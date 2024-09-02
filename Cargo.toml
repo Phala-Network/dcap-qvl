@@ -1,7 +1,10 @@
 [package]
-name = "dcap-attestation"
+name = "dcap-qvl"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust."
+authors = ["Kevin Wang <wy721@qq.com>"]
 
 [dependencies]
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
