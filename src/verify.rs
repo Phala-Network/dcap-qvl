@@ -15,6 +15,18 @@ pub struct TcbStatus {
     pub advisory_ids: Vec<String>,
 }
 
+/// Verify a quote
+///
+/// # Arguments
+///
+/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
+/// * `now` - The current time in seconds since the Unix epoch
+///
+/// # Returns
+///
+/// * `Ok(TcbStatus)` - The TCB status
+/// * `Err(Error)` - The error
 pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,

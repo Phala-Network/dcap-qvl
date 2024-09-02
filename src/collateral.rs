@@ -18,6 +18,17 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
 }
 
 /// Get collateral given DCAP quote and base URL of PCCS server URL.
+///
+/// # Arguments
+///
+/// * `pccs_url` - The base URL of PCCS server. (e.g. `https://pccs.example.com/sgx/certification/v4`)
+/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// * `timeout` - The timeout for the request. (e.g. `Duration::from_secs(10)`)
+///
+/// # Returns
+///
+/// * `Ok(QuoteCollateralV3)` - The quote collateral
+/// * `Err(Error)` - The error
 pub async fn get_collateral(
     pccs_url: &str,
     mut quote: &[u8],
