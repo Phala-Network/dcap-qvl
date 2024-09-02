@@ -141,7 +141,10 @@ pub fn verify(
     let peer_public_key =
         ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
     peer_public_key
-        .verify(&raw_quote[..signed_quote_len], &auth_data.ecdsa_signature)
+        .verify(
+            &raw_quote.get(..signed_quote_len).ok_or(Error::CodecError)?,
+            &auth_data.ecdsa_signature,
+        )
         .map_err(|_| Error::IsvEnclaveReportSignatureIsInvalid)?;
 
     // Extract information from the quote
@@ -174,7 +177,6 @@ pub fn verify(
                 .advisory_ids
                 .iter()
                 .for_each(|id| advisory_ids.push(id.clone()));
-
             break;
         }
     }
