@@ -82,7 +82,7 @@ pub fn verify(
     }
 
     // Check quote fields
-    if quote.header.version != QUOTE_VERSION_V3 && quote.header.version != QUOTE_VERSION_V4 {
+    if ![3, 4, 5].contains(&quote.header.version) {
         return Err(Error::UnsupportedDCAPQuoteVersion);
     }
     // We only support ECDSA256 with P256 curve

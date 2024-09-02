@@ -34,6 +34,12 @@ pub struct Header {
     pub user_data: [u8; 20],
 }
 
+#[derive(Decode, Debug)]
+pub struct Body {
+    pub body_type: u16,
+    pub size: u32,
+}
+
 #[derive(Decode, Debug, Clone)]
 pub struct EnclaveReport {
     pub cpu_svn: [u8; 16],
@@ -201,11 +207,29 @@ impl Decode for Quote {
                 }
                 report = Report::SgxEnclave(EnclaveReport::decode(input)?);
             }
-            4 => {
-                if header.tee_type != TEE_TYPE_TDX {
-                    return Err(scale::Error::from("invalid tee type"));
+            4 => match header.tee_type {
+                TEE_TYPE_SGX => {
+                    report = Report::SgxEnclave(EnclaveReport::decode(input)?);
                 }
-                report = Report::TD10(TDReport10::decode(input)?);
+                TEE_TYPE_TDX => {
+                    report = Report::TD10(TDReport10::decode(input)?);
+                }
+                _ => return Err(scale::Error::from("invalid tee type")),
+            },
+            5 => {
+                let body = Body::decode(input)?;
+                match body.body_type {
+                    BODY_SGX_ENCLAVE_REPORT_TYPE => {
+                        report = Report::SgxEnclave(EnclaveReport::decode(input)?);
+                    }
+                    BODY_TD_REPORT10_TYPE => {
+                        report = Report::TD10(TDReport10::decode(input)?);
+                    }
+                    BODY_TD_REPORT15_TYPE => {
+                        report = Report::TD15(TDReport15::decode(input)?);
+                    }
+                    _ => return Err(scale::Error::from("unsupported body type")),
+                }
             }
             _ => return Err(scale::Error::from("unsupported quote version")),
         }
@@ -235,10 +259,14 @@ impl Quote {
     }
 
     pub fn signed_length(&self) -> usize {
-        match self.report {
+        let mut len = match self.report {
             Report::SgxEnclave(_) => HEADER_BYTE_LEN + ENCLAVE_REPORT_BYTE_LEN,
             Report::TD10(_) => HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN,
             Report::TD15(_) => HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN,
+        };
+        if self.header.version == 5 {
+            len += BODY_BYTE_SIZE;
         }
+        len
     }
 }

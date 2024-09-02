@@ -6,8 +6,6 @@ pub type Fmspc = [u8; 6];
 pub type CpuSvn = [u8; 16];
 pub type Svn = u16;
 
-pub const QUOTE_VERSION_V3: u16 = 3;
-pub const QUOTE_VERSION_V4: u16 = 4;
 pub const ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE: u16 = 2;
 pub const ATTESTATION_KEY_TYPE_ECDSA484_WITH_P384_CURVE: u16 = 3;
 
