@@ -1,9 +1,0 @@
----
-source: tests/verify_quote.rs
-assertion_line: 18
-expression: advisory_ids
----
-[
-    "INTEL-SA-00289",
-    "INTEL-SA-00615",
-]

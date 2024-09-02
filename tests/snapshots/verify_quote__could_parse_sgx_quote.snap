@@ -1,6 +1,0 @@
----
-source: tests/verify_quote.rs
-assertion_line: 17
-expression: tcb_status
----
-"ConfigurationAndSWHardeningNeeded"

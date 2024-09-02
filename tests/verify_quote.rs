@@ -9,13 +9,13 @@ fn could_parse_sgx_quote() {
 
     let quote_collateral =
         QuoteCollateralV3::decode(&mut raw_quote_collateral.as_slice()).expect("decodable");
-    let (tcb_status, advisory_ids) = verify(&raw_quote, &quote_collateral, now).expect("verify");
+    let tcb_status = verify(&raw_quote, &quote_collateral, now).expect("verify");
 
-    assert_eq!(tcb_status, "ConfigurationAndSWHardeningNeeded");
-    assert_eq!(advisory_ids, ["INTEL-SA-00289", "INTEL-SA-00615"]);
-
-    insta::assert_debug_snapshot!(tcb_status);
-    insta::assert_debug_snapshot!(advisory_ids);
+    assert_eq!(tcb_status.status, "ConfigurationAndSWHardeningNeeded");
+    assert_eq!(
+        tcb_status.advisory_ids,
+        ["INTEL-SA-00289", "INTEL-SA-00615"]
+    );
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn could_parse_tdx_quote() {
 
     let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral");
     let quote_collateral = QuoteCollateralV3::decode(&mut raw_quote_collateral.as_slice()).unwrap();
-    let (tcb_status, advisory_ids) = verify(raw_quote, &quote_collateral, now).unwrap();
-    insta::assert_debug_snapshot!(tcb_status);
-    insta::assert_debug_snapshot!(advisory_ids);
+    let tcb_status = verify(raw_quote, &quote_collateral, now).unwrap();
+    assert_eq!(tcb_status.status, "UpToDate");
+    assert!(tcb_status.advisory_ids.is_empty());
 }

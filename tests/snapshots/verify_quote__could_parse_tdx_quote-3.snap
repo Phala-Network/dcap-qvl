@@ -1,6 +1,0 @@
----
-source: tests/verify_quote.rs
-assertion_line: 33
-expression: advisory_ids
----
-[]

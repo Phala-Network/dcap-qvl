@@ -1,10 +1,7 @@
 use scale::Decode;
 
 use {
-    crate::constants::*,
-    crate::tcb_info::TcbInfo,
-    alloc::borrow::ToOwned,
-    alloc::string::{String, ToString},
+    crate::constants::*, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned, alloc::string::String,
     alloc::vec::Vec,
 };
 
@@ -12,11 +9,17 @@ pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::utils::{self, encode_as_der, extract_certs, verify_certificate_chain};
 use crate::{Error, QuoteCollateralV3};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TcbStatus {
+    pub status: String,
+    pub advisory_ids: Vec<String>,
+}
+
 pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,
     now: u64,
-) -> Result<(String, Vec<String>), Error> {
+) -> Result<TcbStatus, Error> {
     // Parse data
     let mut quote = raw_quote;
     let quote = Quote::decode(&mut quote).map_err(|_| Error::CodecError)?;
@@ -159,5 +162,8 @@ pub fn verify(
             break;
         }
     }
-    Ok((tcb_status.to_string(), advisory_ids))
+    Ok(TcbStatus {
+        status: tcb_status,
+        advisory_ids,
+    })
 }
