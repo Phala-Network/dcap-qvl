@@ -6,13 +6,17 @@ use {
 };
 
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
-use crate::utils::{self, encode_as_der, extract_certs, verify_certificate_chain};
+use crate::{
+    quote::Report,
+    utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
+};
 use crate::{Error, QuoteCollateralV3};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TcbStatus {
+#[derive(Debug, Clone)]
+pub struct VerifiedReport {
     pub status: String,
     pub advisory_ids: Vec<String>,
+    pub report: Report,
 }
 
 /// Verify a quote
@@ -25,13 +29,13 @@ pub struct TcbStatus {
 ///
 /// # Returns
 ///
-/// * `Ok(TcbStatus)` - The TCB status
+/// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
 pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,
     now: u64,
-) -> Result<TcbStatus, Error> {
+) -> Result<VerifiedReport, Error> {
     // Parse data
     let mut quote = raw_quote;
     let quote = Quote::decode(&mut quote).map_err(|_| Error::CodecError)?;
@@ -174,8 +178,9 @@ pub fn verify(
             break;
         }
     }
-    Ok(TcbStatus {
+    Ok(VerifiedReport {
         status: tcb_status,
         advisory_ids,
+        report: quote.report,
     })
 }

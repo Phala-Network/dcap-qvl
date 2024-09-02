@@ -5,7 +5,7 @@ use scale::{Decode, Input};
 
 use crate::{constants::*, utils, Error};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
@@ -34,7 +34,7 @@ pub struct Header {
     pub user_data: [u8; 20],
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Clone)]
 pub struct EnclaveReport {
     pub cpu_svn: [u8; 16],
     pub misc_select: u32,
@@ -50,7 +50,7 @@ pub struct EnclaveReport {
     pub report_data: [u8; 64],
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Clone)]
 pub struct TDReport10 {
     pub tee_tcb_svn: [u8; 16],
     pub mr_seam: [u8; 48],
@@ -69,7 +69,7 @@ pub struct TDReport10 {
     pub report_data: [u8; 64],
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Clone)]
 pub struct TDReport15 {
     pub base: TDReport10,
     pub tee_tcb_svn2: [u8; 16],
@@ -176,7 +176,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Report {
     SgxEnclave(EnclaveReport),
     TD10(TDReport10),
