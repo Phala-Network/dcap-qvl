@@ -20,15 +20,16 @@
 //! ```no_run
 //! use dcap_qvl::collateral::get_collateral;
 //! use dcap_qvl::verify::verify;
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() {
+//!     // Get PCCS_URL from environment variable. The URL is like "https://localhost:8081/sgx/certification/v4/".
 //!     let pccs_url = std::env::var("PCCS_URL").expect("PCCS_URL is not set");
-//!     let quote = std::fs::read("tdx_quote").unwrap();
-//!     let collateral = get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(10)).await.unwrap();
+//!     let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
+//!     let collateral = get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-//!     let tcb_status = verify(&quote, &collateral, now).unwrap();
-//!     println!("{:?}", tcb_status);
+//!     let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
+//!     println!("{:?}", tcb);
 //! }
 //! ```
 
