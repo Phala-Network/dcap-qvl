@@ -1,6 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use anyhow::Result;
 use scale::{Decode, Input};
 
 use crate::{constants::*, utils, Error};
@@ -244,6 +245,14 @@ impl Decode for Quote {
 }
 
 impl Quote {
+    /// Parse a TEE quote from a byte slice.
+    pub fn parse(quote: &[u8]) -> Result<Self> {
+        let mut input = &quote[..];
+        let quote = Quote::decode(&mut input)?;
+        Ok(quote)
+    }
+
+    /// Get the raw certificate chain from the quote.
     pub fn raw_cert_chain(&self) -> &[u8] {
         match &self.auth_data {
             AuthData::V3(data) => &data.certification_data.body.data,
@@ -251,6 +260,7 @@ impl Quote {
         }
     }
 
+    /// Get the FMSPC from the quote.
     pub fn fmspc(&self) -> Result<Fmspc, Error> {
         let raw_cert_chain = self.raw_cert_chain();
         let certs = utils::extract_certs(raw_cert_chain)?;
@@ -258,6 +268,7 @@ impl Quote {
         utils::get_fmspc(&extension_section)
     }
 
+    /// Get the the length of signed data in the quote.
     pub fn signed_length(&self) -> usize {
         let mut len = match self.report {
             Report::SgxEnclave(_) => HEADER_BYTE_LEN + ENCLAVE_REPORT_BYTE_LEN,
