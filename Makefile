@@ -3,7 +3,7 @@ INSTALL_TOOL = cargo install wasm-pack
 BUILD_WEB = $(WASM_PACK) build --release --target web --out-dir pkg/web --out-name dcap-qvl-web -- --features=js
 BUILD_NODE = $(WASM_PACK) build --release --target nodejs --out-dir pkg/node --out-name dcap-qvl-node -- --features=js
 
-all: install_wasm_tool build_web_js_api build_node_js_api
+all: install_wasm_tool build_web_pkg build_node_pkg
 
 install_wasm_tool:
 	@echo "Installing wasm-pack if not already installed..."
@@ -26,4 +26,4 @@ clean:
 	@echo "Cleaning up..."
 	rm -rf pkg
 
-.PHONY: all install_wasm_tool build_web_js_api build_node_js_api clean
+.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean
