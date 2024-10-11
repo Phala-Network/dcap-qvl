@@ -45,6 +45,7 @@ serde_json = { version = "1.0.108", optional = true, features = [
 ] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
+getrandom = { version = "0.2", features = ["js"] }
 
 [dependencies.webpki]
 version = "0.102.7"
@@ -55,6 +56,9 @@ features = ["alloc", "ring"]
 [dev-dependencies]
 insta = "1"
 tokio = { version = "1", features = ["full"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["std", "report"]
@@ -74,3 +78,4 @@ std = [
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
+js = []
