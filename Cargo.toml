@@ -31,7 +31,7 @@ log = { version = "0.4.20", default-features = false }
 
 anyhow = { version = "1", optional = true }
 
-ring = { version = "0.16.20", default-features = false, features = [
+ring = { version = "0.17.8", default-features = false, features = [
     "alloc",
 ] }
 reqwest = { version = "0.11.27", optional = true, default-features = false, features = [
@@ -47,7 +47,7 @@ tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
 
 [dependencies.webpki]
-version = "0.102.7"
+version = "0.102.8"
 package = "rustls-webpki"
 default-features = false
 features = ["alloc", "ring"]
