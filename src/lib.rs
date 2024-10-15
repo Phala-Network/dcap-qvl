@@ -40,8 +40,10 @@ extern crate alloc;
 
 use scale::{Decode, Encode};
 use scale_info::TypeInfo;
+use wasm_bindgen::prelude::*;
 
 #[derive(Encode, Decode, TypeInfo, Debug, Clone, PartialEq, Eq)]
+#[wasm_bindgen]
 pub enum Error {
     InvalidCertificate,
     InvalidSignature,
@@ -76,6 +78,7 @@ pub enum Error {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
+#[wasm_bindgen]
 pub struct QuoteCollateralV3 {
     pub pck_crl_issuer_chain: String,
     pub root_ca_crl: String,

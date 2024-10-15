@@ -11,8 +11,10 @@ use crate::{
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{Error, QuoteCollateralV3};
+use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone)]
+#[wasm_bindgen(getter_with_clone)]
 pub struct VerifiedReport {
     pub status: String,
     pub advisory_ids: Vec<String>,
@@ -31,6 +33,7 @@ pub struct VerifiedReport {
 ///
 /// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
+#[wasm_bindgen]
 pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,

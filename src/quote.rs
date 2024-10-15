@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use anyhow::Result;
 use scale::{Decode, Input};
+use wasm_bindgen::prelude::*;
 
 use crate::{constants::*, utils, Error};
 
@@ -41,6 +42,7 @@ pub struct Body {
     pub size: u32,
 }
 
+#[wasm_bindgen]
 #[derive(Decode, Debug, Clone)]
 pub struct EnclaveReport {
     pub cpu_svn: [u8; 16],
@@ -183,6 +185,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
     }
 }
 
+#[wasm_bindgen]
 #[derive(Debug, Clone)]
 pub enum Report {
     SgxEnclave(EnclaveReport),
