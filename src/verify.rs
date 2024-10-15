@@ -29,8 +29,10 @@ pub fn js_verify(
 ) -> Result<JsValue, JsValue> {
     let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral: QuoteCollateralV3 = serde_wasm_bindgen::from_value(quote_collateral)
+    let quote_collateral_bytes: Vec<u8> = serde_wasm_bindgen::from_value(quote_collateral)
         .map_err(|_| JsValue::from_str("Failed to decode quote_collateral"))?;
+    let quote_collateral = QuoteCollateralV3::decode(&mut quote_collateral_bytes.as_slice())
+        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral_bytes"))?;
 
     let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
         serde_wasm_bindgen::to_value(&e)
