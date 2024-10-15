@@ -44,44 +44,70 @@ pub struct Body {
 
 #[derive(Serialize, Deserialize, Decode, Debug, Clone)]
 pub struct EnclaveReport {
+    #[serde(with = "serde_bytes")]
     pub cpu_svn: [u8; 16],
     pub misc_select: u32,
+    #[serde(with = "serde_bytes")]
     pub reserved1: [u8; 28],
+    #[serde(with = "serde_bytes")]
     pub attributes: [u8; 16],
+    #[serde(with = "serde_bytes")]
     pub mr_enclave: [u8; 32],
+    #[serde(with = "serde_bytes")]
     pub reserved2: [u8; 32],
+    #[serde(with = "serde_bytes")]
     pub mr_signer: [u8; 32],
-    pub reserved3: [u8; 32],
+    #[serde(with = "serde_bytes")]
+    pub reserved3: [u8; 96],
     pub isv_prod_id: u16,
     pub isv_svn: u16,
-    pub reserved4: [u8; 32],
-    pub report_data: [u8; 32],
+    #[serde(with = "serde_bytes")]
+    pub reserved4: [u8; 60],
+    #[serde(with = "serde_bytes")]
+    pub report_data: [u8; 64],
 }
 
 #[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport10 {
+    #[serde(with = "serde_bytes")]
     pub tee_tcb_svn: [u8; 16],
-    pub mr_seam: [u8; 32],
-    pub mr_signer_seam: [u8; 32],
+    #[serde(with = "serde_bytes")]
+    pub mr_seam: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub mr_signer_seam: [u8; 48],
+    #[serde(with = "serde_bytes")]
     pub seam_attributes: [u8; 8],
+    #[serde(with = "serde_bytes")]
     pub td_attributes: [u8; 8],
+    #[serde(with = "serde_bytes")]
     pub xfam: [u8; 8],
-    pub mr_td: [u8; 32],
-    pub mr_config_id: [u8; 32],
-    pub mr_owner: [u8; 32],
-    pub mr_owner_config: [u8; 32],
-    pub rt_mr0: [u8; 32],
-    pub rt_mr1: [u8; 32],
-    pub rt_mr2: [u8; 32],
-    pub rt_mr3: [u8; 32],
-    pub report_data: [u8; 32],
+    #[serde(with = "serde_bytes")]
+    pub mr_td: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub mr_config_id: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub mr_owner: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub mr_owner_config: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub rt_mr0: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub rt_mr1: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub rt_mr2: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub rt_mr3: [u8; 48],
+    #[serde(with = "serde_bytes")]
+    pub report_data: [u8; 64],
 }
 
 #[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport15 {
     pub base: TDReport10,
+    #[serde(with = "serde_bytes")]
     pub tee_tcb_svn2: [u8; 16],
-    pub mr_service_td: [u8; 32],
+    #[serde(with = "serde_bytes")]
+    pub mr_service_td: [u8; 48],
 }
 
 #[derive(Decode)]

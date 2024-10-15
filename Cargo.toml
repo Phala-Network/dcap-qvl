@@ -48,6 +48,7 @@ futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", features = ["js"] }
 serde-wasm-bindgen = "0.4"
 wasm-bindgen = "0.2.95"
+serde_bytes = "0.11"
 
 [dependencies.webpki]
 version = "0.102.7"
