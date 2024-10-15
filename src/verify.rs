@@ -11,10 +11,10 @@ use crate::{
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{Error, QuoteCollateralV3};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone)]
-#[wasm_bindgen(getter_with_clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VerifiedReport {
     pub status: String,
     pub advisory_ids: Vec<String>,

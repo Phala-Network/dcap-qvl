@@ -40,10 +40,9 @@ extern crate alloc;
 
 use scale::{Decode, Encode};
 use scale_info::TypeInfo;
-use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Encode, Decode, TypeInfo, Debug, Clone, PartialEq, Eq)]
-#[wasm_bindgen]
+#[derive(Encode, Decode, TypeInfo, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error {
     InvalidCertificate,
     InvalidSignature,
@@ -77,8 +76,7 @@ pub enum Error {
     OidIsMissing,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
-#[wasm_bindgen]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QuoteCollateralV3 {
     pub pck_crl_issuer_chain: String,
     pub root_ca_crl: String,

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use anyhow::Result;
 use scale::{Decode, Input};
-use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::{constants::*, utils, Error};
 
@@ -42,8 +42,7 @@ pub struct Body {
     pub size: u32,
 }
 
-#[wasm_bindgen]
-#[derive(Decode, Debug, Clone)]
+#[derive(Serialize, Deserialize, Decode, Debug, Clone)]
 pub struct EnclaveReport {
     pub cpu_svn: [u8; 16],
     pub misc_select: u32,
@@ -52,37 +51,37 @@ pub struct EnclaveReport {
     pub mr_enclave: [u8; 32],
     pub reserved2: [u8; 32],
     pub mr_signer: [u8; 32],
-    pub reserved3: [u8; 96],
+    pub reserved3: [u8; 32],
     pub isv_prod_id: u16,
     pub isv_svn: u16,
-    pub reserved4: [u8; 60],
-    pub report_data: [u8; 64],
+    pub reserved4: [u8; 32],
+    pub report_data: [u8; 32],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport10 {
     pub tee_tcb_svn: [u8; 16],
-    pub mr_seam: [u8; 48],
-    pub mr_signer_seam: [u8; 48],
+    pub mr_seam: [u8; 32],
+    pub mr_signer_seam: [u8; 32],
     pub seam_attributes: [u8; 8],
     pub td_attributes: [u8; 8],
     pub xfam: [u8; 8],
-    pub mr_td: [u8; 48],
-    pub mr_config_id: [u8; 48],
-    pub mr_owner: [u8; 48],
-    pub mr_owner_config: [u8; 48],
-    pub rt_mr0: [u8; 48],
-    pub rt_mr1: [u8; 48],
-    pub rt_mr2: [u8; 48],
-    pub rt_mr3: [u8; 48],
-    pub report_data: [u8; 64],
+    pub mr_td: [u8; 32],
+    pub mr_config_id: [u8; 32],
+    pub mr_owner: [u8; 32],
+    pub mr_owner_config: [u8; 32],
+    pub rt_mr0: [u8; 32],
+    pub rt_mr1: [u8; 32],
+    pub rt_mr2: [u8; 32],
+    pub rt_mr3: [u8; 32],
+    pub report_data: [u8; 32],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport15 {
     pub base: TDReport10,
     pub tee_tcb_svn2: [u8; 16],
-    pub mr_service_td: [u8; 48],
+    pub mr_service_td: [u8; 32],
 }
 
 #[derive(Decode)]
@@ -185,8 +184,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
     }
 }
 
-#[wasm_bindgen]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Report {
     SgxEnclave(EnclaveReport),
     TD10(TDReport10),
