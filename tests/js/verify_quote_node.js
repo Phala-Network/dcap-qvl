@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { js_verify } = require('../pkg/node/dcap-qvl-node');
+const { js_verify } = require('../../pkg/node/dcap-qvl-node');
 
 // Function to read a file as a Uint8Array
 function readFileAsUint8Array(filePath) {
@@ -9,12 +9,11 @@ function readFileAsUint8Array(filePath) {
 }
 
 // Paths to your sample files
-const rawQuotePath = path.join(__dirname, '../sample', 'tdx_quote');
-const quoteCollateralPath = path.join(__dirname, '../sample', 'tdx_quote_collateral');
+const rawQuotePath = path.join(__dirname, '../../sample', 'tdx_quote');
+const quoteCollateralPath = path.join(__dirname, '../../sample', 'tdx_quote_collateral');
 
 // Read the files
 const rawQuote = readFileAsUint8Array(rawQuotePath);
-console.log("rawQuote: ", rawQuote);
 const quoteCollateral = readFileAsUint8Array(quoteCollateralPath);
 
 // Current timestamp
