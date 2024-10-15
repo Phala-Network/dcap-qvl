@@ -4,7 +4,7 @@
 
 ```
 cd tests/js
-node verify_quote.js
+node verify_quote_node.js
 ```
 
 ## Verify Quote with Web
