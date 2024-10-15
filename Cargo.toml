@@ -31,7 +31,7 @@ log = { version = "0.4.20", default-features = false }
 
 anyhow = { version = "1", optional = true }
 
-ring = { version = "0.16.20", default-features = false, features = [
+ring = { version = "0.17", default-features = false, features = [
     "alloc",
 ] }
 reqwest = { version = "0.11.27", optional = true, default-features = false, features = [
@@ -80,4 +80,4 @@ std = [
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
-js = []
+js = ["ring/wasm32_unknown_unknown_js"]
