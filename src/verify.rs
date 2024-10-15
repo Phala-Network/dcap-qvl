@@ -21,6 +21,26 @@ pub struct VerifiedReport {
     pub report: Report,
 }
 
+#[wasm_bindgen]
+pub fn js_verify(
+    raw_quote: JsValue,
+    quote_collateral: JsValue,
+    now: u64,
+) -> Result<JsValue, JsValue> {
+    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+    let quote_collateral: QuoteCollateralV3 = serde_wasm_bindgen::from_value(quote_collateral)
+        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral"))?;
+
+    let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
+        serde_wasm_bindgen::to_value(&e)
+            .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
+    })?;
+
+    serde_wasm_bindgen::to_value(&verified_report)
+        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+}
+
 /// Verify a quote
 ///
 /// # Arguments
@@ -33,7 +53,6 @@ pub struct VerifiedReport {
 ///
 /// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
-#[wasm_bindgen]
 pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,
