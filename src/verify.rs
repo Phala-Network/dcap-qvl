@@ -12,6 +12,8 @@ use crate::{
 };
 use crate::{Error, QuoteCollateralV3};
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "js")]
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
