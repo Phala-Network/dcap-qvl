@@ -21,6 +21,7 @@ pub struct VerifiedReport {
     pub report: Report,
 }
 
+#[cfg(feature = "js")]
 #[wasm_bindgen]
 pub fn js_verify(
     raw_quote: JsValue,

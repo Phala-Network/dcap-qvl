@@ -45,10 +45,10 @@ serde_json = { version = "1.0.108", optional = true, features = [
 ] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
-getrandom = { version = "0.2", features = ["js"] }
-serde-wasm-bindgen = "0.4"
-wasm-bindgen = "0.2.95"
-serde_bytes = "0.11"
+getrandom = { version = "0.2", optional = true, features = ["js"] }
+serde-wasm-bindgen = { version = "0.4", optional = true}
+wasm-bindgen = { version = "0.2.95", optional = true }
+serde_bytes = { version = "0.11", optional = true }
 
 [dependencies.webpki]
 version = "0.102.8"
@@ -81,4 +81,4 @@ std = [
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
-js = ["ring/wasm32_unknown_unknown_js"]
+js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen", "serde_bytes"]
