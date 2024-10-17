@@ -29,6 +29,7 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
+#[cfg(not(feature = "js"))]
 pub async fn get_collateral(
     pccs_url: &str,
     mut quote: &[u8],

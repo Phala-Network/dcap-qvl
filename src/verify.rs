@@ -11,12 +11,39 @@ use crate::{
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{Error, QuoteCollateralV3};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[cfg(feature = "js")]
+use wasm_bindgen::prelude::*;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VerifiedReport {
     pub status: String,
     pub advisory_ids: Vec<String>,
     pub report: Report,
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen]
+pub fn js_verify(
+    raw_quote: JsValue,
+    quote_collateral: JsValue,
+    now: u64,
+) -> Result<JsValue, JsValue> {
+    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+    let quote_collateral_bytes: Vec<u8> = serde_wasm_bindgen::from_value(quote_collateral)
+        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral"))?;
+    let quote_collateral = QuoteCollateralV3::decode(&mut quote_collateral_bytes.as_slice())
+        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral_bytes"))?;
+
+    let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
+        serde_wasm_bindgen::to_value(&e)
+            .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
+    })?;
+
+    serde_wasm_bindgen::to_value(&verified_report)
+        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
 /// Verify a quote

@@ -31,7 +31,7 @@ log = { version = "0.4.20", default-features = false }
 
 anyhow = { version = "1", optional = true }
 
-ring = { version = "0.17.8", default-features = false, features = [
+ring = { version = "0.17", default-features = false, features = [
     "alloc",
 ] }
 reqwest = { version = "0.11.27", optional = true, default-features = false, features = [
@@ -45,6 +45,10 @@ serde_json = { version = "1.0.108", optional = true, features = [
 ] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
+getrandom = { version = "0.2", optional = true, features = ["js"] }
+serde-wasm-bindgen = { version = "0.4", optional = true}
+wasm-bindgen = { version = "0.2.95", optional = true }
+serde_bytes = { version = "0.11" }
 
 [dependencies.webpki]
 version = "0.102.8"
@@ -55,6 +59,9 @@ features = ["alloc", "ring"]
 [dev-dependencies]
 insta = "1"
 tokio = { version = "1", features = ["full"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["std", "report"]
@@ -74,3 +81,4 @@ std = [
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
+js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]

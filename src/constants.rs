@@ -73,7 +73,6 @@ pub const ATTESTATION_KEY_LEN: usize = 64;
 pub const AUTHENTICATION_DATA_LEN: usize = 32;
 pub const QE_HASH_DATA_BYTE_LEN: usize = ATTESTATION_KEY_LEN + AUTHENTICATION_DATA_LEN;
 
-
 pub const PCK_ID_PLAIN: u16 = 1;
 pub const PCK_ID_RSA_2048_OAEP: u16 = 2;
 pub const PCK_ID_RSA_3072_OAEP: u16 = 3;
