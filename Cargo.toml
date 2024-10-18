@@ -49,6 +49,7 @@ getrandom = { version = "0.2", optional = true, features = ["js"] }
 serde-wasm-bindgen = { version = "0.4", optional = true}
 wasm-bindgen = { version = "0.2.95", optional = true }
 serde_bytes = { version = "0.11" }
+proptest = "1.5.0"
 
 [dependencies.webpki]
 version = "0.102.8"

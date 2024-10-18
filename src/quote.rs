@@ -2,12 +2,13 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use anyhow::Result;
-use scale::{Decode, Input};
+use proptest::prelude::*;
+use scale::{Decode, Encode, Input};
 use serde::{Deserialize, Serialize};
 
 use crate::{constants::*, utils, Error};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
@@ -25,7 +26,21 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     }
 }
 
-#[derive(Decode, Debug)]
+impl<T> Encode for Data<T>
+where
+    T: Encode + TryFrom<usize>,
+    <T as TryFrom<usize>>::Error: std::fmt::Debug,
+{
+    fn encode(&self) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        let len = T::try_from(self.data.len()).expect("Length conversion failed");
+        encoded.extend(len.encode());
+        encoded.extend(&self.data);
+        encoded
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug)]
 pub struct Header {
     pub version: u16,
     pub attestation_key_type: u16,
@@ -36,13 +51,89 @@ pub struct Header {
     pub user_data: [u8; 20],
 }
 
-#[derive(Decode, Debug)]
+impl Arbitrary for Header {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let version_strategy = prop_oneof![Just(3u16), Just(4u16), Just(5u16)];
+
+        let tee_type_strategy = prop::strategy::Union::new_weighted(vec![
+            (1, Just(TEE_TYPE_SGX).boxed()),
+            (1, Just(TEE_TYPE_TDX).boxed()),
+        ]);
+
+        (
+            version_strategy,
+            any::<u16>(),
+            tee_type_strategy,
+            any::<u16>(),
+            any::<u16>(),
+            any::<[u8; 16]>(),
+            any::<[u8; 20]>(),
+            any::<u32>(),
+        )
+            .prop_flat_map(
+                |(
+                    version,
+                    attestation_key_type,
+                    tee_type,
+                    qe_svn,
+                    pce_svn,
+                    qe_vendor_id,
+                    user_data,
+                    v5_tee_type,
+                )| {
+                    let tee_type = match version {
+                        3 => TEE_TYPE_SGX,
+                        4 => tee_type,
+                        5 => v5_tee_type,
+                        _ => unreachable!(),
+                    };
+
+                    (
+                        Just(version),
+                        Just(attestation_key_type),
+                        Just(tee_type),
+                        Just(qe_svn),
+                        Just(pce_svn),
+                        Just(qe_vendor_id),
+                        Just(user_data),
+                    )
+                },
+            )
+            .prop_map(
+                |(
+                    version,
+                    attestation_key_type,
+                    tee_type,
+                    qe_svn,
+                    pce_svn,
+                    qe_vendor_id,
+                    user_data,
+                )| {
+                    Header {
+                        version,
+                        attestation_key_type,
+                        tee_type,
+                        qe_svn,
+                        pce_svn,
+                        qe_vendor_id,
+                        user_data,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug)]
 pub struct Body {
     pub body_type: u16,
     pub size: u32,
 }
 
-#[derive(Serialize, Deserialize, Decode, Debug, Clone)]
+#[derive(Serialize, Deserialize, Decode, Encode, PartialEq, Eq, Debug, Clone)]
 pub struct EnclaveReport {
     #[serde(with = "serde_bytes")]
     pub cpu_svn: [u8; 16],
@@ -67,7 +158,61 @@ pub struct EnclaveReport {
     pub report_data: [u8; 64],
 }
 
-#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+impl Arbitrary for EnclaveReport {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<[u8; 16]>(),
+            any::<u32>(),
+            any::<[u8; 28]>(),
+            any::<[u8; 16]>(),
+            any::<[u8; 32]>(),
+            any::<[u8; 32]>(),
+            any::<[u8; 32]>(),
+            any::<[u8; 96]>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<[u8; 60]>(),
+            any::<[u8; 64]>(),
+        )
+            .prop_map(
+                |(
+                    cpu_svn,
+                    misc_select,
+                    reserved1,
+                    attributes,
+                    mr_enclave,
+                    reserved2,
+                    mr_signer,
+                    reserved3,
+                    isv_prod_id,
+                    isv_svn,
+                    reserved4,
+                    report_data,
+                )| {
+                    EnclaveReport {
+                        cpu_svn,
+                        misc_select,
+                        reserved1,
+                        attributes,
+                        mr_enclave,
+                        reserved2,
+                        mr_signer,
+                        reserved3,
+                        isv_prod_id,
+                        isv_svn,
+                        reserved4,
+                        report_data,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport10 {
     #[serde(with = "serde_bytes")]
     pub tee_tcb_svn: [u8; 16],
@@ -101,7 +246,79 @@ pub struct TDReport10 {
     pub report_data: [u8; 64],
 }
 
-#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+impl Arbitrary for TDReport10 {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let part1 = (
+            any::<[u8; 16]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 8]>(),
+            any::<[u8; 8]>(),
+            any::<[u8; 8]>(),
+            any::<[u8; 48]>(),
+        );
+
+        let part2 = (
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 48]>(),
+            any::<[u8; 64]>(),
+        );
+
+        (part1, part2)
+            .prop_map(
+                |(
+                    (
+                        tee_tcb_svn,
+                        mr_seam,
+                        mr_signer_seam,
+                        seam_attributes,
+                        td_attributes,
+                        xfam,
+                        mr_td,
+                    ),
+                    (
+                        mr_config_id,
+                        mr_owner,
+                        mr_owner_config,
+                        rt_mr0,
+                        rt_mr1,
+                        rt_mr2,
+                        rt_mr3,
+                        report_data,
+                    ),
+                )| {
+                    TDReport10 {
+                        tee_tcb_svn,
+                        mr_seam,
+                        mr_signer_seam,
+                        seam_attributes,
+                        td_attributes,
+                        xfam,
+                        mr_td,
+                        mr_config_id,
+                        mr_owner,
+                        mr_owner_config,
+                        rt_mr0,
+                        rt_mr1,
+                        rt_mr2,
+                        rt_mr3,
+                        report_data,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport15 {
     pub base: TDReport10,
     #[serde(with = "serde_bytes")]
@@ -110,10 +327,46 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
-#[derive(Decode)]
+impl Arbitrary for TDReport15 {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (any::<TDReport10>(), any::<[u8; 16]>(), any::<[u8; 48]>())
+            .prop_map(|(base, tee_tcb_svn2, mr_service_td)| TDReport15 {
+                base,
+                tee_tcb_svn2,
+                mr_service_td,
+            })
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq)]
 pub struct CertificationData {
     pub cert_type: u16,
     pub body: Data<u32>,
+}
+
+impl Arbitrary for CertificationData {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        any::<u16>()
+            .prop_map(|cert_type| {
+                let data = vec![0u8; 10];
+                let body = Data {
+                    data,
+                    _marker: core::marker::PhantomData,
+                };
+                CertificationData {
+                    cert_type,
+                    body: body,
+                }
+            })
+            .boxed()
+    }
 }
 
 impl core::fmt::Debug for CertificationData {
@@ -126,7 +379,7 @@ impl core::fmt::Debug for CertificationData {
     }
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Encode, PartialEq, Eq, Debug)]
 pub struct QEReportCertificationData {
     pub qe_report: [u8; ENCLAVE_REPORT_BYTE_LEN],
     pub qe_report_signature: [u8; QE_REPORT_SIG_BYTE_LEN],
@@ -134,7 +387,34 @@ pub struct QEReportCertificationData {
     pub certification_data: CertificationData,
 }
 
-#[derive(Decode, Debug)]
+impl Arbitrary for QEReportCertificationData {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<[u8; ENCLAVE_REPORT_BYTE_LEN]>(),
+            any::<[u8; QE_REPORT_SIG_BYTE_LEN]>(),
+            any::<CertificationData>(),
+        )
+            .prop_map(|(qe_report, qe_report_signature, certification_data)| {
+                let data = vec![0u8; 10];
+                let qe_auth_data = Data {
+                    data,
+                    _marker: core::marker::PhantomData,
+                };
+                QEReportCertificationData {
+                    qe_report,
+                    qe_report_signature,
+                    qe_auth_data,
+                    certification_data,
+                }
+            })
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug)]
 pub struct AuthDataV3 {
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
     pub ecdsa_attestation_key: [u8; ECDSA_PUBKEY_BYTE_LEN],
@@ -144,12 +424,80 @@ pub struct AuthDataV3 {
     pub certification_data: CertificationData,
 }
 
-#[derive(Debug)]
+impl Arbitrary for AuthDataV3 {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<[u8; ECDSA_SIGNATURE_BYTE_LEN]>(),
+            any::<[u8; ECDSA_PUBKEY_BYTE_LEN]>(),
+            any::<[u8; ENCLAVE_REPORT_BYTE_LEN]>(),
+            any::<[u8; QE_REPORT_SIG_BYTE_LEN]>(),
+            any::<CertificationData>(),
+        )
+            .prop_map(
+                |(
+                    ecdsa_signature,
+                    ecdsa_attestation_key,
+                    qe_report,
+                    qe_report_signature,
+                    certification_data,
+                )| {
+                    let data = vec![0u8; 10];
+                    let qe_auth_data = Data {
+                        data,
+                        _marker: core::marker::PhantomData,
+                    };
+                    AuthDataV3 {
+                        ecdsa_signature,
+                        ecdsa_attestation_key,
+                        qe_report,
+                        qe_report_signature,
+                        qe_auth_data,
+                        certification_data,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct AuthDataV4 {
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
     pub ecdsa_attestation_key: [u8; ECDSA_PUBKEY_BYTE_LEN],
     pub certification_data: CertificationData,
     pub qe_report_data: QEReportCertificationData,
+}
+
+impl Arbitrary for AuthDataV4 {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        (
+            any::<[u8; ECDSA_SIGNATURE_BYTE_LEN]>(),
+            any::<[u8; ECDSA_PUBKEY_BYTE_LEN]>(),
+            any::<QEReportCertificationData>(),
+        )
+            .prop_map(|(ecdsa_signature, ecdsa_attestation_key, qe_report_data)| {
+                let certification_data = CertificationData {
+                    cert_type: 0,
+                    body: Data {
+                        data: qe_report_data.encode(),
+                        _marker: core::marker::PhantomData,
+                    },
+                };
+                AuthDataV4 {
+                    ecdsa_signature,
+                    ecdsa_attestation_key,
+                    certification_data,
+                    qe_report_data,
+                }
+            })
+            .boxed()
+    }
 }
 
 impl AuthDataV4 {
@@ -178,6 +526,16 @@ impl Decode for AuthDataV4 {
             certification_data,
             qe_report_data,
         })
+    }
+}
+
+impl Encode for AuthDataV4 {
+    fn encode(&self) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        encoded.extend(self.ecdsa_signature.encode());
+        encoded.extend(self.ecdsa_attestation_key.encode());
+        encoded.extend(self.certification_data.encode());
+        encoded
     }
 }
 
