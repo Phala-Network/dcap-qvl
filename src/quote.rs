@@ -57,7 +57,7 @@ impl Arbitrary for Header {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         let version_strategy = prop_oneof![Just(3u16), Just(4u16), Just(5u16)];
-
+        let attestation_key_strategy = prop_oneof![Just(2u16), Just(3u16)];
         let tee_type_strategy = prop::strategy::Union::new_weighted(vec![
             (1, Just(TEE_TYPE_SGX).boxed()),
             (1, Just(TEE_TYPE_TDX).boxed()),
@@ -65,7 +65,7 @@ impl Arbitrary for Header {
 
         (
             version_strategy,
-            any::<u16>(),
+            attestation_key_strategy,
             tee_type_strategy,
             any::<u16>(),
             any::<u16>(),
