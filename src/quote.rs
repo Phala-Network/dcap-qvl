@@ -7,10 +7,63 @@ use serde::{Deserialize, Serialize};
 
 use crate::{constants::*, utils, Error};
 
+#[cfg(feature = "hex-bytes")]
+mod serde_bytes {
+    use serde::Deserialize;
+
+    pub(crate) trait FromBytes {
+        fn from_bytes(bytes: Vec<u8>) -> Option<Self>
+        where
+            Self: Sized;
+    }
+    impl FromBytes for Vec<u8> {
+        fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
+            Some(bytes)
+        }
+    }
+    impl<const N: usize> FromBytes for [u8; N] {
+        fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
+            bytes.try_into().ok()
+        }
+    }
+
+    pub(crate) fn serialize<S: serde::Serializer>(
+        data: impl AsRef<[u8]>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let hex_str = hex::encode(data);
+        serializer.serialize_str(&hex_str)
+    }
+
+    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>, T: FromBytes>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        let hex_str = String::deserialize(deserializer)?;
+        let bytes = hex::decode(hex_str).map_err(serde::de::Error::custom)?;
+        T::from_bytes(bytes).ok_or_else(|| serde::de::Error::custom("invalid bytes"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
+}
+
+impl<T> Serialize for Data<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde_bytes::serialize(&self.data, serializer)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Data<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = serde_bytes::deserialize(deserializer)?;
+        Ok(Data {
+            data,
+            _marker: core::marker::PhantomData,
+        })
+    }
 }
 
 impl<T: Decode + Into<u64>> Decode for Data<T> {
@@ -25,14 +78,16 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     }
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Serialize, Deserialize)]
 pub struct Header {
     pub version: u16,
     pub attestation_key_type: u16,
     pub tee_type: u32,
     pub qe_svn: u16,
     pub pce_svn: u16,
+    #[serde(with = "serde_bytes")]
     pub qe_vendor_id: [u8; 16],
+    #[serde(with = "serde_bytes")]
     pub user_data: [u8; 20],
 }
 
@@ -110,7 +165,7 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
-#[derive(Decode)]
+#[derive(Decode, Serialize, Deserialize)]
 pub struct CertificationData {
     pub cert_type: u16,
     pub body: Data<u32>,
@@ -126,27 +181,35 @@ impl core::fmt::Debug for CertificationData {
     }
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Serialize, Deserialize)]
 pub struct QEReportCertificationData {
+    #[serde(with = "serde_bytes")]
     pub qe_report: [u8; ENCLAVE_REPORT_BYTE_LEN],
+    #[serde(with = "serde_bytes")]
     pub qe_report_signature: [u8; QE_REPORT_SIG_BYTE_LEN],
     pub qe_auth_data: Data<u16>,
     pub certification_data: CertificationData,
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Debug, Serialize, Deserialize)]
 pub struct AuthDataV3 {
+    #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
+    #[serde(with = "serde_bytes")]
     pub ecdsa_attestation_key: [u8; ECDSA_PUBKEY_BYTE_LEN],
+    #[serde(with = "serde_bytes")]
     pub qe_report: [u8; ENCLAVE_REPORT_BYTE_LEN],
+    #[serde(with = "serde_bytes")]
     pub qe_report_signature: [u8; QE_REPORT_SIG_BYTE_LEN],
     pub qe_auth_data: Data<u16>,
     pub certification_data: CertificationData,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AuthDataV4 {
+    #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
+    #[serde(with = "serde_bytes")]
     pub ecdsa_attestation_key: [u8; ECDSA_PUBKEY_BYTE_LEN],
     pub certification_data: CertificationData,
     pub qe_report_data: QEReportCertificationData,
@@ -181,7 +244,7 @@ impl Decode for AuthDataV4 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AuthData {
     V3(AuthDataV3),
     V4(AuthDataV4),
@@ -217,7 +280,7 @@ pub enum Report {
     TD15(TDReport15),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Quote {
     pub header: Header,
     pub report: Report,

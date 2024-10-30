@@ -82,3 +82,4 @@ std = [
 ]
 report = ["std", "tracing", "futures"]
 js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
+hex-bytes = []
