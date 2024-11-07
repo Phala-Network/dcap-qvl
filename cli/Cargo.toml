@@ -13,3 +13,4 @@ clap = { version = "4.5.20", features = ["derive"] }
 dcap-qvl = { path = "../", features = ["hex-bytes"] }
 hex = "0.4.3"
 serde_json = "1.0.132"
+tokio = { version = "1.41.0", features = ["full"] }

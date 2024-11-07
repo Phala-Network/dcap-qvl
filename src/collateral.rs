@@ -50,7 +50,6 @@ pub async fn get_collateral(
             .get(format!("{base_url}/pckcrl?ca=processor"))
             .send()
             .await?;
-        println!("{:#?}", response);
         pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
         pck_crl = response.text().await?;
     };
@@ -115,4 +114,20 @@ pub async fn get_collateral(
         qe_identity,
         qe_identity_signature,
     })
+}
+
+/// Get collateral given DCAP quote from Intel PCS.
+///
+/// # Arguments
+///
+/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// * `timeout` - The timeout for the request. (e.g. `Duration::from_secs(10)`)
+///
+/// # Returns
+///
+/// * `Ok(QuoteCollateralV3)` - The quote collateral
+/// * `Err(Error)` - The error
+pub async fn get_collateral_from_pcs(quote: &[u8], timeout: Duration) -> Result<QuoteCollateralV3> {
+    const PCS_URL: &str = "https://api.trustedservices.intel.com/sgx/certification/v4";
+    get_collateral(PCS_URL, quote, timeout).await
 }

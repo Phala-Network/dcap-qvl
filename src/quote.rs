@@ -280,6 +280,12 @@ pub enum Report {
     TD15(TDReport15),
 }
 
+impl Report {
+    pub fn is_sgx(&self) -> bool {
+        matches!(self, Report::SgxEnclave(_))
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Quote {
     pub header: Header,

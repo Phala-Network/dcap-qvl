@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
 use clap::{Args, Parser, Subcommand};
+use dcap_qvl::collateral::get_collateral_from_pcs;
 use dcap_qvl::quote::Quote;
+use dcap_qvl::verify::verify;
 
 #[derive(Parser)]
 struct Cli {
@@ -17,7 +19,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Decode a quote file
-    DecodeQuote(DecodeQuoteArgs),
+    Decode(DecodeQuoteArgs),
+    /// Verify a quote file
+    Verify(VerifyQuoteArgs),
 }
 
 #[derive(Args)]
@@ -29,28 +33,55 @@ struct DecodeQuoteArgs {
     quote_file: PathBuf,
 }
 
-fn decode_quote(args: DecodeQuoteArgs) -> Result<Quote> {
-    let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
-    let quote = if args.hex {
-        let quote = quote.strip_prefix(b"0x").unwrap_or(&quote);
-        hex::decode(quote).context("Failed to decode quote file")?
+#[derive(Args)]
+struct VerifyQuoteArgs {
+    /// Indicate the quote file is in hex format
+    #[arg(long)]
+    hex: bool,
+    /// The quote file
+    quote_file: PathBuf,
+}
+
+fn hex_decode(input: &[u8], is_hex: bool) -> Result<Vec<u8>> {
+    if is_hex {
+        let input = input.strip_prefix(b"0x").unwrap_or(input);
+        hex::decode(input).context("Failed to decode quote file")
     } else {
-        quote
-    };
-    let quote = Quote::parse(&quote).context("Failed to parse quote")?;
-    Ok(quote)
+        Ok(input.to_vec())
+    }
 }
 
 fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
-    let quote = decode_quote(args).context("Failed to decode quote")?;
-    let json = serde_json::to_string(&quote).context("Failed to serialize quote")?;
+    let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
+    let quote = hex_decode(&quote, args.hex)?;
+    let decoded_quote = Quote::parse(&quote).context("Failed to parse quote")?;
+    let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;
     println!("{}", json);
     Ok(())
 }
 
-fn main() -> Result<()> {
+async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
+    let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
+    let quote = hex_decode(&quote, args.hex)?;
+    println!("Getting collateral...");
+    let collateral = get_collateral_from_pcs(&quote, std::time::Duration::from_secs(60)).await?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    verify(&quote, &collateral, now)
+        .ok()
+        .context("Failed to verify quote")?;
+    eprintln!("Quote verified");
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::DecodeQuote(args) => command_decode_quote(args).context("Failed to decode quote"),
+        Commands::Decode(args) => command_decode_quote(args).context("Failed to decode quote"),
+        Commands::Verify(args) => command_verify_quote(args)
+            .await
+            .context("Failed to verify quote"),
     }
 }

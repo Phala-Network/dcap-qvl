@@ -17,7 +17,9 @@ Add the following dependency to your `Cargo.toml` file to use this crate:
 dcap-qvl = "0.1.0"
 ```
 
-# Example: Get Collateral from PCCS_URL and Verify Quote
+# Examples
+
+## Get Collateral from PCCS_URL and Verify Quote
 
 To get collateral from a PCCS_URL and verify a quote, you can use the following example code:
 ```rust
@@ -30,6 +32,22 @@ async fn main() {
     let pccs_url = std::env::var("PCCS_URL").expect("PCCS_URL is not set");
     let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
     let collateral = get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
+    println!("{:?}", tcb);
+}
+```
+
+## Get Collateral from Intel PCS and Verify Quote
+
+```rust
+use dcap_qvl::collateral::get_collateral_from_pcs;
+use dcap_qvl::verify::verify;
+
+#[tokio::main]
+async fn main() {
+    let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
+    let collateral = get_collateral_from_pcs(&quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
     println!("{:?}", tcb);
