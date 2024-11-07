@@ -43,22 +43,6 @@ pub async fn get_collateral(
         .build()?;
     let base_url = pccs_url.trim_end_matches('/');
 
-    let pck_crl_issuer_chain;
-    let pck_crl;
-    {
-        let response = client
-            .get(format!("{base_url}/pckcrl?ca=processor"))
-            .send()
-            .await?;
-        pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
-        pck_crl = response.text().await?;
-    };
-    let root_ca_crl = client
-        .get(format!("{base_url}/rootcacrl"))
-        .send()
-        .await?
-        .text()
-        .await?;
     let tcb_info_issuer_chain;
     let raw_tcb_info;
     {
@@ -104,9 +88,6 @@ pub async fn get_collateral(
         .map_err(|_| anyhow!("QE Identity signature should a hex string"))?;
 
     Ok(QuoteCollateralV3 {
-        pck_crl_issuer_chain,
-        root_ca_crl,
-        pck_crl,
         tcb_info_issuer_chain,
         tcb_info,
         tcb_info_signature,
@@ -128,6 +109,6 @@ pub async fn get_collateral(
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
 pub async fn get_collateral_from_pcs(quote: &[u8], timeout: Duration) -> Result<QuoteCollateralV3> {
-    const PCS_URL: &str = "https://api.trustedservices.intel.com/sgx/certification/v4";
+    const PCS_URL: &str = "https://api.trustedservices.intel.com/tdx/certification/v4";
     get_collateral(PCS_URL, quote, timeout).await
 }
