@@ -45,6 +45,7 @@ struct VerifyQuoteArgs {
 fn hex_decode(input: &[u8], is_hex: bool) -> Result<Vec<u8>> {
     if is_hex {
         let input = input.strip_prefix(b"0x").unwrap_or(input);
+        let input = input.strip_suffix(b"\n").unwrap_or(input);
         hex::decode(input).context("Failed to decode quote file")
     } else {
         Ok(input.to_vec())
