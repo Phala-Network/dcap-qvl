@@ -284,6 +284,28 @@ impl Report {
     pub fn is_sgx(&self) -> bool {
         matches!(self, Report::SgxEnclave(_))
     }
+
+    pub fn as_td10(&self) -> Option<&TDReport10> {
+        match self {
+            Report::TD10(report) => Some(report),
+            Report::TD15(report) => Some(&report.base),
+            _ => None,
+        }
+    }
+
+    pub fn as_td15(&self) -> Option<&TDReport15> {
+        match self {
+            Report::TD15(report) => Some(report),
+            _ => None,
+        }
+    }
+
+    pub fn as_sgx(&self) -> Option<&EnclaveReport> {
+        match self {
+            Report::SgxEnclave(report) => Some(report),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
