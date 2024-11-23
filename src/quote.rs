@@ -7,43 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{constants::*, utils, Error};
 
-#[cfg(feature = "hex-bytes")]
-mod serde_bytes {
-    use serde::Deserialize;
-
-    pub(crate) trait FromBytes {
-        fn from_bytes(bytes: Vec<u8>) -> Option<Self>
-        where
-            Self: Sized;
-    }
-    impl FromBytes for Vec<u8> {
-        fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
-            Some(bytes)
-        }
-    }
-    impl<const N: usize> FromBytes for [u8; N] {
-        fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
-            bytes.try_into().ok()
-        }
-    }
-
-    pub(crate) fn serialize<S: serde::Serializer>(
-        data: impl AsRef<[u8]>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let hex_str = hex::encode(data);
-        serializer.serialize_str(&hex_str)
-    }
-
-    pub(crate) fn deserialize<'de, D: serde::Deserializer<'de>, T: FromBytes>(
-        deserializer: D,
-    ) -> Result<T, D::Error> {
-        let hex_str = String::deserialize(deserializer)?;
-        let bytes = hex::decode(hex_str).map_err(serde::de::Error::custom)?;
-        T::from_bytes(bytes).ok_or_else(|| serde::de::Error::custom("invalid bytes"))
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Data<T> {
     pub data: Vec<u8>,

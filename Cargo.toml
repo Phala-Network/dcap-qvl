@@ -8,12 +8,12 @@ authors = ["Kevin Wang <wy721@qq.com>"]
 
 [dependencies]
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
-serde = { version = "1", default-features = false, features = ["derive"] }
-base64 = { version = "0.21", default-features = false, features = ["alloc"] }
-scale = { package = "parity-scale-codec", version = "3.6.5", default-features = false, features = [
+serde = { version = "1.0.215", default-features = false, features = ["derive"] }
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+scale = { package = "parity-scale-codec", version = "3.7.0", default-features = false, features = [
     "derive",
 ] }
-scale-info = { version = "2", default-features = false, features = ["derive"] }
+scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
 chrono = { version = "0.4.31", default-features = false, features = [
     "alloc",
     "serde",
@@ -29,26 +29,26 @@ der = { version = "0.7.8", default-features = false, features = ["alloc"] }
 
 log = { version = "0.4.20", default-features = false }
 
-anyhow = { version = "1", optional = true }
+anyhow = { version = "1.0.93", optional = true }
 
 ring = { version = "0.17", default-features = false, features = [
     "alloc",
 ] }
-reqwest = { version = "0.11.27", optional = true, default-features = false, features = [
+reqwest = { version = "0.12.9", optional = true, default-features = false, features = [
     "rustls-tls",
     "blocking",
     "hickory-dns",
 ] }
 urlencoding = { version = "2", optional = true }
-serde_json = { version = "1.0.108", optional = true, features = [
+serde_json = { version = "1.0.133", optional = true, features = [
     "preserve_order",
 ] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
-serde-wasm-bindgen = { version = "0.4", optional = true}
+serde-wasm-bindgen = { version = "0.6.5", optional = true}
 wasm-bindgen = { version = "0.2.95", optional = true }
-serde_bytes = { version = "0.11" }
+serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 [dependencies.webpki]
 version = "0.102.8"
@@ -57,8 +57,9 @@ default-features = false
 features = ["alloc", "ring"]
 
 [dev-dependencies]
-insta = "1"
-tokio = { version = "1", features = ["full"] }
+insta = "1.41.1"
+serde_json = "1.0.133"
+tokio = { version = "1.41.1", features = ["full"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -82,4 +83,3 @@ std = [
 ]
 report = ["std", "tracing", "futures"]
 js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
-hex-bytes = []

@@ -1,11 +1,12 @@
-use core::time::Duration;
-
 use alloc::string::{String, ToString};
 use anyhow::{anyhow, Result};
 use scale::Decode;
 
 use crate::quote::Quote;
 use crate::QuoteCollateralV3;
+
+#[cfg(not(feature = "js"))]
+use core::time::Duration;
 
 fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
     let value = resposne
@@ -29,18 +30,17 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
-#[cfg(not(feature = "js"))]
 pub async fn get_collateral(
     pccs_url: &str,
     mut quote: &[u8],
-    timeout: Duration,
+    #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
     let quote = Quote::decode(&mut quote)?;
     let fmspc = hex::encode_upper(quote.fmspc().map_err(|_| anyhow!("get fmspc error"))?);
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(timeout)
-        .build()?;
+    let builder = reqwest::Client::builder();
+    #[cfg(not(feature = "js"))]
+    let builder = builder.danger_accept_invalid_certs(true).timeout(timeout);
+    let client = builder.build()?;
     let base_url = pccs_url.trim_end_matches('/');
 
     let tcb_info_issuer_chain;
@@ -108,7 +108,16 @@ pub async fn get_collateral(
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
-pub async fn get_collateral_from_pcs(quote: &[u8], timeout: Duration) -> Result<QuoteCollateralV3> {
+pub async fn get_collateral_from_pcs(
+    quote: &[u8],
+    #[cfg(not(feature = "js"))] timeout: Duration,
+) -> Result<QuoteCollateralV3> {
     const PCS_URL: &str = "https://api.trustedservices.intel.com/tdx/certification/v4";
-    get_collateral(PCS_URL, quote, timeout).await
+    get_collateral(
+        PCS_URL,
+        quote,
+        #[cfg(not(feature = "js"))]
+        timeout,
+    )
+    .await
 }
