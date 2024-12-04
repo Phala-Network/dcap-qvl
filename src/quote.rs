@@ -5,8 +5,124 @@ use anyhow::Result;
 use proptest::prelude::*;
 use scale::{Decode, Encode, Input};
 use serde::{Deserialize, Serialize};
+use sha2::{Sha384,Digest};
 
 use crate::{constants::*, utils, Error};
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug, Serialize)]
+pub struct TdxEventLog {
+    /// IMR index, starts from 0
+    pub imr: u32,
+    /// Event type
+    pub event_type: u32,
+    /// Digest
+    #[serde(serialize_with = "hex::serialize")]
+    pub digest: [u8; 48],
+    /// Event name
+    pub event: String,
+    /// Event payload
+    #[serde(serialize_with = "hex::serialize")]
+    pub event_payload: Vec<u8>,
+}
+
+// Add this helper module for hex serialization
+mod hex {
+    use serde::Serializer;
+
+    pub fn serialize<S, T>(bytes: T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: AsRef<[u8]>,
+    {
+        serializer.serialize_str(&hex::encode(bytes))
+    }
+}
+
+impl Arbitrary for TdxEventLog {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Create a strategy for imr that only generates values 0-3
+        let imr_strategy = 0..=3u32;
+
+        (
+            imr_strategy,
+            any::<u32>(),
+            any::<[u8; 48]>(),
+            any::<String>(),
+            any::<Vec<u8>>(),
+        )
+            .prop_map(|(imr, event_type, digest, event, event_payload)| {
+                TdxEventLog {
+                    imr,
+                    event_type,
+                    digest,
+                    event,
+                    event_payload,
+                }
+            })
+            .boxed()
+    }
+}
+
+#[derive(Decode, Encode, PartialEq, Eq, Debug, Serialize)]
+pub struct TdxEventLogs {
+    pub logs: Vec<TdxEventLog>,
+}
+
+impl TdxEventLogs {
+    /// Convert event logs to a vector of RTMR values by accumulating digests with SHA384.
+    /// Returns a vector of 48-byte arrays representing the RTMR values,
+    /// where the index corresponds to the IMR index.
+    pub fn get_rtmr(&self) -> Vec<[u8; 48]> {
+        let mut rtmrs = vec![[0u8; 48]; 4]; // Initialize with 4 zero-filled RTMRs
+
+        // Process events for each IMR index
+        for imr_idx in 0..4 {
+            let mut current_rtmr = [0u8; 48];
+
+            // Get all events for this IMR index in order
+            let imr_events: Vec<_> = self.logs.iter()
+                .filter(|event| event.imr == imr_idx as u32)
+                .collect();
+
+            // If we have events for this IMR, calculate the accumulated hash
+            if !imr_events.is_empty() {
+                for event in imr_events {
+                    // Create hasher and update with current RTMR
+                    let mut hasher = Sha384::new();
+                    hasher.update(current_rtmr);
+                    // Update with event digest
+                    hasher.update(event.digest);
+                    // Get the new RTMR value
+                    current_rtmr.copy_from_slice(&hasher.finalize());
+                }
+            }
+
+            rtmrs[imr_idx] = current_rtmr;
+        }
+
+        rtmrs
+    }
+
+    /// Convert event logs to a JSON string
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+}
+
+impl Arbitrary for TdxEventLogs {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let size = 2..=32usize;
+        prop::collection::vec(any::<TdxEventLog>(), size)
+            .prop_map(|logs| TdxEventLogs { logs })
+            .boxed()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Data<T> {
