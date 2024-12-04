@@ -43,22 +43,21 @@ impl Arbitrary for TdxEventLog {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        // Create a strategy for imr that only generates values 0-3
+        // Create a strategy for imr that only generates values 0-3, which represent to rtmr0 ~ rtmr3
         let imr_strategy = 0..=3u32;
 
         (
             imr_strategy,
             any::<u32>(),
             any::<[u8; 48]>(),
-            any::<String>(),
             any::<Vec<u8>>(),
         )
-            .prop_map(|(imr, event_type, digest, event, event_payload)| {
+            .prop_map(|(imr, event_type, digest, event_payload)| {
                 TdxEventLog {
                     imr,
                     event_type,
                     digest,
-                    event,
+                    event: "".to_string(),
                     event_payload,
                 }
             })
@@ -77,32 +76,21 @@ impl TdxEventLogs {
     /// where the index corresponds to the IMR index.
     pub fn get_rtmr(&self) -> Vec<[u8; 48]> {
         let mut rtmrs = vec![[0u8; 48]; 4]; // Initialize with 4 zero-filled RTMRs
-
-        // Process events for each IMR index
         for imr_idx in 0..4 {
             let mut current_rtmr = [0u8; 48];
-
-            // Get all events for this IMR index in order
             let imr_events: Vec<_> = self.logs.iter()
                 .filter(|event| event.imr == imr_idx as u32)
                 .collect();
-
-            // If we have events for this IMR, calculate the accumulated hash
             if !imr_events.is_empty() {
                 for event in imr_events {
-                    // Create hasher and update with current RTMR
                     let mut hasher = Sha384::new();
                     hasher.update(current_rtmr);
-                    // Update with event digest
                     hasher.update(event.digest);
-                    // Get the new RTMR value
                     current_rtmr.copy_from_slice(&hasher.finalize());
                 }
             }
-
             rtmrs[imr_idx] = current_rtmr;
         }
-
         rtmrs
     }
 
