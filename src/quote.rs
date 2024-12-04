@@ -105,9 +105,40 @@ impl Arbitrary for TdxEventLogs {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let size = 2..=32usize;
-        prop::collection::vec(any::<TdxEventLog>(), size)
-            .prop_map(|logs| TdxEventLogs { logs })
+        let imr0_size = 6..=12usize;
+        let remaining_size = 0..=8usize;
+
+        (
+            prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
+                log.imr = 0;
+                log
+            }), imr0_size),
+            prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
+                log.imr = 1;
+                log
+            }), remaining_size.clone()),
+            prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
+                log.imr = 2;
+                log
+            }), remaining_size.clone()),
+            prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
+                log.imr = 3;
+                log
+            }), remaining_size),
+        )
+            .prop_map(|(mut imr0_logs, mut imr1_logs, mut imr2_logs, mut imr3_logs)| {
+                let mut logs = Vec::new();
+                logs.append(&mut imr0_logs);
+                logs.append(&mut imr1_logs);
+                logs.append(&mut imr2_logs);
+                logs.append(&mut imr3_logs);
+                if logs.len() > 32 {
+                    logs.sort_by_key(|log| log.imr);
+                    logs.truncate(32);
+                    debug_assert!(logs.iter().filter(|log| log.imr == 0).count() >= 6);
+                }
+                TdxEventLogs { logs }
+            })
             .boxed()
     }
 }
