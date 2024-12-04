@@ -65,6 +65,25 @@ impl Arbitrary for TdxEventLog {
     }
 }
 
+#[derive(Debug)]
+pub struct TdxEventLogsParams {
+    pub imr0_size: Option<usize>,
+    pub imr1_size: Option<usize>,
+    pub imr2_size: Option<usize>,
+    pub imr3_size: Option<usize>,
+}
+
+impl Default for TdxEventLogsParams {
+    fn default() -> Self {
+        TdxEventLogsParams {
+            imr0_size: None,
+            imr1_size: None,
+            imr2_size: None,
+            imr3_size: None,
+        }
+    }
+}
+
 #[derive(Decode, Encode, PartialEq, Eq, Debug, Serialize)]
 pub struct TdxEventLogs {
     pub logs: Vec<TdxEventLog>,
@@ -84,9 +103,9 @@ impl TdxEventLogs {
             if !imr_events.is_empty() {
                 for event in imr_events {
                     let mut hasher = Sha384::new();
-                    hasher.update(current_rtmr);
-                    hasher.update(event.digest);
-                    current_rtmr.copy_from_slice(&hasher.finalize());
+                    hasher.update(&current_rtmr);
+                    hasher.update(&event.digest);
+                    current_rtmr = hasher.finalize().into();
                 }
             }
             rtmrs[imr_idx] = current_rtmr;
@@ -101,30 +120,47 @@ impl TdxEventLogs {
 }
 
 impl Arbitrary for TdxEventLogs {
-    type Parameters = ();
+    type Parameters = TdxEventLogsParams;
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        let imr0_size = 6..=12usize;
-        let remaining_size = 0..=8usize;
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let default_imr0_size = 6..=12usize;
+        let default_remaining_size = 1..=8usize;
+
+        let imr0_strategy = match args.imr0_size {
+            Some(size) => size..=size,
+            None => default_imr0_size,
+        };
+        let imr1_strategy = match args.imr1_size {
+            Some(size) => size..=size,
+            None => default_remaining_size.clone(),
+        };
+        let imr2_strategy = match args.imr2_size {
+            Some(size) => size..=size,
+            None => default_remaining_size.clone(),
+        };
+        let imr3_strategy = match args.imr3_size {
+            Some(size) => size..=size,
+            None => default_remaining_size,
+        };
 
         (
             prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
                 log.imr = 0;
                 log
-            }), imr0_size),
+            }), imr0_strategy),
             prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
                 log.imr = 1;
                 log
-            }), remaining_size.clone()),
+            }), imr1_strategy),
             prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
                 log.imr = 2;
                 log
-            }), remaining_size.clone()),
+            }), imr2_strategy),
             prop::collection::vec(any::<TdxEventLog>().prop_map(|mut log| {
                 log.imr = 3;
                 log
-            }), remaining_size),
+            }), imr3_strategy),
         )
             .prop_map(|(mut imr0_logs, mut imr1_logs, mut imr2_logs, mut imr3_logs)| {
                 let mut logs = Vec::new();
