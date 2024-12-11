@@ -232,7 +232,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
             let auth_data = AuthDataV4::decode(input)?;
             Ok(AuthData::V4(auth_data))
         }
-        _ => Err(scale::Error::from("unsupported quote version")),
+        _ => Err(scale::Error::from("unsupported auth data version")),
     }
 }
 

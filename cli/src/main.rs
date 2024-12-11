@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
 use clap::{Args, Parser, Subcommand};
-use dcap_qvl::collateral::get_collateral_from_pcs;
+use dcap_qvl::collateral::{get_collateral, get_collateral_from_pcs};
 use dcap_qvl::quote::Quote;
 use dcap_qvl::verify::verify;
 
@@ -64,14 +64,21 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
 async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
     let quote = hex_decode(&quote, args.hex)?;
-    println!("Getting collateral...");
-    let collateral = get_collateral_from_pcs(&quote, std::time::Duration::from_secs(60)).await?;
+    let pccs_url = std::env::var("PCCS_URL").unwrap_or_default();
+    let collateral = if pccs_url.is_empty() {
+        eprintln!("Getting collateral from PCS...");
+        get_collateral_from_pcs(&quote, std::time::Duration::from_secs(60)).await?
+    } else {
+        eprintln!("Getting collateral from {pccs_url}");
+        get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(60)).await?
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    verify(&quote, &collateral, now)
+    let report = verify(&quote, &collateral, now)
         .ok()
         .context("Failed to verify quote")?;
+    println!("{}", serde_json::to_string(&report).unwrap());
     eprintln!("Quote verified");
     Ok(())
 }
