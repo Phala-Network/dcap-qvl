@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail, Context, Result};
 use scale::Decode;
 
 use {
@@ -6,11 +7,11 @@ use {
 };
 
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
+use crate::QuoteCollateralV3;
 use crate::{
     quote::Report,
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
-use crate::{Error, QuoteCollateralV3};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "js")]
@@ -62,19 +63,20 @@ pub fn verify(
     raw_quote: &[u8],
     quote_collateral: &QuoteCollateralV3,
     now: u64,
-) -> Result<VerifiedReport, Error> {
+) -> Result<VerifiedReport> {
     // Parse data
     let mut quote = raw_quote;
-    let quote = Quote::decode(&mut quote).map_err(|_| Error::CodecError)?;
+    let quote = Quote::decode(&mut quote).context("Failed to decode quote")?;
     let signed_quote_len = quote.signed_length();
 
     let tcb_info = serde_json::from_str::<TcbInfo>(&quote_collateral.tcb_info)
-        .map_err(|_| Error::CodecError)?;
+        .context("Failed to decode TcbInfo")?;
 
     let next_update = chrono::DateTime::parse_from_rfc3339(&tcb_info.next_update)
-        .map_err(|_| Error::CodecError)?;
+        .ok()
+        .context("Failed to parse next update")?;
     if now > next_update.timestamp() as u64 {
-        return Err(Error::TCBInfoExpired);
+        bail!("TCBInfo expired");
     }
 
     let now_in_milli = now * 1000;
@@ -90,10 +92,10 @@ pub fn verify(
     // Check TCB info cert chain and signature
     let leaf_certs = extract_certs(quote_collateral.tcb_info_issuer_chain.as_bytes())?;
     if leaf_certs.len() < 2 {
-        return Err(Error::CertificateChainIsTooShort);
+        bail!("Certificate chain is too short");
     }
     let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&leaf_certs[0])
-        .map_err(|_| Error::LeafCertificateParsingError)?;
+        .context("Failed to parse leaf certificate")?;
     let intermediate_certs = &leaf_certs[1..];
     verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
     let asn1_signature = encode_as_der(&quote_collateral.tcb_info_signature)?;
@@ -105,16 +107,16 @@ pub fn verify(
         )
         .is_err()
     {
-        return Err(Error::RsaSignatureIsInvalid);
+        return Err(anyhow!("Rsa signature is invalid"));
     }
 
     // Check quote fields
     if ![3, 4, 5].contains(&quote.header.version) {
-        return Err(Error::UnsupportedDCAPQuoteVersion);
+        return Err(anyhow!("Unsupported DCAP quote version"));
     }
     // We only support ECDSA256 with P256 curve
     if quote.header.attestation_key_type != ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE {
-        return Err(Error::UnsupportedDCAPAttestationKeyType);
+        bail!("Unsupported DCAP attestation key type");
     }
 
     // Extract Auth data from quote
@@ -123,16 +125,16 @@ pub fn verify(
 
     // We only support 5 -Concatenated PCK Cert Chain (PEM formatted).
     if certification_data.cert_type != PCK_CERT_CHAIN {
-        return Err(Error::UnsupportedDCAPPckCertFormat);
+        bail!("Unsupported DCAP PCK cert format");
     }
 
     let certification_certs = extract_certs(&certification_data.body.data)?;
     if certification_certs.len() < 2 {
-        return Err(Error::CertificateChainIsTooShort);
+        bail!("Certificate chain is too short");
     }
     // Check certification_data
     let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&certification_certs[0])
-        .map_err(|_| Error::LeafCertificateParsingError)?;
+        .context("Failed to parse leaf certificate")?;
     let intermediate_certs = &certification_certs[1..];
     verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
 
@@ -146,12 +148,12 @@ pub fn verify(
         )
         .is_err()
     {
-        return Err(Error::RsaSignatureIsInvalid);
+        return Err(anyhow!("Rsa signature is invalid"));
     }
 
     // Extract QE report from quote
     let mut qe_report = auth_data.qe_report.as_slice();
-    let qe_report = EnclaveReport::decode(&mut qe_report).map_err(|_err| Error::CodecError)?;
+    let qe_report = EnclaveReport::decode(&mut qe_report).context("Failed to decode QE report")?;
 
     // Check QE hash
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
@@ -159,7 +161,7 @@ pub fn verify(
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
     let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
     if qe_hash.as_ref() != &qe_report.report_data[0..32] {
-        return Err(Error::QEReportHashMismatch);
+        bail!("QE report hash mismatch");
     }
 
     // Check signature from auth data
@@ -169,10 +171,12 @@ pub fn verify(
         ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
     peer_public_key
         .verify(
-            &raw_quote.get(..signed_quote_len).ok_or(Error::CodecError)?,
+            &raw_quote
+                .get(..signed_quote_len)
+                .ok_or(anyhow!("Failed to get signed quote"))?,
             &auth_data.ecdsa_signature,
         )
-        .map_err(|_| Error::IsvEnclaveReportSignatureIsInvalid)?;
+        .map_err(|_| anyhow!("Isv enclave report signature is invalid"))?;
 
     // Extract information from the quote
 
@@ -181,9 +185,11 @@ pub fn verify(
     let pce_svn = utils::get_pce_svn(&extension_section)?;
     let fmspc = utils::get_fmspc(&extension_section)?;
 
-    let tcb_fmspc = hex::decode(&tcb_info.fmspc).map_err(|_| Error::CodecError)?;
+    let tcb_fmspc = hex::decode(&tcb_info.fmspc)
+        .ok()
+        .context("Failed to decode TCB FMSPC")?;
     if fmspc != tcb_fmspc[..] {
-        return Err(Error::FmspcMismatch);
+        bail!("Fmspc mismatch");
     }
 
     // TCB status and advisory ids

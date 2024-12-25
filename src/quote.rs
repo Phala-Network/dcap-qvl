@@ -1,11 +1,11 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Context, Result};
 use scale::{Decode, Input};
 use serde::{Deserialize, Serialize};
 
-use crate::{constants::*, utils, Error};
+use crate::{constants::*, utils};
 
 #[derive(Debug, Clone)]
 pub struct Data<T> {
@@ -232,7 +232,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
             let auth_data = AuthDataV4::decode(input)?;
             Ok(AuthData::V4(auth_data))
         }
-        _ => Err(scale::Error::from("unsupported auth data version")),
+        _ => Err(scale::Error::from("Unsupported auth data version")),
     }
 }
 
@@ -296,7 +296,7 @@ impl Decode for Quote {
                 TEE_TYPE_TDX => {
                     report = Report::TD10(TDReport10::decode(input)?);
                 }
-                _ => return Err(scale::Error::from("invalid tee type")),
+                _ => return Err(scale::Error::from("Invalid TEE type")),
             },
             5 => {
                 let body = Body::decode(input)?;
@@ -310,10 +310,10 @@ impl Decode for Quote {
                     BODY_TD_REPORT15_TYPE => {
                         report = Report::TD15(TDReport15::decode(input)?);
                     }
-                    _ => return Err(scale::Error::from("unsupported body type")),
+                    _ => return Err(scale::Error::from("Unsupported body type")),
                 }
             }
-            _ => return Err(scale::Error::from("unsupported quote version")),
+            _ => return Err(scale::Error::from("Unsupported quote version")),
         }
         let data = Data::<u32>::decode(input)?;
         let auth_data = decode_auth_data(header.version, &mut &data.data[..])?;
@@ -334,18 +334,26 @@ impl Quote {
     }
 
     /// Get the raw certificate chain from the quote.
-    pub fn raw_cert_chain(&self) -> &[u8] {
-        match &self.auth_data {
-            AuthData::V3(data) => &data.certification_data.body.data,
-            AuthData::V4(data) => &data.qe_report_data.certification_data.body.data,
+    pub fn raw_cert_chain(&self) -> Result<&[u8]> {
+        let cert_data = match &self.auth_data {
+            AuthData::V3(data) => &data.certification_data,
+            AuthData::V4(data) => &data.qe_report_data.certification_data,
+        };
+        if cert_data.cert_type != 5 {
+            bail!("Unsupported cert type: {}", cert_data.cert_type);
         }
+        Ok(&cert_data.body.data)
     }
 
     /// Get the FMSPC from the quote.
-    pub fn fmspc(&self) -> Result<Fmspc, Error> {
-        let raw_cert_chain = self.raw_cert_chain();
-        let certs = utils::extract_certs(raw_cert_chain)?;
-        let extension_section = utils::get_intel_extension(&certs[0])?;
+    pub fn fmspc(&self) -> Result<Fmspc> {
+        let raw_cert_chain = self
+            .raw_cert_chain()
+            .context("Failed to get raw cert chain")?;
+        let certs = utils::extract_certs(raw_cert_chain).context("Failed to extract certs")?;
+        let cert = certs.get(0).ok_or(anyhow!("Invalid certificate"))?;
+        let extension_section =
+            utils::get_intel_extension(cert).context("Failed to get Intel extension")?;
         utils::get_fmspc(&extension_section)
     }
 
