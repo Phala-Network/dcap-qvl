@@ -10,7 +10,7 @@ authors = ["Kevin Wang <wy721@qq.com>"]
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.215", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-scale = { package = "parity-scale-codec", version = "3.7.0", default-features = false, features = [
+scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = [
     "derive",
 ] }
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
