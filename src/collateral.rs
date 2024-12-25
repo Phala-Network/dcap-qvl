@@ -1,5 +1,5 @@
 use alloc::string::{String, ToString};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use scale::Decode;
 
 use crate::quote::Quote;
@@ -12,7 +12,7 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
     let value = resposne
         .headers()
         .get(name)
-        .ok_or(anyhow!("Missing {name}"))?
+        .ok_or_else(|| anyhow!("Missing {name}"))?
         .to_str()?;
     let value = urlencoding::decode(value)?;
     Ok(value.into_owned())
@@ -36,7 +36,7 @@ pub async fn get_collateral(
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
     let quote = Quote::decode(&mut quote)?;
-    let fmspc = hex::encode_upper(quote.fmspc().map_err(|_| anyhow!("get fmspc error"))?);
+    let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.danger_accept_invalid_certs(true).timeout(timeout);
@@ -63,29 +63,31 @@ pub async fn get_collateral(
     };
 
     let tcb_info_json: serde_json::Value =
-        serde_json::from_str(&raw_tcb_info).map_err(|_| anyhow!("TCB Info should a JSON"))?;
+        serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
     let tcb_info = tcb_info_json["tcbInfo"].to_string();
     let tcb_info_signature = tcb_info_json
         .get("signature")
-        .ok_or(anyhow!("TCB Info should has `signature` field"))?
+        .context("TCB Info missing 'signature' field")?
         .as_str()
-        .ok_or(anyhow!("TCB Info signature should a hex string"))?;
+        .context("TCB Info signature must be a string")?;
     let tcb_info_signature = hex::decode(tcb_info_signature)
-        .map_err(|_| anyhow!("TCB Info signature should a hex string"))?;
+        .ok()
+        .context("TCB Info signature must be valid hex")?;
 
-    let qe_identity_json: serde_json::Value = serde_json::from_str(raw_qe_identity.as_str())
-        .map_err(|_| anyhow!("QE Identity should a JSON"))?;
+    let qe_identity_json: serde_json::Value =
+        serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
     let qe_identity = qe_identity_json
         .get("enclaveIdentity")
-        .ok_or(anyhow!("QE Identity should has `enclaveIdentity` field"))?
+        .context("QE Identity missing 'enclaveIdentity' field")?
         .to_string();
     let qe_identity_signature = qe_identity_json
         .get("signature")
-        .ok_or(anyhow!("QE Identity should has `signature` field"))?
+        .context("QE Identity missing 'signature' field")?
         .as_str()
-        .ok_or(anyhow!("QE Identity signature should a hex string"))?;
+        .context("QE Identity signature must be a string")?;
     let qe_identity_signature = hex::decode(qe_identity_signature)
-        .map_err(|_| anyhow!("QE Identity signature should a hex string"))?;
+        .ok()
+        .context("QE Identity signature must be valid hex")?;
 
     Ok(QuoteCollateralV3 {
         tcb_info_issuer_chain,

@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use anyhow::{anyhow, bail, Context, Result};
 use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
@@ -7,11 +8,10 @@ use webpki::types::CertificateDer;
 use x509_cert::Certificate;
 
 use crate::constants::*;
-use crate::Error;
 
-pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>, Error> {
-    let cert: Certificate = der::Decode::from_der(der_encoded)
-        .map_err(|_| Error::IntelExtensionCertificateDecodingError)?;
+pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>> {
+    let cert: Certificate =
+        der::Decode::from_der(der_encoded).context("Failed to decode certificate")?;
     let mut extension_iter = cert
         .tbs_certificate
         .extensions
@@ -21,88 +21,89 @@ pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>, Error> {
         .filter(|e| e.extn_id == oids::SGX_EXTENSION)
         .map(|e| e.extn_value.clone());
 
-    let extension = extension_iter
-        .next()
-        .ok_or(Error::IntelExtensionAmbiguity)?;
+    let extension = extension_iter.next().context("Intel extension not found")?;
     if extension_iter.next().is_some() {
         //"There should only be one section containing Intel extensions"
-        return Err(Error::IntelExtensionAmbiguity);
+        bail!("Intel extension ambiguity");
     }
     Ok(extension.into_bytes())
 }
 
-pub fn find_extension(path: &[&[u8]], raw: &[u8]) -> Result<Vec<u8>, Error> {
-    let obj = DerObject::decode(raw).map_err(|_| Error::DerDecodingError)?;
-    let subobj = get_obj(path, obj)?;
+pub fn find_extension(path: &[&[u8]], raw: &[u8]) -> Result<Vec<u8>> {
+    let obj = DerObject::decode(raw).context("Failed to decode DER object")?;
+    let subobj = get_obj(path, obj).context("Failed to get subobject")?;
     Ok(subobj.value().to_vec())
 }
 
-fn get_obj<'a>(path: &[&[u8]], mut obj: DerObject<'a>) -> Result<DerObject<'a>, Error> {
+fn get_obj<'a>(path: &[&[u8]], mut obj: DerObject<'a>) -> Result<DerObject<'a>> {
     for oid in path {
-        let seq = Sequence::load(obj).map_err(|_| Error::DerDecodingError)?;
-        obj = sub_obj(oid, seq)?;
+        let seq = Sequence::load(obj).context("Failed to load sequence")?;
+        obj = sub_obj(oid, seq).context("Failed to get subobject")?;
     }
     Ok(obj)
 }
 
-fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>, Error> {
+fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>> {
     for i in 0..seq.len() {
-        let entry = seq.get(i).map_err(|_| Error::OidIsMissing)?;
-        let entry = Sequence::load(entry).map_err(|_| Error::DerDecodingError)?;
-        let name = entry.get(0).map_err(|_| Error::OidIsMissing)?;
-        let value = entry.get(1).map_err(|_| Error::OidIsMissing)?;
+        let entry = seq.get(i).context("Failed to get entry")?;
+        let entry = Sequence::load(entry).context("Failed to load sequence")?;
+        let name = entry.get(0).context("Failed to get name")?;
+        let value = entry.get(1).context("Failed to get value")?;
         if name.value() == oid {
             return Ok(value);
         }
     }
-    Err(Error::OidIsMissing)
+    bail!("Oid is missing");
 }
 
-pub fn get_fmspc(extension_section: &[u8]) -> Result<Fmspc, Error> {
-    let data = find_extension(&[oids::FMSPC.as_bytes()], extension_section)?;
+pub fn get_fmspc(extension_section: &[u8]) -> Result<Fmspc> {
+    let data = find_extension(&[oids::FMSPC.as_bytes()], extension_section)
+        .context("Failed to find Fmspc")?;
     if data.len() != 6 {
-        return Err(Error::FmspcLengthMismatch);
+        bail!("Fmspc length mismatch");
     }
 
-    data.try_into().map_err(|_| Error::FmspcDecodingError)
+    data.try_into()
+        .map_err(|_| anyhow!("Failed to decode Fmspc"))
 }
 
-pub fn get_cpu_svn(extension_section: &[u8]) -> Result<CpuSvn, Error> {
+pub fn get_cpu_svn(extension_section: &[u8]) -> Result<CpuSvn> {
     let data = find_extension(
         &[oids::TCB.as_bytes(), oids::CPUSVN.as_bytes()],
         extension_section,
     )?;
     if data.len() != 16 {
-        return Err(Error::CpuSvnLengthMismatch);
+        bail!("CpuSvn length mismatch");
     }
 
-    data.try_into().map_err(|_| Error::CpuSvnDecodingError)
+    data.try_into().map_err(|_| anyhow!("Failed to decode CpuSvn"))
 }
 
-pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn, Error> {
+pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     let data = find_extension(
         &[oids::TCB.as_bytes(), oids::PCESVN.as_bytes()],
         extension_section,
-    )?;
+    )
+    .context("Failed to find PceSvn")?;
 
     match data.len() {
         1 => Ok(u16::from(data[0])),
         2 => Ok(u16::from_be_bytes(
-            data.try_into().map_err(|_| Error::PceSvnDecodingError)?,
+            data.try_into().map_err(|_| anyhow!("Failed to decode PceSvn"))?,
         )),
-        _ => Err(Error::PceSvnLengthMismatch),
+        _ => bail!("PceSvn length mismatch"),
     }
 }
 
-pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
+pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(pem::parse_many(cert_chain)
-        .map_err(|_| Error::CodecError)?
+        .context("Failed to parse certs")?
         .iter()
         .map(|i| i.contents().to_vec())
         .collect())
 }
 
-pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>, Error> {
+pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>> {
     let mut certs = Vec::<CertificateDer<'a>>::new();
 
     let raw_certs = extract_raw_certs(cert_chain)?;
@@ -117,26 +118,26 @@ pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>
 /// Encode two 32-byte values in DER format
 /// This is meant for 256 bit ECC signatures or public keys
 /// TODO: We may could use `asn1_der` crate reimplement this, so we can remove `der` which overlap with `asn1_der`
-pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>, Error> {
+pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     if data.len() != 64 {
-        return Err(Error::KeyLengthIsInvalid);
+        bail!("Key length is invalid");
     }
     let mut sequence = der::asn1::SequenceOf::<der::asn1::UintRef, 2>::new();
     sequence
-        .add(der::asn1::UintRef::new(&data[0..32]).map_err(|_| Error::PublicKeyIsInvalid)?)
-        .map_err(|_| Error::PublicKeyIsInvalid)?;
+        .add(der::asn1::UintRef::new(&data[0..32]).context("Failed to add first element")?)
+        .context("Failed to add second element")?;
     sequence
-        .add(der::asn1::UintRef::new(&data[32..]).map_err(|_| Error::PublicKeyIsInvalid)?)
-        .map_err(|_| Error::PublicKeyIsInvalid)?;
+        .add(der::asn1::UintRef::new(&data[32..]).context("Failed to add third element")?)
+        .context("Failed to add third element")?;
     // 72 should be enough in all cases. 2 + 2 x (32 + 3)
     let mut asn1 = alloc::vec![0u8; 72];
     let mut writer = der::SliceWriter::new(&mut asn1);
     writer
         .encode(&sequence)
-        .map_err(|_| Error::DerEncodingError)?;
+        .context("Failed to encode sequence")?;
     Ok(writer
         .finish()
-        .map_err(|_| Error::DerEncodingError)?
+        .context("Failed to finish writer")?
         .to_vec())
 }
 
@@ -146,7 +147,7 @@ pub fn verify_certificate_chain(
     leaf_cert: &webpki::EndEntityCert,
     intermediate_certs: &[CertificateDer],
     verification_time: u64,
-) -> Result<(), Error> {
+) -> Result<()> {
     let time = webpki::types::UnixTime::since_unix_epoch(core::time::Duration::from_secs(
         verification_time / 1000,
     ));
@@ -161,7 +162,7 @@ pub fn verify_certificate_chain(
             None,
             None,
         )
-        .map_err(|_e| Error::CertificateChainIsInvalid)?;
+        .context("Failed to verify certificate chain")?;
 
     Ok(())
 }
