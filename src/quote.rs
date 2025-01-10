@@ -54,6 +54,12 @@ pub struct Header {
     pub user_data: [u8; 20],
 }
 
+impl Header {
+    pub fn is_sgx(&self) -> bool {
+        self.tee_type == TEE_TYPE_SGX
+    }
+}
+
 #[derive(Decode, Debug)]
 pub struct Body {
     pub body_type: u16,

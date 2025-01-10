@@ -2,11 +2,13 @@ use alloc::string::{String, ToString};
 use anyhow::{anyhow, Context, Result};
 use scale::Decode;
 
-use crate::quote::Quote;
+use crate::quote::{Header, Quote};
+use crate::verify::VerifiedReport;
 use crate::QuoteCollateralV3;
 
 #[cfg(not(feature = "js"))]
 use core::time::Duration;
+use std::time::SystemTime;
 
 fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
     let value = resposne
@@ -122,4 +124,29 @@ pub async fn get_collateral_from_pcs(
         timeout,
     )
     .await
+}
+
+/// Get collateral and verify the quote.
+pub async fn get_collateral_and_verify(
+    quote: &[u8],
+    pccs_url: Option<&str>,
+) -> Result<VerifiedReport> {
+    let url = pccs_url.unwrap_or_default();
+    let pccs_url = if url.is_empty() {
+        let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
+        if header.is_sgx() {
+            "https://api.trustedservices.intel.com/sgx/certification/v4"
+        } else {
+            "https://api.trustedservices.intel.com/tdx/certification/v4"
+        }
+    } else {
+        url
+    };
+    let timeout = Duration::from_secs(120);
+    let collateral = get_collateral(pccs_url, quote, timeout).await?;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .context("Failed to get current time")?
+        .as_secs() as u64;
+    crate::verify::verify(quote, &collateral, now)
 }
