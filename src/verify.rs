@@ -92,10 +92,10 @@ pub fn verify(
     // Check TCB info cert chain and signature
     let leaf_certs = extract_certs(quote_collateral.tcb_info_issuer_chain.as_bytes())?;
     if leaf_certs.len() < 2 {
-        bail!("Certificate chain is too short");
+        bail!("Certificate chain is too short in quote_collateral");
     }
     let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&leaf_certs[0])
-        .context("Failed to parse leaf certificate")?;
+        .context("Failed to parse leaf certificate in quote_collateral")?;
     let intermediate_certs = &leaf_certs[1..];
     verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
     let asn1_signature = encode_as_der(&quote_collateral.tcb_info_signature)?;
@@ -107,7 +107,7 @@ pub fn verify(
         )
         .is_err()
     {
-        return Err(anyhow!("Rsa signature is invalid"));
+        return Err(anyhow!("Rsa signature is invalid for tcb_info in quote_collateral"));
     }
 
     // Check quote fields
@@ -130,11 +130,11 @@ pub fn verify(
 
     let certification_certs = extract_certs(&certification_data.body.data)?;
     if certification_certs.len() < 2 {
-        bail!("Certificate chain is too short");
+        bail!("Certificate chain is too short in quote");
     }
     // Check certification_data
     let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&certification_certs[0])
-        .context("Failed to parse leaf certificate")?;
+        .context("Failed to parse leaf certificate in quote")?;
     let intermediate_certs = &certification_certs[1..];
     verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
 
@@ -148,7 +148,7 @@ pub fn verify(
         )
         .is_err()
     {
-        return Err(anyhow!("Rsa signature is invalid"));
+        return Err(anyhow!("Rsa signature is invalid for qe_report in quote"));
     }
 
     // Extract QE report from quote
