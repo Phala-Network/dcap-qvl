@@ -101,6 +101,15 @@ pub async fn get_collateral(
     })
 }
 
+fn pcs_url(quote: &[u8]) -> Result<&'static str> {
+    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
+    if header.is_sgx() {
+        Ok("https://api.trustedservices.intel.com/sgx/certification/v4")
+    } else {
+        Ok("https://api.trustedservices.intel.com/tdx/certification/v4")
+    }
+}
+
 /// Get collateral given DCAP quote from Intel PCS.
 ///
 /// # Arguments
@@ -116,9 +125,8 @@ pub async fn get_collateral_from_pcs(
     quote: &[u8],
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
-    const PCS_URL: &str = "https://api.trustedservices.intel.com/tdx/certification/v4";
     get_collateral(
-        PCS_URL,
+        pcs_url(quote)?,
         quote,
         #[cfg(not(feature = "js"))]
         timeout,
@@ -131,16 +139,11 @@ pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<VerifiedReport> {
-    let url = pccs_url.unwrap_or_default();
-    let pccs_url = if url.is_empty() {
-        let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
-        if header.is_sgx() {
-            "https://api.trustedservices.intel.com/sgx/certification/v4"
-        } else {
-            "https://api.trustedservices.intel.com/tdx/certification/v4"
-        }
+    let pccs_url = pccs_url.unwrap_or_default();
+    let pccs_url = if pccs_url.is_empty() {
+        pcs_url(quote)?
     } else {
-        url
+        pccs_url
     };
     let timeout = Duration::from_secs(120);
     let collateral = get_collateral(pccs_url, quote, timeout).await?;
