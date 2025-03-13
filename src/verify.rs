@@ -107,7 +107,9 @@ pub fn verify(
         )
         .is_err()
     {
-        return Err(anyhow!("Rsa signature is invalid for tcb_info in quote_collateral"));
+        return Err(anyhow!(
+            "Rsa signature is invalid for tcb_info in quote_collateral"
+        ));
     }
 
     // Check quote fields
@@ -192,26 +194,50 @@ pub fn verify(
         bail!("Fmspc mismatch");
     }
 
+    if quote.header.tee_type == TEE_TYPE_TDX {
+        if tcb_info.version < 3 || tcb_info.id != "TDX" {
+            bail!("TDX quote with non-TDX TCB info in the collateral");
+        }
+    }
+
     // TCB status and advisory ids
     let mut tcb_status = "Unknown".to_owned();
     let mut advisory_ids = Vec::<String>::new();
     for tcb_level in &tcb_info.tcb_levels {
-        if pce_svn >= tcb_level.tcb.pce_svn {
-            if cpu_svn
+        if pce_svn < tcb_level.tcb.pce_svn {
+            continue;
+        }
+        let sgx_components = tcb_level
+            .tcb
+            .sgx_components
+            .iter()
+            .map(|c| c.svn)
+            .collect::<Vec<_>>();
+        if cpu_svn[..] < sgx_components[..] {
+            continue;
+        }
+        if quote.header.tee_type == TEE_TYPE_TDX {
+            let td_report = quote
+                .report
+                .as_td10()
+                .context("Failed to get TD10 report")?;
+            let tdx_components = tcb_level
+                .tcb
+                .tdx_components
                 .iter()
-                .zip(&tcb_level.tcb.components)
-                .any(|(a, b)| a < &b.svn)
-            {
+                .map(|c| c.svn)
+                .collect::<Vec<_>>();
+            if td_report.tee_tcb_svn[..] < tdx_components[..] {
                 continue;
             }
-
-            tcb_status = tcb_level.tcb_status.clone();
-            tcb_level
-                .advisory_ids
-                .iter()
-                .for_each(|id| advisory_ids.push(id.clone()));
-            break;
         }
+
+        tcb_status = tcb_level.tcb_status.clone();
+        tcb_level
+            .advisory_ids
+            .iter()
+            .for_each(|id| advisory_ids.push(id.clone()));
+        break;
     }
     Ok(VerifiedReport {
         status: tcb_status,

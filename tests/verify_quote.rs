@@ -25,7 +25,7 @@ fn could_parse_sgx_quote() {
 fn could_parse_tdx_quote() {
     let raw_quote = include_bytes!("../sample/tdx_quote");
     let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
-    let now = 1725258675u64;
+    let now = 1741852249u64;
 
     let quote = Quote::decode(&mut &raw_quote[..]).unwrap();
     insta::assert_debug_snapshot!(quote);

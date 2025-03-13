@@ -30,12 +30,14 @@ pub struct TcbLevel {
 #[serde(rename_all = "camelCase")]
 pub struct Tcb {
     #[serde(rename = "sgxtcbcomponents")]
-    pub components: Vec<TcbComponents>,
+    pub sgx_components: Vec<TcbComponents>,
+    #[serde(rename = "tdxtcbcomponents", default)]
+    pub tdx_components: Vec<TcbComponents>,
     #[serde(rename = "pcesvn")]
     pub pce_svn: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct TcbComponents {
     pub svn: u8,
