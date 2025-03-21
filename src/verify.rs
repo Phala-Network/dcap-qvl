@@ -7,10 +7,13 @@ use {
 };
 
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
-use crate::QuoteCollateralV3;
 use crate::{
     quote::Report,
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
+};
+use crate::{
+    quote::{TDReport10, TDReport15},
+    QuoteCollateralV3,
 };
 use serde::{Deserialize, Serialize};
 
@@ -239,9 +242,38 @@ pub fn verify(
             .for_each(|id| advisory_ids.push(id.clone()));
         break;
     }
+    validate_tcb(&quote.report)?;
     Ok(VerifiedReport {
         status: tcb_status,
         advisory_ids,
         report: quote.report,
     })
+}
+
+fn validate_tcb(report: &Report) -> Result<()> {
+    fn validate_td10(report: &TDReport10) -> Result<()> {
+        let is_debug = report.td_attributes[0] & 0x01 != 0;
+        if is_debug {
+            bail!("Debug mode is not allowed");
+        }
+        Ok(())
+    }
+    fn validate_td15(report: &TDReport15) -> Result<()> {
+        if report.mr_service_td != [0u8; 48] {
+            bail!("Invalid mr service td");
+        }
+        validate_td10(&report.base)
+    }
+    fn validate_sgx(report: &EnclaveReport) -> Result<()> {
+        let is_debug = report.attributes[0] & 0x02 != 0;
+        if is_debug {
+            bail!("Debug mode is not allowed");
+        }
+        Ok(())
+    }
+    match &report {
+        Report::TD15(report) => validate_td15(report),
+        Report::TD10(report) => validate_td10(report),
+        Report::SgxEnclave(report) => validate_sgx(report),
+    }
 }
