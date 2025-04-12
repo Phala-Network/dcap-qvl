@@ -216,6 +216,9 @@ pub fn verify(
             .iter()
             .map(|c| c.svn)
             .collect::<Vec<_>>();
+        if sgx_components.is_empty() {
+            bail!("No SGX components in the TCB info");
+        }
         if cpu_svn[..] < sgx_components[..] {
             continue;
         }
@@ -230,6 +233,9 @@ pub fn verify(
                 .iter()
                 .map(|c| c.svn)
                 .collect::<Vec<_>>();
+            if tdx_components.is_empty() {
+                bail!("No TDX components in the TCB info");
+            }
             if td_report.tee_tcb_svn[..] < tdx_components[..] {
                 continue;
             }
