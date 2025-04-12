@@ -8,6 +8,7 @@ use crate::QuoteCollateralV3;
 
 #[cfg(not(feature = "js"))]
 use core::time::Duration;
+use std::borrow::Cow;
 use std::time::SystemTime;
 
 fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
@@ -101,15 +102,6 @@ pub async fn get_collateral(
     })
 }
 
-fn pcs_url(quote: &[u8]) -> Result<&'static str> {
-    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
-    if header.is_sgx() {
-        Ok("https://api.trustedservices.intel.com/sgx/certification/v4")
-    } else {
-        Ok("https://api.trustedservices.intel.com/tdx/certification/v4")
-    }
-}
-
 /// Get collateral given DCAP quote from Intel PCS.
 ///
 /// # Arguments
@@ -125,8 +117,9 @@ pub async fn get_collateral_from_pcs(
     quote: &[u8],
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
+    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
     get_collateral(
-        pcs_url(quote)?,
+        pcs_url(header.is_sgx()),
         quote,
         #[cfg(not(feature = "js"))]
         timeout,
@@ -139,17 +132,129 @@ pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<VerifiedReport> {
+    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
     let pccs_url = pccs_url.unwrap_or_default();
     let pccs_url = if pccs_url.is_empty() {
-        pcs_url(quote)?
+        Cow::Borrowed(pcs_url(header.is_sgx()))
     } else {
-        pccs_url
+        normalize_pccs_url(pccs_url, header.is_sgx())
     };
     let timeout = Duration::from_secs(120);
-    let collateral = get_collateral(pccs_url, quote, timeout).await?;
+    let collateral = get_collateral(&pccs_url, quote, timeout).await?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
         .as_secs() as u64;
     crate::verify::verify(quote, &collateral, now)
+}
+
+fn pcs_url(is_sgx: bool) -> &'static str {
+    if is_sgx {
+        "https://api.trustedservices.intel.com/sgx/certification/v4"
+    } else {
+        "https://api.trustedservices.intel.com/tdx/certification/v4"
+    }
+}
+
+fn normalize_pccs_url(url: &str, is_sgx: bool) -> Cow<'_, str> {
+    let url = url.trim_end_matches('/');
+    let path = if is_sgx {
+        "/sgx/certification/v4"
+    } else {
+        "/tdx/certification/v4"
+    };
+    if url.ends_with(path) {
+        return Cow::Borrowed(url);
+    }
+    let base_url = url
+        .trim_end_matches("/sgx/certification/v4")
+        .trim_end_matches("/tdx/certification/v4");
+    Cow::Owned(format!("{}{}", base_url, path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_pccs_url_sgx() {
+        // Test cases for SGX
+        let test_cases = vec![
+            (
+                "https://any.domain.com",
+                "https://any.domain.com/sgx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080",
+                "https://any.domain.com:8080/sgx/certification/v4",
+            ),
+            (
+                "https://any.domain.com/",
+                "https://any.domain.com/sgx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/",
+                "https://any.domain.com:8080/sgx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/sgx/certification/v4",
+                "https://any.domain.com:8080/sgx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/sgx/certification/v4/",
+                "https://any.domain.com:8080/sgx/certification/v4",
+            ),
+        ];
+
+        for (input, expected) in test_cases {
+            assert_eq!(normalize_pccs_url(input, true), expected);
+        }
+    }
+
+    #[test]
+    fn test_normalize_pccs_url_tdx() {
+        // Test cases for TDX
+        let test_cases = vec![
+            (
+                "https://any.domain.com",
+                "https://any.domain.com/tdx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080",
+                "https://any.domain.com:8080/tdx/certification/v4",
+            ),
+            (
+                "https://any.domain.com/",
+                "https://any.domain.com/tdx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/",
+                "https://any.domain.com:8080/tdx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/tdx/certification/v4",
+                "https://any.domain.com:8080/tdx/certification/v4",
+            ),
+            (
+                "https://any.domain.com:8080/tdx/certification/v4/",
+                "https://any.domain.com:8080/tdx/certification/v4",
+            ),
+        ];
+
+        for (input, expected) in test_cases {
+            assert_eq!(normalize_pccs_url(input, false), expected);
+        }
+    }
+
+    #[test]
+    fn test_pcs_url() {
+        assert_eq!(
+            pcs_url(true),
+            "https://api.trustedservices.intel.com/sgx/certification/v4"
+        );
+        assert_eq!(
+            pcs_url(false),
+            "https://api.trustedservices.intel.com/tdx/certification/v4"
+        );
+    }
 }
