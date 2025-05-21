@@ -176,7 +176,7 @@ pub fn verify(
         ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
     peer_public_key
         .verify(
-            &raw_quote
+            raw_quote
                 .get(..signed_quote_len)
                 .ok_or(anyhow!("Failed to get signed quote"))?,
             &auth_data.ecdsa_signature,
@@ -197,10 +197,8 @@ pub fn verify(
         bail!("Fmspc mismatch");
     }
 
-    if quote.header.tee_type == TEE_TYPE_TDX {
-        if tcb_info.version < 3 || tcb_info.id != "TDX" {
-            bail!("TDX quote with non-TDX TCB info in the collateral");
-        }
+    if quote.header.tee_type == TEE_TYPE_TDX && (tcb_info.version < 3 || tcb_info.id != "TDX") {
+        bail!("TDX quote with non-TDX TCB info in the collateral");
     }
 
     // TCB status and advisory ids

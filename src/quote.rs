@@ -334,7 +334,7 @@ impl Decode for Quote {
 impl Quote {
     /// Parse a TEE quote from a byte slice.
     pub fn parse(quote: &[u8]) -> Result<Self> {
-        let mut input = &quote[..];
+        let mut input = quote;
         let quote = Quote::decode(&mut input)?;
         Ok(quote)
     }
@@ -357,7 +357,7 @@ impl Quote {
             .raw_cert_chain()
             .context("Failed to get raw cert chain")?;
         let certs = utils::extract_certs(raw_cert_chain).context("Failed to extract certs")?;
-        let cert = certs.get(0).ok_or(anyhow!("Invalid certificate"))?;
+        let cert = certs.first().ok_or(anyhow!("Invalid certificate"))?;
         let extension_section =
             utils::get_intel_extension(cert).context("Failed to get Intel extension")?;
         utils::get_fmspc(&extension_section)

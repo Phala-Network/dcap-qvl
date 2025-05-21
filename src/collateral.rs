@@ -149,7 +149,7 @@ pub async fn get_collateral_and_verify(
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
-        .as_secs() as u64;
+        .as_secs();
     crate::verify::verify(quote, &collateral, now)
 }
 

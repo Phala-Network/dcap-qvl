@@ -76,7 +76,8 @@ pub fn get_cpu_svn(extension_section: &[u8]) -> Result<CpuSvn> {
         bail!("CpuSvn length mismatch");
     }
 
-    data.try_into().map_err(|_| anyhow!("Failed to decode CpuSvn"))
+    data.try_into()
+        .map_err(|_| anyhow!("Failed to decode CpuSvn"))
 }
 
 pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
@@ -89,7 +90,8 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     match data.len() {
         1 => Ok(u16::from(data[0])),
         2 => Ok(u16::from_be_bytes(
-            data.try_into().map_err(|_| anyhow!("Failed to decode PceSvn"))?,
+            data.try_into()
+                .map_err(|_| anyhow!("Failed to decode PceSvn"))?,
         )),
         _ => bail!("PceSvn length mismatch"),
     }
@@ -135,10 +137,7 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     writer
         .encode(&sequence)
         .context("Failed to encode sequence")?;
-    Ok(writer
-        .finish()
-        .context("Failed to finish writer")?
-        .to_vec())
+    Ok(writer.finish().context("Failed to finish writer")?.to_vec())
 }
 
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
