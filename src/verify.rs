@@ -42,7 +42,7 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to decode quote_collateral_bytes"))?;
 
     let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
-        serde_wasm_bindgen::to_value(&e)
+        serde_wasm_bindgen::to_value(&e.to_string())
             .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
     })?;
 

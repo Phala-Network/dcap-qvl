@@ -139,8 +139,13 @@ pub async fn get_collateral_and_verify(
     } else {
         normalize_pccs_url(pccs_url, header.is_sgx())
     };
-    let timeout = Duration::from_secs(120);
-    let collateral = get_collateral(&pccs_url, quote, timeout).await?;
+    let collateral = get_collateral(
+        &pccs_url,
+        quote,
+        #[cfg(not(feature = "js"))]
+        Duration::from_secs(120),
+    )
+    .await?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?

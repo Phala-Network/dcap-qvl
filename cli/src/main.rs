@@ -31,6 +31,9 @@ struct DecodeQuoteArgs {
     hex: bool,
     /// The quote file
     quote_file: PathBuf,
+    /// Print fmspc
+    #[arg(long)]
+    fmspc: bool,
 }
 
 #[derive(Args)]
@@ -56,8 +59,12 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
     let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
     let quote = hex_decode(&quote, args.hex)?;
     let decoded_quote = Quote::parse(&quote).context("Failed to parse quote")?;
-    let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;
-    println!("{}", json);
+    if args.fmspc {
+        println!("fmspc={}", hex::encode(decoded_quote.fmspc().unwrap()).to_uppercase());
+    } else {
+        let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;
+        println!("{}", json);
+    }
     Ok(())
 }
 
