@@ -20,3 +20,29 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  wasm:
+    name: Check WebAssembly target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check wasm32 build
+        run: cargo check --target wasm32-unknown-unknown --features js
+
+  format:
+    name: Format code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Format code
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Check code with clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check code with clippy
+        run: cargo clippy --all
