@@ -1,6 +1,9 @@
 const fs = require("fs");
 const path = require("path");
-const { js_verify } = require("../../pkg/node/dcap-qvl-node");
+const {
+    js_verify,
+    js_get_collateral,
+} = require("../../pkg/node/dcap-qvl-node");
 
 // Function to read a file as a Uint8Array
 function readFileAsUint8Array(filePath) {
@@ -8,31 +11,27 @@ function readFileAsUint8Array(filePath) {
     return new Uint8Array(data);
 }
 
-function readFileAsString(filePath) {
-    return fs.readFileSync(filePath, "utf8");
-}
-
 // Paths to your sample files
 const rawQuotePath = path.join(__dirname, "../../sample", "tdx_quote");
-const quoteCollateralPath = path.join(
-    __dirname,
-    "../../sample",
-    "tdx_quote_collateral.json"
-);
 
 // Read the files
 const rawQuote = readFileAsUint8Array(rawQuotePath);
-const quoteCollateral = readFileAsString(quoteCollateralPath);
 
 // Current timestamp
-// TCBInfoExpired when using current timestamp, pick the time from verify_quote.rs
-// const now = BigInt(Math.floor(Date.now() / 1000));
-const now = BigInt(1741852249);
+const now = BigInt(Math.floor(Date.now() / 1000));
 
-try {
-    // Call the js_verify function
-    const result = js_verify(rawQuote, quoteCollateral, now);
-    console.log("Verification Result:", result);
-} catch (error) {
-    console.error("Verification failed:", error);
-}
+(async () => {
+    try {
+        // Call the js_verify function
+        let pccs_url = "https://pccs.phala.network/tdx/certification/v4";
+        const quoteCollateral = await js_get_collateral(pccs_url, rawQuote);
+        const result = js_verify(
+            rawQuote,
+            JSON.stringify(quoteCollateral),
+            now
+        );
+        console.log("Verification Result:", result);
+    } catch (error) {
+        console.error("Verification failed:", error);
+    }
+})();

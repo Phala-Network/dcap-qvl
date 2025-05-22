@@ -1,4 +1,4 @@
-import init, { js_verify } from "/pkg/web/dcap-qvl-web.js";
+import init, { js_verify, js_get_collateral } from "/pkg/web/dcap-qvl-web.js";
 
 // Function to fetch a file as a Uint8Array
 async function fetchFileAsUint8Array(url) {
@@ -21,14 +21,22 @@ async function loadFilesAndVerify() {
         // Initialize the WASM module
         await init("/pkg/web/dcap-qvl-web_bg.wasm");
 
+        // Get the raw quote from local file
         const rawQuote = await fetchFileAsUint8Array(rawQuoteUrl);
-        const quoteCollateral = await fetchFileAsString(quoteCollateralUrl);
+
+        // Get the quote collateral
+        let pccs_url = "https://pccs.phala.network/tdx/certification/v4";
+        const quoteCollateral = await js_get_collateral(pccs_url, rawQuote);
 
         // Current timestamp
-        const now = BigInt(1741852249);
+        const now = BigInt(Math.floor(Date.now() / 1000));
 
         // Call the js_verify function
-        const result = js_verify(rawQuote, quoteCollateral, now);
+        const result = js_verify(
+            rawQuote,
+            JSON.stringify(quoteCollateral),
+            now
+        );
         console.log("Verification Result:", result);
     } catch (error) {
         console.error("Verification failed:", error);
