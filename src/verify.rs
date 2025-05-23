@@ -36,7 +36,11 @@ pub fn js_verify(
 ) -> Result<JsValue, JsValue> {
     let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+    let quote_collateral_str = quote_collateral
+        .as_string()
+        .ok_or_else(|| JsValue::from_str("quote_collateral is not a valid string"))?;
+    let quote_collateral = serde_json::from_str::<QuoteCollateralV3>(&quote_collateral_str)
+        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral"))?;
 
     let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
         serde_wasm_bindgen::to_value(&e.to_string())
