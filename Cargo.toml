@@ -1,10 +1,11 @@
 [package]
 name = "dcap-qvl"
-version = "0.2.4"
+version = "0.2.7"
 edition = "2021"
 license = "MIT"
 description = "This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust."
 authors = ["Kevin Wang <wy721@qq.com>"]
+repository = "https://github.com/Phala-Network/dcap-qvl"
 
 [dependencies]
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
@@ -48,6 +49,7 @@ futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
 serde-wasm-bindgen = { version = "0.6.5", optional = true}
 wasm-bindgen = { version = "0.2.95", optional = true }
+wasm-bindgen-futures = { version = "0.4.50" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 [dependencies.webpki]

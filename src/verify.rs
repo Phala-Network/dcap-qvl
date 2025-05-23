@@ -36,10 +36,7 @@ pub fn js_verify(
 ) -> Result<JsValue, JsValue> {
     let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral_bytes: Vec<u8> = serde_wasm_bindgen::from_value(quote_collateral)
-        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral"))?;
-    let quote_collateral = QuoteCollateralV3::decode(&mut quote_collateral_bytes.as_slice())
-        .map_err(|_| JsValue::from_str("Failed to decode quote_collateral_bytes"))?;
+    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
 
     let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
         serde_wasm_bindgen::to_value(&e.to_string())
@@ -48,6 +45,21 @@ pub fn js_verify(
 
     serde_wasm_bindgen::to_value(&verified_report)
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen]
+pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<JsValue, JsValue> {
+    let pccs_url: String = serde_wasm_bindgen::from_value(pccs_url)
+        .map_err(|_| JsValue::from_str("Failed to decode pccs_url"))?;
+    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+
+    let collateral: QuoteCollateralV3 = crate::collateral::get_collateral(&pccs_url, &raw_quote)
+        .await
+        .map_err(|_| JsValue::from_str("Failed to get collateral"))?;
+    serde_wasm_bindgen::to_value(&collateral)
+        .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
 
 /// Verify a quote
