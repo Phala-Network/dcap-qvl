@@ -1,4 +1,5 @@
 import init, { js_verify, js_get_collateral } from "@phala/dcap-qvl-web";
+import wasm from "@phala/dcap-qvl-web/dcap-qvl-web_bg.wasm";
 
 const PCCS_URL = "https://pccs.phala.network/tdx/certification/v4";
 
@@ -11,7 +12,7 @@ async function fetchQuoteAsUint8Array(url: string): Promise<Uint8Array> {
   return new Uint8Array(arrayBuffer);
 }
 
-init().then(() => {
+init(wasm).then(() => {
   console.log("Phala DCAP QVL initialized!");
   // You can now use js_verify, js_get_collateral, etc.
   fetchQuoteAsUint8Array("/sample/tdx_quote").then(async (rawQuote) => {
