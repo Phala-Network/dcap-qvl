@@ -1,0 +1,16 @@
+{
+  "name": "dcap-qvl-web-esbuild-demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outdir=dist --loader:.wasm=file --loader:.svg=file --define:process.env.NODE_ENV=\"production\"",
+    "dev": "esbuild src/main.ts --bundle --outdir=src --servedir=src --loader:.wasm=file --loader:.svg=file --define:process.env.NODE_ENV=\"development\" --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0"
+  },
+  "dependencies": {
+    "@phala/dcap-qvl-web": "^0.2.7"
+  }
+}
