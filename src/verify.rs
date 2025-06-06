@@ -268,7 +268,7 @@ pub fn verify(
 
 fn validate_tcb(report: &Report) -> Result<()> {
     fn validate_td10(report: &TDReport10) -> Result<()> {
-        let is_debug = report.td_attributes[0] & 0x01 != 0;
+        let is_debug = report.td_attributes[0] != 0;
         if is_debug {
             bail!("Debug mode is not allowed");
         }
