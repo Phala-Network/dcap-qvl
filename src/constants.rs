@@ -81,8 +81,21 @@ pub const PCK_CERT_CHAIN: u16 = 5;
 pub const QE_REPORT_CERT: u16 = 6;
 pub const PLATFORM_MANIFEST: u16 = 7;
 
-/// The needed code for a trust anchor can be extracted using `webpki` with something like this:
-/// println!("{:?}", webpki::TrustAnchor::try_from_cert_der(&root_cert));
+#[cfg(test)]
+#[tokio::test]
+async fn dcap_roots_should_be_fresh() {
+    let response = reqwest::get("https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer").await.unwrap();
+    let ca_der = response.bytes().await.unwrap();
+    let der = webpki::types::CertificateDer::from_slice(&ca_der);
+    let anchor = webpki::anchor_from_trusted_cert(&der).unwrap();
+    println!("{:?}", anchor);
+    assert_eq!(anchor.subject, DCAP_SERVER_ROOTS[0].subject);
+    assert_eq!(
+        anchor.subject_public_key_info,
+        DCAP_SERVER_ROOTS[0].subject_public_key_info
+    );
+}
+
 #[allow(clippy::zero_prefixed_literal)]
 pub static DCAP_SERVER_ROOTS: &[webpki::types::TrustAnchor<'static>; 1] =
     &[webpki::types::TrustAnchor {

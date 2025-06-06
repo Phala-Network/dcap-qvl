@@ -60,6 +60,7 @@ features = ["alloc", "ring"]
 
 [dev-dependencies]
 insta = "1.41.1"
+reqwest = "0.12.9"
 serde_json = "1.0.133"
 tokio = { version = "1.41.1", features = ["full"] }
 
