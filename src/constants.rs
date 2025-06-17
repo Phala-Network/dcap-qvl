@@ -96,6 +96,8 @@ async fn dcap_roots_should_be_fresh() {
     );
 }
 
+// The root cert is downloaded from `https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer`.
+// See https://api.portal.trustedservices.intel.com/content/documentation.html#pcs for more details
 #[allow(clippy::zero_prefixed_literal)]
 pub static DCAP_SERVER_ROOTS: &[webpki::types::TrustAnchor<'static>; 1] =
     &[webpki::types::TrustAnchor {
