@@ -2,14 +2,65 @@ use alloc::string::{String, ToString};
 use anyhow::{anyhow, Context, Result};
 use scale::Decode;
 
-use crate::quote::{Header, Quote};
+use crate::quote::Quote;
 use crate::verify::VerifiedReport;
 use crate::QuoteCollateralV3;
 
 #[cfg(not(feature = "js"))]
 use core::time::Duration;
-use std::borrow::Cow;
 use std::time::SystemTime;
+
+const PCS_URL: &str = "https://api.trustedservices.intel.com";
+
+struct PcsEndpoints {
+    base_url: String,
+    tee: &'static str,
+    fmspc: String,
+    ca: &'static str,
+}
+
+impl PcsEndpoints {
+    fn new(base_url: &str, for_sgx: bool, fmspc: String, ca: &'static str) -> Self {
+        let tee = if for_sgx { "sgx" } else { "tdx" };
+        let base_url = base_url
+            .trim_end_matches('/')
+            .trim_end_matches("/sgx/certification/v4")
+            .trim_end_matches("/tdx/certification/v4")
+            .to_owned();
+        Self {
+            base_url,
+            tee,
+            fmspc,
+            ca,
+        }
+    }
+
+    fn from_quote(base_url: &str, quote: &Quote) -> Result<Self> {
+        let ca = quote.ca().context("Failed to get CA")?;
+        let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
+        Ok(Self::new(base_url, quote.header.is_sgx(), fmspc, ca))
+    }
+
+    fn url_pckcrl(&self) -> String {
+        self.mk_url("sgx", &format!("pckcrl?ca={}", self.ca))
+    }
+
+    fn url_rootcacrl(&self) -> String {
+        self.mk_url("sgx", "rootcacrl")
+    }
+
+    fn url_tcb(&self) -> String {
+        self.mk_url(self.tee, &format!("tcb?fmspc={}", self.fmspc))
+    }
+
+    fn url_qe_identity(&self) -> String {
+        self.mk_url(self.tee, "qe/identity?update=standard")
+    }
+
+    fn mk_url(&self, tee: &str, path: &str) -> String {
+        format!("{}/{}/certification/v4/{}", self.base_url, tee, path)
+    }
+}
 
 fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
     let value = resposne
@@ -39,25 +90,22 @@ pub async fn get_collateral(
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
     let quote = Quote::decode(&mut quote)?;
-    let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.danger_accept_invalid_certs(true).timeout(timeout);
     let client = builder.build()?;
-    let base_url = pccs_url.trim_end_matches('/');
+
+    let endpoints = PcsEndpoints::from_quote(pccs_url, &quote)?;
 
     let pck_crl_issuer_chain;
     let pck_crl;
     {
-        let response = client
-            .get(format!("{base_url}/pckcrl?ca=processor"))
-            .send()
-            .await?;
+        let response = client.get(endpoints.url_pckcrl()).send().await?;
         pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
         pck_crl = response.text().await?;
     };
     let root_ca_crl = client
-        .get(format!("{base_url}/rootcacrl"))
+        .get(endpoints.url_rootcacrl())
         .send()
         .await?
         .text()
@@ -65,10 +113,7 @@ pub async fn get_collateral(
     let tcb_info_issuer_chain;
     let raw_tcb_info;
     {
-        let resposne = client
-            .get(format!("{base_url}/tcb?fmspc={fmspc}"))
-            .send()
-            .await?;
+        let resposne = client.get(endpoints.url_tcb()).send().await?;
         tcb_info_issuer_chain = get_header(&resposne, "SGX-TCB-Info-Issuer-Chain")
             .or(get_header(&resposne, "TCB-Info-Issuer-Chain"))?;
         raw_tcb_info = resposne.text().await?;
@@ -76,7 +121,7 @@ pub async fn get_collateral(
     let qe_identity_issuer_chain;
     let raw_qe_identity;
     {
-        let response = client.get(format!("{base_url}/qe/identity")).send().await?;
+        let response = client.get(endpoints.url_qe_identity()).send().await?;
         qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
         raw_qe_identity = response.text().await?;
     };
@@ -136,9 +181,8 @@ pub async fn get_collateral_from_pcs(
     quote: &[u8],
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
-    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
     get_collateral(
-        pcs_url(header.is_sgx()),
+        PCS_URL,
         quote,
         #[cfg(not(feature = "js"))]
         timeout,
@@ -151,15 +195,9 @@ pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<VerifiedReport> {
-    let header = Header::decode(&mut &quote[..]).context("Failed to decode quote header")?;
-    let pccs_url = pccs_url.unwrap_or_default();
-    let pccs_url = if pccs_url.is_empty() {
-        Cow::Borrowed(pcs_url(header.is_sgx()))
-    } else {
-        normalize_pccs_url(pccs_url, header.is_sgx())
-    };
+    let pccs_url = pccs_url.unwrap_or(PCS_URL);
     let collateral = get_collateral(
-        &pccs_url,
+        pccs_url,
         quote,
         #[cfg(not(feature = "js"))]
         Duration::from_secs(120),
@@ -172,113 +210,191 @@ pub async fn get_collateral_and_verify(
     crate::verify::verify(quote, &collateral, now)
 }
 
-fn pcs_url(is_sgx: bool) -> &'static str {
-    if is_sgx {
-        "https://api.trustedservices.intel.com/sgx/certification/v4"
-    } else {
-        "https://api.trustedservices.intel.com/tdx/certification/v4"
-    }
-}
-
-fn normalize_pccs_url(url: &str, is_sgx: bool) -> Cow<'_, str> {
-    let url = url.trim_end_matches('/');
-    let path = if is_sgx {
-        "/sgx/certification/v4"
-    } else {
-        "/tdx/certification/v4"
-    };
-    if url.ends_with(path) {
-        return Cow::Borrowed(url);
-    }
-    let base_url = url
-        .trim_end_matches("/sgx/certification/v4")
-        .trim_end_matches("/tdx/certification/v4");
-    Cow::Owned(format!("{}{}", base_url, path))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{PLATFORM_ISSUER_ID, PROCESSOR_ISSUER_ID};
 
     #[test]
-    fn test_normalize_pccs_url_sgx() {
-        // Test cases for SGX
-        let test_cases = vec![
-            (
-                "https://any.domain.com",
-                "https://any.domain.com/sgx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080",
-                "https://any.domain.com:8080/sgx/certification/v4",
-            ),
-            (
-                "https://any.domain.com/",
-                "https://any.domain.com/sgx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/",
-                "https://any.domain.com:8080/sgx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/sgx/certification/v4",
-                "https://any.domain.com:8080/sgx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/sgx/certification/v4/",
-                "https://any.domain.com:8080/sgx/certification/v4",
-            ),
-        ];
+    fn test_pcs_endpoints_new() {
+        // Test SGX endpoint initialization
+        let sgx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(sgx_endpoints.base_url, "https://pccs.example.com");
+        assert_eq!(sgx_endpoints.tee, "sgx");
+        assert_eq!(sgx_endpoints.fmspc, "B0C06F000000");
+        assert_eq!(sgx_endpoints.ca, PROCESSOR_ISSUER_ID);
 
-        for (input, expected) in test_cases {
-            assert_eq!(normalize_pccs_url(input, true), expected);
-        }
-    }
+        // Test TDX endpoint initialization
+        let tdx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(tdx_endpoints.base_url, "https://pccs.example.com");
+        assert_eq!(tdx_endpoints.tee, "tdx");
+        assert_eq!(tdx_endpoints.fmspc, "B0C06F000000");
+        assert_eq!(tdx_endpoints.ca, PROCESSOR_ISSUER_ID);
 
-    #[test]
-    fn test_normalize_pccs_url_tdx() {
-        // Test cases for TDX
-        let test_cases = vec![
-            (
-                "https://any.domain.com",
-                "https://any.domain.com/tdx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080",
-                "https://any.domain.com:8080/tdx/certification/v4",
-            ),
-            (
-                "https://any.domain.com/",
-                "https://any.domain.com/tdx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/",
-                "https://any.domain.com:8080/tdx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/tdx/certification/v4",
-                "https://any.domain.com:8080/tdx/certification/v4",
-            ),
-            (
-                "https://any.domain.com:8080/tdx/certification/v4/",
-                "https://any.domain.com:8080/tdx/certification/v4",
-            ),
-        ];
-
-        for (input, expected) in test_cases {
-            assert_eq!(normalize_pccs_url(input, false), expected);
-        }
-    }
-
-    #[test]
-    fn test_pcs_url() {
-        assert_eq!(
-            pcs_url(true),
-            "https://api.trustedservices.intel.com/sgx/certification/v4"
+        // Test URL normalization during initialization
+        let endpoints_with_trailing_slash = PcsEndpoints::new(
+            "https://pccs.example.com/",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
         );
         assert_eq!(
-            pcs_url(false),
-            "https://api.trustedservices.intel.com/tdx/certification/v4"
+            endpoints_with_trailing_slash.base_url,
+            "https://pccs.example.com"
+        );
+
+        // Test URL normalization with SGX certification path
+        let endpoints_with_sgx_path = PcsEndpoints::new(
+            "https://pccs.example.com/sgx/certification/v4",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(endpoints_with_sgx_path.base_url, "https://pccs.example.com");
+
+        // Test URL normalization with TDX certification path
+        let endpoints_with_tdx_path = PcsEndpoints::new(
+            "https://pccs.example.com/tdx/certification/v4",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(endpoints_with_tdx_path.base_url, "https://pccs.example.com");
+    }
+
+    #[test]
+    fn test_pcs_endpoints_url_pckcrl() {
+        // Test with processor CA
+        let processor_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            processor_endpoints.url_pckcrl(),
+            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=processor"
+        );
+
+        // Test with platform CA
+        let platform_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PLATFORM_ISSUER_ID,
+        );
+        assert_eq!(
+            platform_endpoints.url_pckcrl(),
+            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=platform"
+        );
+    }
+
+    #[test]
+    fn test_pcs_endpoints_url_rootcacrl() {
+        let endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            endpoints.url_rootcacrl(),
+            "https://pccs.example.com/sgx/certification/v4/rootcacrl"
+        );
+    }
+
+    #[test]
+    fn test_pcs_endpoints_url_tcb() {
+        // Test SGX TCB URL
+        let sgx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            sgx_endpoints.url_tcb(),
+            "https://pccs.example.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+        );
+
+        // Test TDX TCB URL
+        let tdx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            tdx_endpoints.url_tcb(),
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000"
+        );
+    }
+
+    #[test]
+    fn test_pcs_endpoints_url_qe_identity() {
+        // Test SGX QE identity URL
+        let sgx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            true,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            sgx_endpoints.url_qe_identity(),
+            "https://pccs.example.com/sgx/certification/v4/qe/identity?update=standard"
+        );
+
+        // Test TDX QE identity URL
+        let tdx_endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        assert_eq!(
+            tdx_endpoints.url_qe_identity(),
+            "https://pccs.example.com/tdx/certification/v4/qe/identity?update=standard"
+        );
+    }
+
+    #[test]
+    fn test_intel_pcs_url() {
+        // Test the default Intel PCS URL constant
+        assert_eq!(PCS_URL, "https://api.trustedservices.intel.com");
+
+        // Test with the known FMSPC from memory
+        let fmspc = "B0C06F000000";
+        let intel_endpoints =
+            PcsEndpoints::new(PCS_URL, true, fmspc.to_string(), PROCESSOR_ISSUER_ID);
+
+        assert_eq!(
+            intel_endpoints.url_pckcrl(),
+            "https://api.trustedservices.intel.com/sgx/certification/v4/pckcrl?ca=processor"
+        );
+
+        assert_eq!(
+            intel_endpoints.url_rootcacrl(),
+            "https://api.trustedservices.intel.com/sgx/certification/v4/rootcacrl"
+        );
+
+        assert_eq!(
+            intel_endpoints.url_tcb(),
+            "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+        );
+
+        assert_eq!(
+            intel_endpoints.url_qe_identity(),
+            "https://api.trustedservices.intel.com/sgx/certification/v4/qe/identity?update=standard"
         );
     }
 }

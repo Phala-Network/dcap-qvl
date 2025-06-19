@@ -4,8 +4,12 @@ use alloc::vec::Vec;
 use anyhow::{anyhow, bail, Context, Result};
 use scale::{Decode, Input};
 use serde::{Deserialize, Serialize};
+use x509_cert::Certificate;
 
-use crate::{constants::*, utils};
+use crate::{
+    constants::{self, *},
+    utils,
+};
 
 #[derive(Debug, Clone)]
 pub struct Data<T> {
@@ -361,6 +365,25 @@ impl Quote {
         let extension_section =
             utils::get_intel_extension(cert).context("Failed to get Intel extension")?;
         utils::get_fmspc(&extension_section)
+    }
+
+    /// Get the Certificate Authority (CA) type from the quote.
+    /// Returns "processor" or "platform" based on the issuer of the PCK certificate.
+    pub fn ca(&self) -> Result<&'static str> {
+        let raw_cert_chain = self
+            .raw_cert_chain()
+            .context("Failed to get raw cert chain")?;
+        let certs = utils::extract_certs(raw_cert_chain).context("Failed to extract certs")?;
+        let cert = certs.first().ok_or(anyhow!("Invalid certificate"))?;
+        let cert_der: Certificate =
+            der::Decode::from_der(cert).context("Failed to decode certificate")?;
+        let issuer = cert_der.tbs_certificate.issuer.to_string();
+        if issuer.contains(constants::PROCESSOR_ISSUER) {
+            return Ok(constants::PROCESSOR_ISSUER_ID);
+        } else if issuer.contains(constants::PLATFORM_ISSUER) {
+            return Ok(constants::PLATFORM_ISSUER_ID);
+        }
+        Ok(constants::PROCESSOR_ISSUER_ID)
     }
 
     /// Get the the length of signed data in the quote.
