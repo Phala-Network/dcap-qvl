@@ -43,6 +43,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QuoteCollateralV3 {
+    pub pck_crl_issuer_chain: String,
+    pub root_ca_crl: String,
+    pub pck_crl: String,
     pub tcb_info_issuer_chain: String,
     pub tcb_info: String,
     #[serde(with = "serde_bytes")]

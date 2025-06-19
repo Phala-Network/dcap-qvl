@@ -46,6 +46,22 @@ pub async fn get_collateral(
     let client = builder.build()?;
     let base_url = pccs_url.trim_end_matches('/');
 
+    let pck_crl_issuer_chain;
+    let pck_crl;
+    {
+        let response = client
+            .get(format!("{base_url}/pckcrl?ca=processor"))
+            .send()
+            .await?;
+        pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
+        pck_crl = response.text().await?;
+    };
+    let root_ca_crl = client
+        .get(format!("{base_url}/rootcacrl"))
+        .send()
+        .await?
+        .text()
+        .await?;
     let tcb_info_issuer_chain;
     let raw_tcb_info;
     {
@@ -93,6 +109,9 @@ pub async fn get_collateral(
         .context("QE Identity signature must be valid hex")?;
 
     Ok(QuoteCollateralV3 {
+        pck_crl_issuer_chain,
+        root_ca_crl,
+        pck_crl,
         tcb_info_issuer_chain,
         tcb_info,
         tcb_info_signature,
