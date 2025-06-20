@@ -52,6 +52,10 @@ wasm-bindgen = { version = "0.2.95", optional = true }
 wasm-bindgen-futures = { version = "0.4.50" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
+[dependencies.dcap-qvl-webpki]
+version = "0.103.3"
+features = ["alloc", "ring"]
+
 [dependencies.webpki]
 version = "0.102.8"
 package = "rustls-webpki"

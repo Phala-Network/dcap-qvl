@@ -1,6 +1,14 @@
 use alloc::string::{String, ToString};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use der::Decode as DerDecode;
 use scale::Decode;
+use x509_cert::{
+    ext::pkix::{
+        name::{DistributionPointName, GeneralName},
+        CrlDistributionPoints,
+    },
+    Certificate,
+};
 
 use crate::quote::Quote;
 use crate::verify::VerifiedReport;
@@ -35,6 +43,10 @@ impl PcsEndpoints {
         }
     }
 
+    fn is_pcs(&self) -> bool {
+        self.base_url.starts_with(PCS_URL)
+    }
+
     fn from_quote(base_url: &str, quote: &Quote) -> Result<Self> {
         let ca = quote.ca().context("Failed to get CA")?;
         let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
@@ -42,7 +54,7 @@ impl PcsEndpoints {
     }
 
     fn url_pckcrl(&self) -> String {
-        self.mk_url("sgx", &format!("pckcrl?ca={}", self.ca))
+        self.mk_url("sgx", &format!("pckcrl?ca={}&encoding=der", self.ca))
     }
 
     fn url_rootcacrl(&self) -> String {
@@ -70,6 +82,49 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
         .to_str()?;
     let value = urlencoding::decode(value)?;
     Ok(value.into_owned())
+}
+
+/// Extracts the CRL Distribution Point URL from a certificate.
+///
+/// This function parses the certificate and looks for the CRL Distribution Points extension (OID 2.5.29.31).
+/// It then extracts the first URL found in the extension's FullName field.
+///
+/// # Arguments
+/// * `cert_der` - The DER-encoded certificate bytes
+///
+/// # Returns
+/// * `Ok(Some(String))` - The CRL distribution point URL if found
+/// * `Ok(None)` - If no CRL distribution point was found in the certificate
+/// * `Err(_)` - If there was an error parsing the certificate or the extension
+fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
+    let cert: Certificate = DerDecode::from_der(cert_der).context("Failed to parse certificate")?;
+
+    let Some(extensions) = &cert.tbs_certificate.extensions else {
+        return Ok(None);
+    };
+    for ext in extensions.iter() {
+        if ext.extn_id.to_string() != "2.5.29.31" {
+            continue;
+        }
+        let crl_dist_points: CrlDistributionPoints = DerDecode::from_der(ext.extn_value.as_bytes())
+            .context("Failed to parse CRL Distribution Points")?;
+
+        for dist_point in crl_dist_points.0.iter() {
+            let Some(dist_point_name) = &dist_point.distribution_point else {
+                continue;
+            };
+            let DistributionPointName::FullName(general_names) = dist_point_name else {
+                continue;
+            };
+            for general_name in general_names.iter() {
+                let GeneralName::UniformResourceIdentifier(uri) = general_name else {
+                    continue;
+                };
+                return Ok(Some(uri.to_string()));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Get collateral given DCAP quote and base URL of PCCS server URL.
@@ -102,14 +157,9 @@ pub async fn get_collateral(
     {
         let response = client.get(endpoints.url_pckcrl()).send().await?;
         pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
-        pck_crl = response.text().await?;
+        pck_crl = response.bytes().await?.to_vec();
     };
-    let root_ca_crl = client
-        .get(endpoints.url_rootcacrl())
-        .send()
-        .await?
-        .text()
-        .await?;
+
     let tcb_info_issuer_chain;
     let raw_tcb_info;
     {
@@ -124,6 +174,36 @@ pub async fn get_collateral(
         let response = client.get(endpoints.url_qe_identity()).send().await?;
         qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
         raw_qe_identity = response.text().await?;
+    };
+
+    async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
+        let response = client.get(url).send().await?;
+        if !response.status().is_success() {
+            bail!("Failed to fetch {url}: {}", response.status());
+        }
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    // First try to get root CA CRL directly from the PCCS endpoint
+    let mut root_ca_crl = None;
+    if !endpoints.is_pcs() {
+        root_ca_crl = http_get(&client, &endpoints.url_rootcacrl()).await.ok();
+    }
+    let root_ca_crl = match root_ca_crl {
+        Some(crl) => crl,
+        None => {
+            let certs = crate::utils::extract_certs(qe_identity_issuer_chain.as_bytes())
+                .context("Failed to extract certificates from PCK CRL issuer chain")?;
+            if certs.is_empty() {
+                bail!("No certificates found in PCK CRL issuer chain");
+            }
+            let root_cert_der = certs.last().unwrap();
+            let crl_url = extract_crl_url(root_cert_der)?;
+            let Some(url) = crl_url else {
+                bail!("Could not find CRL distribution point in root certificate");
+            };
+            http_get(&client, &url).await?
+        }
     };
 
     let tcb_info_json: serde_json::Value =
@@ -283,7 +363,7 @@ mod tests {
         );
         assert_eq!(
             processor_endpoints.url_pckcrl(),
-            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=processor"
+            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=processor&encoding=der"
         );
 
         // Test with platform CA
@@ -295,7 +375,7 @@ mod tests {
         );
         assert_eq!(
             platform_endpoints.url_pckcrl(),
-            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=platform"
+            "https://pccs.example.com/sgx/certification/v4/pckcrl?ca=platform&encoding=der"
         );
     }
 
@@ -379,7 +459,7 @@ mod tests {
 
         assert_eq!(
             intel_endpoints.url_pckcrl(),
-            "https://api.trustedservices.intel.com/sgx/certification/v4/pckcrl?ca=processor"
+            "https://api.trustedservices.intel.com/sgx/certification/v4/pckcrl?ca=processor&encoding=der"
         );
 
         assert_eq!(

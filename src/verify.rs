@@ -1,5 +1,8 @@
+use core::time::Duration;
+
 use anyhow::{anyhow, bail, Context, Result};
 use scale::Decode;
+use webpki::types::UnixTime;
 
 use {
     crate::constants::*, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned, alloc::string::String,
@@ -76,25 +79,28 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 /// * `Err(Error)` - The error
 pub fn verify(
     raw_quote: &[u8],
-    quote_collateral: &QuoteCollateralV3,
-    now: u64,
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
 ) -> Result<VerifiedReport> {
     // Parse data
     let mut quote = raw_quote;
     let quote = Quote::decode(&mut quote).context("Failed to decode quote")?;
     let signed_quote_len = quote.signed_length();
 
-    let tcb_info = serde_json::from_str::<TcbInfo>(&quote_collateral.tcb_info)
+    let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
 
     let next_update = chrono::DateTime::parse_from_rfc3339(&tcb_info.next_update)
         .ok()
         .context("Failed to parse next update")?;
-    if now > next_update.timestamp() as u64 {
+    if now_secs > next_update.timestamp() as u64 {
         bail!("TCBInfo expired");
     }
 
-    let now_in_milli = now * 1000;
+    let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+    // Because the original rustls-webpki doesn't check the ROOT CA against the CRL, we use our forked webpki to check it
+    let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
+    dcap_qvl_webpki::check_single_cert_crl(TRUSTED_ROOT_CA_DER, &crls, now)?;
 
     // Verify enclave
 
@@ -105,19 +111,18 @@ pub fn verify(
     // Verify integrity
 
     // Check TCB info cert chain and signature
-    let leaf_certs = extract_certs(quote_collateral.tcb_info_issuer_chain.as_bytes())?;
-    if leaf_certs.len() < 2 {
+    let tcb_leaf_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
+    if tcb_leaf_certs.len() < 2 {
         bail!("Certificate chain is too short in quote_collateral");
     }
-    let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&leaf_certs[0])
+    let tcb_leaf_cert = webpki::EndEntityCert::try_from(&tcb_leaf_certs[0])
         .context("Failed to parse leaf certificate in quote_collateral")?;
-    let intermediate_certs = &leaf_certs[1..];
-    verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
-    let asn1_signature = encode_as_der(&quote_collateral.tcb_info_signature)?;
-    if leaf_cert
+    verify_certificate_chain(&tcb_leaf_cert, &tcb_leaf_certs[1..], now, &crls)?;
+    let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
+    if tcb_leaf_cert
         .verify_signature(
             webpki::ring::ECDSA_P256_SHA256,
-            quote_collateral.tcb_info.as_bytes(),
+            collateral.tcb_info.as_bytes(),
             &asn1_signature,
         )
         .is_err()
@@ -145,19 +150,22 @@ pub fn verify(
         bail!("Unsupported DCAP PCK cert format");
     }
 
-    let certification_certs = extract_certs(&certification_data.body.data)?;
-    if certification_certs.len() < 2 {
+    // Extract PCK certificate chain from certification data in the quote
+    let qe_certification_certs = extract_certs(&certification_data.body.data)
+        .context("Failed to extract PCK certificates")?;
+
+    if qe_certification_certs.len() < 2 {
         bail!("Certificate chain is too short in quote");
     }
-    // Check certification_data
-    let leaf_cert: webpki::EndEntityCert = webpki::EndEntityCert::try_from(&certification_certs[0])
-        .context("Failed to parse leaf certificate in quote")?;
-    let intermediate_certs = &certification_certs[1..];
-    verify_certificate_chain(&leaf_cert, intermediate_certs, now_in_milli)?;
+
+    let qe_leaf_cert = webpki::EndEntityCert::try_from(&qe_certification_certs[0])
+        .context("Failed to parse PCK certificate")?;
+    // Then verify the certificate chain
+    verify_certificate_chain(&qe_leaf_cert, &qe_certification_certs[1..], now, &crls)?;
 
     // Check QE signature
     let asn1_signature = encode_as_der(&auth_data.qe_report_signature)?;
-    if leaf_cert
+    if qe_leaf_cert
         .verify_signature(
             webpki::ring::ECDSA_P256_SHA256,
             &auth_data.qe_report,
@@ -197,7 +205,7 @@ pub fn verify(
 
     // Extract information from the quote
 
-    let extension_section = utils::get_intel_extension(&certification_certs[0])?;
+    let extension_section = utils::get_intel_extension(&qe_certification_certs[0])?;
     let cpu_svn = utils::get_cpu_svn(&extension_section)?;
     let pce_svn = utils::get_pce_svn(&extension_section)?;
     let fmspc = utils::get_fmspc(&extension_section)?;

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use webpki::types::{CertificateDer, TrustAnchor};
+
 pub type MrSigner = [u8; 32];
 pub type MrEnclave = [u8; 32];
 pub type Fmspc = [u8; 6];
@@ -87,43 +89,23 @@ pub const PLATFORM_ISSUER: &str = "Platform";
 pub const PROCESSOR_ISSUER_ID: &str = "processor";
 pub const PLATFORM_ISSUER_ID: &str = "platform";
 
+// The root cert is downloaded from `https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer`.
+// See https://api.portal.trustedservices.intel.com/content/documentation.html#pcs for more details
+pub static TRUSTED_ROOT_CA_DER: &[u8] = include_bytes!("TrustedRootCA.der");
+pub static TRUSTED_ROOT_CA: CertificateDer<'static> =
+    CertificateDer::from_slice(TRUSTED_ROOT_CA_DER);
+
+pub fn sgx_pck_root() -> TrustAnchor<'static> {
+    webpki::anchor_from_trusted_cert(&TRUSTED_ROOT_CA).expect("Failed to create trust anchor")
+}
+
 #[cfg(test)]
 #[tokio::test]
 async fn dcap_roots_should_be_fresh() {
     let response = reqwest::get("https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer").await.unwrap();
     let ca_der = response.bytes().await.unwrap();
-    let der = webpki::types::CertificateDer::from_slice(&ca_der);
-    let anchor = webpki::anchor_from_trusted_cert(&der).unwrap();
-    println!("{:?}", anchor);
-    assert_eq!(anchor.subject, DCAP_SERVER_ROOTS[0].subject);
-    assert_eq!(
-        anchor.subject_public_key_info,
-        DCAP_SERVER_ROOTS[0].subject_public_key_info
-    );
+    assert_eq!(TRUSTED_ROOT_CA_DER, ca_der.as_ref());
 }
-
-// The root cert is downloaded from `https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer`.
-// See https://api.portal.trustedservices.intel.com/content/documentation.html#pcs for more details
-#[allow(clippy::zero_prefixed_literal)]
-pub static DCAP_SERVER_ROOTS: &[webpki::types::TrustAnchor<'static>; 1] =
-    &[webpki::types::TrustAnchor {
-        subject: webpki::types::Der::from_slice(&[
-            49, 26, 48, 24, 06, 03, 85, 04, 03, 12, 17, 73, 110, 116, 101, 108, 32, 83, 71, 88, 32,
-            82, 111, 111, 116, 32, 67, 65, 49, 26, 48, 24, 06, 03, 85, 04, 10, 12, 17, 73, 110,
-            116, 101, 108, 32, 67, 111, 114, 112, 111, 114, 97, 116, 105, 111, 110, 49, 20, 48, 18,
-            06, 03, 85, 04, 07, 12, 11, 83, 97, 110, 116, 97, 32, 67, 108, 97, 114, 97, 49, 11, 48,
-            09, 06, 03, 85, 04, 08, 12, 02, 67, 65, 49, 11, 48, 09, 06, 03, 85, 04, 06, 19, 02, 85,
-            83,
-        ]),
-        subject_public_key_info: webpki::types::Der::from_slice(&[
-            48, 19, 06, 07, 42, 134, 72, 206, 61, 02, 01, 06, 08, 42, 134, 72, 206, 61, 03, 01, 07,
-            03, 66, 00, 04, 11, 169, 196, 192, 192, 200, 97, 147, 163, 254, 35, 214, 176, 44, 218,
-            16, 168, 187, 212, 232, 142, 72, 180, 69, 133, 97, 163, 110, 112, 85, 37, 245, 103,
-            145, 142, 46, 220, 136, 228, 13, 134, 11, 208, 204, 78, 226, 106, 172, 201, 136, 229,
-            05, 169, 83, 85, 140, 69, 63, 107, 09, 04, 174, 115, 148,
-        ]),
-        name_constraints: None,
-    }];
 
 pub mod oids {
     use const_oid::ObjectIdentifier as OID;
