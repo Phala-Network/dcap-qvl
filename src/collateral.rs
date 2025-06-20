@@ -47,12 +47,6 @@ impl PcsEndpoints {
         self.base_url.starts_with(PCS_URL)
     }
 
-    fn from_quote(base_url: &str, quote: &Quote) -> Result<Self> {
-        let ca = quote.ca().context("Failed to get CA")?;
-        let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
-        Ok(Self::new(base_url, quote.header.is_sgx(), fmspc, ca))
-    }
-
     fn url_pckcrl(&self) -> String {
         self.mk_url("sgx", &format!("pckcrl?ca={}&encoding=der", self.ca))
     }
@@ -145,12 +139,32 @@ pub async fn get_collateral(
     #[cfg(not(feature = "js"))] timeout: Duration,
 ) -> Result<QuoteCollateralV3> {
     let quote = Quote::decode(&mut quote)?;
+    let ca = quote.ca().context("Failed to get CA")?;
+    let fmspc = hex::encode_upper(quote.fmspc().context("Failed to get FMSPC")?);
+    get_collateral_for_fmspc(
+        pccs_url,
+        fmspc,
+        ca,
+        quote.header.is_sgx(),
+        #[cfg(not(feature = "js"))]
+        timeout,
+    )
+    .await
+}
+
+pub async fn get_collateral_for_fmspc(
+    pccs_url: &str,
+    fmspc: String,
+    ca: &'static str,
+    for_sgx: bool,
+    #[cfg(not(feature = "js"))] timeout: Duration,
+) -> Result<QuoteCollateralV3> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.danger_accept_invalid_certs(true).timeout(timeout);
     let client = builder.build()?;
 
-    let endpoints = PcsEndpoints::from_quote(pccs_url, &quote)?;
+    let endpoints = PcsEndpoints::new(pccs_url, for_sgx, fmspc, ca);
 
     let pck_crl_issuer_chain;
     let pck_crl;
