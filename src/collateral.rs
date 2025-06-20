@@ -275,7 +275,12 @@ pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<VerifiedReport> {
-    let pccs_url = pccs_url.unwrap_or(PCS_URL);
+    let pccs_url = pccs_url.unwrap_or_default().trim();
+    let pccs_url = if pccs_url.is_empty() {
+        PCS_URL
+    } else {
+        pccs_url
+    };
     let collateral = get_collateral(
         pccs_url,
         quote,
