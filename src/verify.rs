@@ -8,7 +8,7 @@ use {
 
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
-    quote::Report,
+    quote::{Report, TDAttributes},
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{
@@ -258,7 +258,7 @@ pub fn verify(
             .for_each(|id| advisory_ids.push(id.clone()));
         break;
     }
-    validate_tcb(&quote.report)?;
+    validate_attrs(&quote.report)?;
     Ok(VerifiedReport {
         status: tcb_status,
         advisory_ids,
@@ -266,11 +266,27 @@ pub fn verify(
     })
 }
 
-fn validate_tcb(report: &Report) -> Result<()> {
+fn validate_attrs(report: &Report) -> Result<()> {
     fn validate_td10(report: &TDReport10) -> Result<()> {
-        let is_debug = report.td_attributes[0] != 0;
-        if is_debug {
-            bail!("Debug mode is not allowed");
+        let td_attrs =
+            TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
+        if td_attrs.tud != 0 {
+            bail!("Debug mode is enabled");
+        }
+        if td_attrs.sec.reserved_lower != 0
+            || td_attrs.sec.reserved_bit29
+            || td_attrs.other.reserved != 0
+        {
+            bail!("Reserved bits in TD attributes are set");
+        }
+        if !td_attrs.sec.sept_ve_disable {
+            bail!("SEPT_VE_DISABLE is not enabled");
+        }
+        if td_attrs.sec.pks {
+            bail!("PKS is enabled");
+        }
+        if td_attrs.sec.kl {
+            bail!("KL is enabled");
         }
         Ok(())
     }
@@ -283,7 +299,7 @@ fn validate_tcb(report: &Report) -> Result<()> {
     fn validate_sgx(report: &EnclaveReport) -> Result<()> {
         let is_debug = report.attributes[0] & 0x02 != 0;
         if is_debug {
-            bail!("Debug mode is not allowed");
+            bail!("Debug mode is enabled");
         }
         Ok(())
     }

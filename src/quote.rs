@@ -91,6 +91,95 @@ pub struct EnclaveReport {
     pub report_data: [u8; 64],
 }
 
+/// TD Attributes as defined in Intel TDX Module specification A.3.4
+#[derive(Debug, Clone)]
+pub struct TDAttributes {
+    /// TUD (TD Under Debug) flags (bits 7:0)
+    /// If any of the bits in this group are set to 1, the TD is untrusted.
+    pub tud: u8,
+
+    /// SEC attributes that may impact the security of the TD (bits 31:8)
+    pub sec: SECFlags,
+
+    /// OTHER attributes that do not impact the security of the TD (bits 63:32)
+    pub other: OTHERFlags,
+}
+
+/// TUD (TD Under Debug) flags (bits 7:0)
+#[derive(Debug, Clone)]
+pub struct TUDFlags {
+    /// DEBUG: Defines whether the TD runs in TD debug mode (set to 1) or not (set to 0).
+    /// In TD debug mode, the CPU state and private memory are accessible by the host VMM.
+    pub debug: bool,
+
+    /// Reserved for future TUD flags - must be 0 (bits 7:1)
+    pub reserved: u8,
+}
+
+/// SEC attributes that may impact the security of the TD (bits 31:8)
+#[derive(Debug, Clone)]
+pub struct SECFlags {
+    /// Reserved for future SEC flags - must be 0 (bits 27:8)
+    pub reserved_lower: u32,
+
+    /// SEPT_VE_DISABLE: Disable EPT violation conversion to #VE on TD access of PENDING pages
+    pub sept_ve_disable: bool,
+
+    /// Reserved for future SEC flags - must be 0 (bit 29)
+    pub reserved_bit29: bool,
+
+    /// PKS: TD is allowed to use Supervisor Protection Keys
+    pub pks: bool,
+
+    /// KL: TD is allowed to use Key Locker
+    pub kl: bool,
+}
+
+/// OTHER attributes that do not impact the security of the TD (bits 63:32)
+#[derive(Debug, Clone)]
+pub struct OTHERFlags {
+    /// Reserved for future OTHER flags - must be 0 (bits 62:32)
+    pub reserved: u32,
+
+    /// PERFMON: TD is allowed to use Perfmon and PERF_METRICS capabilities
+    pub perfmon: bool,
+}
+
+impl TDAttributes {
+    pub fn parse(input: [u8; 8]) -> Result<Self, scale::Error> {
+        let tud = input[0];
+        // Extract SEC flags (27:8 bits, bytes 1-3 and part of byte 4)
+        let reserved_lower =
+            (((input[3] & 0x0f) as u32) << 16) | ((input[2] as u32) << 8) | (input[1] as u32);
+        let sept_ve_disable = (input[3] & 0x10) != 0; // Bit 28
+        let reserved_bit29 = (input[3] & 0x20) != 0; // Bit 29
+        let pks = (input[3] & 0x40) != 0; // Bit 30
+        let kl = (input[3] & 0x80) != 0; // Bit 31
+
+        // Extract OTHER flags (bytes 4-7)
+        let reserved_other = ((input[7] as u32) << 24)
+            | ((input[6] as u32) << 16)
+            | ((input[5] as u32) << 8)
+            | ((input[4] as u32) & 0x7F);
+        let perfmon = (input[7] & 0x80) != 0; // Bit 63
+
+        Ok(TDAttributes {
+            tud,
+            sec: SECFlags {
+                reserved_lower,
+                sept_ve_disable,
+                reserved_bit29,
+                pks,
+                kl,
+            },
+            other: OTHERFlags {
+                reserved: reserved_other,
+                perfmon,
+            },
+        })
+    }
+}
+
 #[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 pub struct TDReport10 {
     #[serde(with = "serde_bytes")]
