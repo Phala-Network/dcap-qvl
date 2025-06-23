@@ -26,7 +26,7 @@
 //!     // Get PCCS_URL from environment variable. The URL is like "https://localhost:8081/sgx/certification/v4/".
 //!     let pccs_url = std::env::var("PCCS_URL").expect("PCCS_URL is not set");
 //!     let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
-//!     let collateral = get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
+//!     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 //!     let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
 //!     println!("{:?}", tcb);
@@ -43,6 +43,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct QuoteCollateralV3 {
+    pub pck_crl_issuer_chain: String,
+    #[serde(with = "serde_bytes")]
+    pub root_ca_crl: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub pck_crl: Vec<u8>,
     pub tcb_info_issuer_chain: String,
     pub tcb_info: String,
     #[serde(with = "serde_bytes")]

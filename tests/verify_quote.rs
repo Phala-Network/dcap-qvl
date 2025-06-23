@@ -5,7 +5,7 @@ use scale::Decode;
 fn could_parse_sgx_quote() {
     let raw_quote = include_bytes!("../sample/sgx_quote").to_vec();
     let raw_quote_collateral = include_bytes!("../sample/sgx_quote_collateral.json");
-    let now = 1699301000u64;
+    let now = 1750320802u64;
 
     let quote = Quote::decode(&mut &raw_quote[..]).unwrap();
     insta::assert_debug_snapshot!(quote);
@@ -25,7 +25,7 @@ fn could_parse_sgx_quote() {
 fn could_parse_tdx_quote() {
     let raw_quote = include_bytes!("../sample/tdx_quote");
     let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
-    let now = 1741852249u64;
+    let now = 1750320802u64;
 
     let quote = Quote::decode(&mut &raw_quote[..]).unwrap();
     insta::assert_debug_snapshot!(quote);

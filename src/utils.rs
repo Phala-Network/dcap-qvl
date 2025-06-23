@@ -4,7 +4,8 @@ use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
-use webpki::types::CertificateDer;
+use webpki::{self, types::UnixTime, BorrowedCertRevocationList};
+use webpki::{types::CertificateDer, CertRevocationList};
 use x509_cert::Certificate;
 
 use crate::constants::*;
@@ -142,23 +143,43 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
 
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
 /// a valid certificate chain that is rooted in one of the trust anchors that was compiled into to the pallet
+///
+/// It will also check that the certificate is not revoked according to the CRL
 pub fn verify_certificate_chain(
     leaf_cert: &webpki::EndEntityCert,
     intermediate_certs: &[CertificateDer],
-    verification_time: u64,
+    time: UnixTime,
+    crl_der: &[&[u8]],
 ) -> Result<()> {
-    let time = webpki::types::UnixTime::since_unix_epoch(core::time::Duration::from_secs(
-        verification_time / 1000,
-    ));
-    let sig_algs = &[webpki::ring::ECDSA_P256_SHA256];
+    let sig_algs = webpki::ALL_VERIFICATION_ALGS;
+
+    // Parse the CRL
+    let crls: Vec<CertRevocationList> = crl_der
+        .iter()
+        .map(|der| BorrowedCertRevocationList::from_der(der).map(|crl| crl.into()))
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to parse CRL")?;
+    let crl_slice = crls.iter().collect::<Vec<_>>();
+
+    // Create a RevocationOptions object with the CRL
+    let builder = match webpki::RevocationOptionsBuilder::new(&crl_slice) {
+        Ok(builder) => builder,
+        Err(_) => bail!("Failed to create RevocationOptionsBuilder - CRLs required"),
+    };
+    let revocation = builder
+        .with_depth(webpki::RevocationCheckDepth::Chain)
+        .with_status_policy(webpki::UnknownStatusPolicy::Deny)
+        .with_expiration_policy(webpki::ExpirationPolicy::Enforce)
+        .build();
+
     leaf_cert
         .verify_for_usage(
             sig_algs,
-            DCAP_SERVER_ROOTS,
+            &[sgx_pck_root()],
             intermediate_certs,
             time,
             webpki::KeyUsage::server_auth(),
-            None,
+            Some(revocation),
             None,
         )
         .context("Failed to verify certificate chain")?;
