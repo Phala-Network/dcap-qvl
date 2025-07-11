@@ -46,3 +46,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check code with clippy
         run: cargo clippy --all
+
+  clippy-cli:
+    name: Check cli code with clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check cli code with clippy
+        run: cd cli && cargo clippy --all
