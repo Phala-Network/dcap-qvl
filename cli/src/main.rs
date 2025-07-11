@@ -60,7 +60,10 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
     let quote = hex_decode(&quote, args.hex)?;
     let decoded_quote = Quote::parse(&quote).context("Failed to parse quote")?;
     if args.fmspc {
-        println!("fmspc={}", hex::encode(decoded_quote.fmspc().unwrap()).to_uppercase());
+        println!(
+            "fmspc={}",
+            hex::encode(decoded_quote.fmspc().unwrap()).to_uppercase()
+        );
     } else {
         let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;
         println!("{}", json);
@@ -74,10 +77,10 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let pccs_url = std::env::var("PCCS_URL").unwrap_or_default();
     let collateral = if pccs_url.is_empty() {
         eprintln!("Getting collateral from PCS...");
-        get_collateral_from_pcs(&quote, std::time::Duration::from_secs(60)).await?
+        get_collateral_from_pcs(&quote).await?
     } else {
         eprintln!("Getting collateral from {pccs_url}");
-        get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(60)).await?
+        get_collateral(&pccs_url, &quote).await?
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
