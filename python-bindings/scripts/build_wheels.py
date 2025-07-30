@@ -11,6 +11,12 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Optional
 
+# Ensure UTF-8 encoding on Windows
+if sys.platform == "win32":
+    import codecs
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
+
 # Platform configurations
 PLATFORMS = {
     # Linux platforms (manylinux)
@@ -86,7 +92,7 @@ def check_prerequisites():
         print("ERROR: cargo not found. Install Rust toolchain.")
         sys.exit(1)
 
-    print("✓ Prerequisites check passed")
+    print("* Prerequisites check passed")
 
 
 def install_rust_targets(platforms: List[str]):
@@ -104,7 +110,7 @@ def install_rust_targets(platforms: List[str]):
         if result.returncode != 0:
             print(f"Warning: Failed to install target {target}")
 
-    print("✓ Rust targets installation completed")
+    print("* Rust targets installation completed")
 
 
 def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
@@ -144,10 +150,10 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
     result = run_command(cmd, cwd=project_root)
 
     if result.returncode == 0:
-        print(f"✓ Successfully built wheel for {platform}")
+        print(f"* Successfully built wheel for {platform}")
         return True
     else:
-        print(f"✗ Failed to build wheel for {platform}")
+        print(f"* Failed to build wheel for {platform}")
         return False
 
 

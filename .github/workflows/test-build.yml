@@ -66,11 +66,13 @@ jobs:
           override: true
       - name: Test build
         working-directory: python-bindings
+        env:
+          PYTHONIOENCODING: "utf-8"
         run: |
           uv sync
           uv run python scripts/build_wheels.py --platforms windows-x64 --install-targets --output-dir test-dist
       - name: List built wheels
-        run: ls python-bindings/test-dist/
+        run: Get-ChildItem python-bindings/test-dist/
       - name: Upload test wheels
         uses: actions/upload-artifact@v4
         with:
