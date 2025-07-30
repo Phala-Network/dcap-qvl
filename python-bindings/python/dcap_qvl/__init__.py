@@ -1,7 +1,7 @@
 """
 DCAP Quote Verification Library
 
-This package provides Python bindings for the DCAP (Data Center Attestation Primitives) 
+This package provides Python bindings for the DCAP (Data Center Attestation Primitives)
 quote verification library implemented in Rust.
 
 Main classes:
@@ -11,7 +11,7 @@ Main classes:
 Main functions:
 - verify: Verify a quote with collateral data
 - get_collateral: Get collateral from PCCS URL (async)
-- get_collateral_from_pcs: Get collateral from Intel PCS (async)  
+- get_collateral_from_pcs: Get collateral from Intel PCS (async)
 - get_collateral_and_verify: Get collateral and verify quote (async)
 """
 
@@ -28,13 +28,14 @@ try:
         py_get_collateral_from_pcs as get_collateral_from_pcs,
         py_get_collateral_and_verify as get_collateral_and_verify,
     )
+
     __all__ = [
-        "QuoteCollateralV3", 
-        "VerifiedReport", 
+        "QuoteCollateralV3",
+        "VerifiedReport",
         "verify",
         "get_collateral",
-        "get_collateral_from_pcs", 
-        "get_collateral_and_verify"
+        "get_collateral_from_pcs",
+        "get_collateral_and_verify",
     ]
 except ImportError:
     # Async functions not available (compiled without 'report' feature)

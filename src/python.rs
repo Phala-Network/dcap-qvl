@@ -1,12 +1,15 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3::exceptions::PyValueError;
 use serde_json;
 
-use crate::{QuoteCollateralV3, verify::{verify, VerifiedReport}};
+use crate::{
+    verify::{verify, VerifiedReport},
+    QuoteCollateralV3,
+};
 
 #[cfg(feature = "report")]
-use crate::collateral::{get_collateral, get_collateral_from_pcs, get_collateral_and_verify};
+use crate::collateral::{get_collateral, get_collateral_and_verify, get_collateral_from_pcs};
 
 #[pyclass]
 #[derive(Clone)]
@@ -39,7 +42,7 @@ impl PyQuoteCollateralV3 {
                 qe_identity_issuer_chain,
                 qe_identity,
                 qe_identity_signature,
-            }
+            },
         }
     }
 
@@ -132,9 +135,11 @@ fn py_verify(
     now_secs: u64,
 ) -> PyResult<PyVerifiedReport> {
     let quote_bytes = raw_quote.as_bytes();
-    
+
     match verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport { inner: verified_report }),
+        Ok(verified_report) => Ok(PyVerifiedReport {
+            inner: verified_report,
+        }),
         Err(e) => Err(PyValueError::new_err(format!("Verification failed: {}", e))),
     }
 }
@@ -147,27 +152,30 @@ fn py_get_collateral<'a>(
     raw_quote: &PyBytes,
 ) -> PyResult<&'a PyAny> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
-    
+
     pyo3_asyncio::tokio::future_into_py(py, async move {
         match get_collateral(&pccs_url, &quote_bytes).await {
             Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral: {}", e))),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to get collateral: {}",
+                e
+            ))),
         }
     })
 }
 
 #[cfg(feature = "report")]
 #[pyfunction]
-fn py_get_collateral_from_pcs<'a>(
-    py: Python<'a>,
-    raw_quote: &PyBytes,
-) -> PyResult<&'a PyAny> {
+fn py_get_collateral_from_pcs<'a>(py: Python<'a>, raw_quote: &PyBytes) -> PyResult<&'a PyAny> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
-    
+
     pyo3_asyncio::tokio::future_into_py(py, async move {
         match get_collateral_from_pcs(&quote_bytes).await {
             Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral from PCS: {}", e))),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to get collateral from PCS: {}",
+                e
+            ))),
         }
     })
 }
@@ -180,12 +188,17 @@ fn py_get_collateral_and_verify<'a>(
     pccs_url: Option<String>,
 ) -> PyResult<&'a PyAny> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
-    
+
     pyo3_asyncio::tokio::future_into_py(py, async move {
         let pccs_url_ref = pccs_url.as_deref();
         match get_collateral_and_verify(&quote_bytes, pccs_url_ref).await {
-            Ok(verified_report) => Ok(PyVerifiedReport { inner: verified_report }),
-            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral and verify: {}", e))),
+            Ok(verified_report) => Ok(PyVerifiedReport {
+                inner: verified_report,
+            }),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to get collateral and verify: {}",
+                e
+            ))),
         }
     })
 }
@@ -194,13 +207,13 @@ pub fn register_module(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
-    
+
     #[cfg(feature = "report")]
     {
         m.add_function(wrap_pyfunction!(py_get_collateral, m)?)?;
         m.add_function(wrap_pyfunction!(py_get_collateral_from_pcs, m)?)?;
         m.add_function(wrap_pyfunction!(py_get_collateral_and_verify, m)?)?;
     }
-    
+
     Ok(())
 }
