@@ -9,8 +9,6 @@ use crate::{
     QuoteCollateralV3,
 };
 
-
-
 #[pyclass]
 #[derive(Clone)]
 pub struct PyQuoteCollateralV3 {
@@ -140,7 +138,10 @@ impl PyQuote {
         let quote_bytes = raw_quote.as_bytes();
         match Quote::parse(quote_bytes) {
             Ok(quote) => Ok(PyQuote { inner: quote }),
-            Err(e) => Err(PyValueError::new_err(format!("Failed to parse quote: {}", e))),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to parse quote: {}",
+                e
+            ))),
         }
     }
 
