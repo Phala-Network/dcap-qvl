@@ -5,8 +5,7 @@ This file provides type hints for the compiled Rust extension, enabling better
 IDE support, type checking with mypy, and improved developer experience.
 """
 
-from typing import List, Optional, Union, Awaitable
-from typing_extensions import Literal
+from typing import List
 
 __version__: str
 __all__: List[str]
@@ -166,6 +165,105 @@ class VerifiedReport:
         """
         ...
 
+
+class Quote:
+    """
+    Represents a parsed SGX or TDX quote.
+
+    This class provides access to quote metadata and identifiers
+    without requiring collateral data for verification.
+    """
+
+    @staticmethod
+    def parse(raw_quote: bytes) -> "Quote":
+        """
+        Parse a raw quote from bytes.
+
+        Args:
+            raw_quote: Raw quote data as bytes (SGX or TDX format)
+
+        Returns:
+            Quote instance with parsed quote data
+
+        Raises:
+            ValueError: If quote parsing fails due to invalid format or corrupted data
+
+        Example:
+            >>> import dcap_qvl
+            >>>
+            >>> with open("quote.bin", "rb") as f:
+            ...     quote_data = f.read()
+            >>>
+            >>> quote = dcap_qvl.Quote.parse(quote_data)
+            >>> print(f"Quote type: {quote.quote_type()}")
+            >>> print(f"FMSPC: {quote.fmspc()}")
+        """
+        ...
+
+    def fmspc(self) -> str:
+        """
+        Extract the FMSPC (Family-Model-Stepping-Platform-CustomSKU) identifier.
+
+        The FMSPC is a 6-byte identifier that uniquely identifies the
+        platform's TCB level and is used for collateral retrieval.
+
+        Returns:
+            FMSPC as uppercase hexadecimal string (12 characters)
+
+        Raises:
+            ValueError: If FMSPC cannot be extracted from the quote
+
+        Example:
+            >>> quote = dcap_qvl.Quote.parse(quote_data)
+            >>> fmspc = quote.fmspc()
+            >>> print(f"FMSPC: {fmspc}")  # e.g., "00606A000000"
+        """
+        ...
+
+    def ca(self) -> str:
+        """
+        Extract the CA (Certificate Authority) identifier.
+
+        The CA identifier indicates which certificate authority
+        should be used for quote verification.
+
+        Returns:
+            CA identifier as string
+
+        Raises:
+            ValueError: If CA identifier cannot be extracted from the quote
+        """
+        ...
+
+    def is_tdx(self) -> bool:
+        """
+        Check if this is a TDX (Trust Domain Extensions) quote.
+
+        Returns:
+            True if the quote is TDX format, False if SGX format
+
+        Example:
+            >>> quote = dcap_qvl.Quote.parse(quote_data)
+            >>> if quote.is_tdx():
+            ...     print("This is a TDX quote")
+            ... else:
+            ...     print("This is an SGX quote")
+        """
+        ...
+
+    def quote_type(self) -> str:
+        """
+        Get the quote type as a string.
+
+        Returns:
+            "TDX" for TDX quotes, "SGX" for SGX quotes
+
+        Example:
+            >>> quote = dcap_qvl.Quote.parse(quote_data)
+            >>> print(f"Quote type: {quote.quote_type()}")
+        """
+        ...
+
 # Synchronous functions
 
 
@@ -207,113 +305,30 @@ def verify(
     """
     ...
 
-# Asynchronous functions (available when compiled with 'report' feature)
 
-
-async def get_collateral(
-    pccs_url: str,
-    raw_quote: bytes
-) -> QuoteCollateralV3:
+def parse_quote(raw_quote: bytes) -> Quote:
     """
-    Fetch quote collateral from a PCCS (Provisioning Certificate Caching Service).
+    Parse a raw quote from bytes (convenience function).
 
-    This async function connects to a PCCS server to retrieve the necessary
-    collateral data for verifying the provided quote.
+    This is a convenience function that calls Quote.parse() directly.
 
     Args:
-        pccs_url: PCCS server URL (e.g., "https://localhost:8081/sgx/certification/v4/")
-        raw_quote: Raw quote data as bytes to get collateral for
+        raw_quote: Raw quote data as bytes (SGX or TDX format)
 
     Returns:
-        QuoteCollateralV3 containing the fetched collateral data
+        Quote instance with parsed quote data
 
     Raises:
-        ValueError: If the request fails, server returns an error, or data is invalid
+        ValueError: If quote parsing fails due to invalid format or corrupted data
 
     Example:
-        >>> import asyncio
         >>> import dcap_qvl
         >>>
-        >>> async def main():
-        ...     pccs_url = "https://api.trustedservices.intel.com/sgx/certification/v4/"
-        ...     with open("quote.bin", "rb") as f:
-        ...         quote_data = f.read()
-        ...     collateral = await dcap_qvl.get_collateral(pccs_url, quote_data)
-        ...     print(f"Got collateral with TCB info: {len(collateral.tcb_info)} chars")
+        >>> with open("quote.bin", "rb") as f:
+        ...     quote_data = f.read()
         >>>
-        >>> asyncio.run(main())
-    """
-    ...
-
-
-async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
-    """
-    Fetch quote collateral from Intel's default PCS (Provisioning Certificate Service).
-
-    This is a convenience function that uses Intel's production PCS endpoint
-    to retrieve collateral data.
-
-    Args:
-        raw_quote: Raw quote data as bytes to get collateral for
-
-    Returns:
-        QuoteCollateralV3 containing the fetched collateral data
-
-    Raises:
-        ValueError: If the request fails, server returns an error, or data is invalid
-
-    Example:
-        >>> import asyncio
-        >>> import dcap_qvl
-        >>>
-        >>> async def main():
-        ...     with open("quote.bin", "rb") as f:
-        ...         quote_data = f.read()
-        ...     collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
-        ...     return collateral
-        >>>
-        >>> collateral = asyncio.run(main())
-    """
-    ...
-
-
-async def get_collateral_and_verify(
-    raw_quote: bytes,
-    pccs_url: Optional[str]
-) -> VerifiedReport:
-    """
-    Fetch collateral and verify quote in a single operation.
-
-    This convenience function combines collateral fetching and quote verification
-    into a single async operation.
-
-    Args:
-        raw_quote: Raw quote data as bytes
-        pccs_url: Optional PCCS URL. If None, uses Intel's default PCS
-
-    Returns:
-        VerifiedReport containing verification results
-
-    Raises:
-        ValueError: If collateral fetching or verification fails
-
-    Example:
-        >>> import asyncio
-        >>> import dcap_qvl
-        >>>
-        >>> async def verify_quote():
-        ...     with open("quote.bin", "rb") as f:
-        ...         quote_data = f.read()
-        ...
-        ...     # Use default Intel PCS (pass None for pccs_url)
-        ...     result = await dcap_qvl.get_collateral_and_verify(quote_data, None)
-        ...     print(f"Verification status: {result.status}")
-        ...
-        ...     # Or use custom PCCS
-        ...     custom_url = "https://my-pccs.example.com/sgx/certification/v4/"
-        ...     result = await dcap_qvl.get_collateral_and_verify(quote_data, custom_url)
-        ...     return result
-        >>>
-        >>> result = asyncio.run(verify_quote())
+        >>> quote = dcap_qvl.parse_quote(quote_data)
+        >>> print(f"Quote type: {quote.quote_type()}")
+        >>> print(f"FMSPC: {quote.fmspc()}")
     """
     ...

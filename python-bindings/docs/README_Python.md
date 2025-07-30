@@ -23,7 +23,7 @@ print(f'Available functions: {dcap_qvl.__all__}')
 - Parse verification results
 - Pure Rust implementation with Python bindings
 - Cross-platform compatibility (Linux, macOS, Windows)
-- Async support for fetching collateral data
+- Synchronous collateral fetching from PCCS/PCS
 - Compatible with Python 3.8+
 
 ## Installation
@@ -95,36 +95,35 @@ collateral = dcap_qvl.QuoteCollateralV3.from_json(json_str)
 
 ## API Reference
 
-### Async Functions
+### Collateral Functions
 
-All async functions are available when the library is compiled with the `report` feature (default).
-
-#### `async get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3`
+#### `get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3`
 
 Get collateral from a custom PCCS URL.
 
 **Parameters:**
-- `pccs_url`: PCCS URL (e.g., "https://localhost:8081/sgx/certification/v4/")
+- `pccs_url`: PCCS URL (e.g., "https://api.trustedservices.intel.com")
 - `raw_quote`: Raw quote data as bytes
 
 **Returns:**
 - `QuoteCollateralV3`: Quote collateral data
 
+**Raises:**
+- `ValueError`: If quote is invalid or FMSPC cannot be extracted
+- `RuntimeError`: If network request fails
+- `ImportError`: If requests library is not available
+
 **Example:**
 ```python
-import asyncio
 import dcap_qvl
 
-async def main():
-    pccs_url = "https://api.trustedservices.intel.com/sgx/certification/v4/"
-    quote_data = open("quote.bin", "rb").read()
-    collateral = await dcap_qvl.get_collateral(pccs_url, quote_data)
-    print(f"Got collateral: {len(collateral.tcb_info)} chars")
-
-asyncio.run(main())
+pccs_url = "https://api.trustedservices.intel.com"
+quote_data = open("quote.bin", "rb").read()
+collateral = dcap_qvl.get_collateral(pccs_url, quote_data)
+print(f"Got collateral: {len(collateral.tcb_info)} chars")
 ```
 
-#### `async get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3`
+#### `get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3`
 
 Get collateral from Intel's PCS (default).
 
@@ -134,7 +133,12 @@ Get collateral from Intel's PCS (default).
 **Returns:**
 - `QuoteCollateralV3`: Quote collateral data
 
-#### `async get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport`
+**Raises:**
+- `ValueError`: If quote is invalid or FMSPC cannot be extracted
+- `RuntimeError`: If network request fails
+- `ImportError`: If requests library is not available
+
+#### `get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport`
 
 Get collateral and verify quote in one step.
 
@@ -145,18 +149,19 @@ Get collateral and verify quote in one step.
 **Returns:**
 - `VerifiedReport`: Verification results
 
+**Raises:**
+- `ValueError`: If quote is invalid or verification fails
+- `RuntimeError`: If network request fails
+- `ImportError`: If requests library is not available
+
 **Example:**
 ```python
-import asyncio
 import dcap_qvl
 
-async def verify_quote():
-    quote_data = open("quote.bin", "rb").read()
-    result = await dcap_qvl.get_collateral_and_verify(quote_data)
-    print(f"Status: {result.status}")
-    print(f"Advisory IDs: {result.advisory_ids}")
-
-asyncio.run(verify_quote())
+quote_data = open("quote.bin", "rb").read()
+result = dcap_qvl.get_collateral_and_verify(quote_data)
+print(f"Status: {result.status}")
+print(f"Advisory IDs: {result.advisory_ids}")
 ```
 
 ### Classes

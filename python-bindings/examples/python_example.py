@@ -17,8 +17,9 @@ import dcap_qvl
 
 def main():
     # Example paths - adjust these to your actual sample files
-    quote_file = Path("sample/tdx_quote")
-    collateral_file = Path("sample/tdx_quote_collateral.json")
+    this_file = Path(__file__)
+    quote_file = this_file.parent.parent.parent / "sample/tdx_quote"
+    collateral_file = this_file.parent.parent.parent / "sample/tdx_quote_collateral.json"
 
     if not quote_file.exists():
         print(f"Quote file not found: {quote_file}")
@@ -36,13 +37,13 @@ def main():
 
     # Load collateral
     with open(collateral_file, "r") as f:
-        collateral_json = json.load(f)
+        collateral_json = f.read()
 
     # Create QuoteCollateralV3 object
-    collateral = dcap_qvl.QuoteCollateralV3.from_json(json.dumps(collateral_json))
+    collateral = dcap_qvl.QuoteCollateralV3.from_json(collateral_json)
 
     # Get current timestamp
-    now = int(time.time())
+    now = 1750320802
 
     try:
         # Verify the quote

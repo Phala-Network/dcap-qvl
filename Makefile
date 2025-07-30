@@ -34,10 +34,12 @@ build_python:
 test_python:
 	@echo "Testing Python bindings..."
 	cd python-bindings && uv run python examples/basic_test.py
-
-test_python_versions:
 	@echo "Testing Python bindings across multiple versions..."
 	./python-bindings/scripts/test_python_versions.sh
+	@echo "Testing collateral API..."
+	cd python-bindings && uv run python -m pytest tests/test_collateral_api.py -v
+	@echo "Testing across Python versions with cross-version script..."
+	cd python-bindings && ./scripts/test_cross_versions.sh
 
 python_clean:
 	@echo "Cleaning Python build artifacts..."
@@ -46,4 +48,4 @@ python_clean:
 	find python-bindings -name "*.pyc" -delete
 	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python test_python test_python_versions python_clean
+.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean

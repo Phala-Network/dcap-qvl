@@ -4,12 +4,12 @@ use pyo3::types::PyBytes;
 use serde_json;
 
 use crate::{
+    quote::Quote,
     verify::{verify, VerifiedReport},
     QuoteCollateralV3,
 };
 
-#[cfg(feature = "report")]
-use crate::collateral::{get_collateral, get_collateral_and_verify, get_collateral_from_pcs};
+
 
 #[pyclass]
 #[derive(Clone)]
@@ -128,6 +128,49 @@ impl PyVerifiedReport {
     }
 }
 
+#[pyclass]
+pub struct PyQuote {
+    inner: Quote,
+}
+
+#[pymethods]
+impl PyQuote {
+    #[staticmethod]
+    fn parse(raw_quote: &Bound<'_, PyBytes>) -> PyResult<Self> {
+        let quote_bytes = raw_quote.as_bytes();
+        match Quote::parse(quote_bytes) {
+            Ok(quote) => Ok(PyQuote { inner: quote }),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to parse quote: {}", e))),
+        }
+    }
+
+    fn fmspc(&self) -> PyResult<String> {
+        match self.inner.fmspc() {
+            Ok(fmspc) => Ok(hex::encode_upper(fmspc)),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to get FMSPC: {}", e))),
+        }
+    }
+
+    fn ca(&self) -> PyResult<String> {
+        match self.inner.ca() {
+            Ok(ca) => Ok(ca.to_string()),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to get CA: {}", e))),
+        }
+    }
+
+    fn is_tdx(&self) -> bool {
+        !self.inner.header.is_sgx()
+    }
+
+    fn quote_type(&self) -> String {
+        if self.inner.header.is_sgx() {
+            "SGX".to_string()
+        } else {
+            "TDX".to_string()
+        }
+    }
+}
+
 #[pyfunction]
 fn py_verify(
     raw_quote: &Bound<'_, PyBytes>,
@@ -144,79 +187,17 @@ fn py_verify(
     }
 }
 
-#[cfg(feature = "report")]
 #[pyfunction]
-fn py_get_collateral<'a>(
-    py: Python<'a>,
-    pccs_url: String,
-    raw_quote: &Bound<'_, PyBytes>,
-) -> PyResult<Bound<'a, PyAny>> {
-    let quote_bytes = raw_quote.as_bytes().to_vec();
-
-    pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        match get_collateral(&pccs_url, &quote_bytes).await {
-            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to get collateral: {}",
-                e
-            ))),
-        }
-    })
-}
-
-#[cfg(feature = "report")]
-#[pyfunction]
-fn py_get_collateral_from_pcs<'a>(
-    py: Python<'a>,
-    raw_quote: &Bound<'_, PyBytes>,
-) -> PyResult<Bound<'a, PyAny>> {
-    let quote_bytes = raw_quote.as_bytes().to_vec();
-
-    pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        match get_collateral_from_pcs(&quote_bytes).await {
-            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to get collateral from PCS: {}",
-                e
-            ))),
-        }
-    })
-}
-
-#[cfg(feature = "report")]
-#[pyfunction]
-fn py_get_collateral_and_verify<'a>(
-    py: Python<'a>,
-    raw_quote: &Bound<'_, PyBytes>,
-    pccs_url: Option<String>,
-) -> PyResult<Bound<'a, PyAny>> {
-    let quote_bytes = raw_quote.as_bytes().to_vec();
-
-    pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let pccs_url_ref = pccs_url.as_deref();
-        match get_collateral_and_verify(&quote_bytes, pccs_url_ref).await {
-            Ok(verified_report) => Ok(PyVerifiedReport {
-                inner: verified_report,
-            }),
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to get collateral and verify: {}",
-                e
-            ))),
-        }
-    })
+fn parse_quote(raw_quote: &Bound<'_, PyBytes>) -> PyResult<PyQuote> {
+    PyQuote::parse(raw_quote)
 }
 
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
+    m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
-
-    #[cfg(feature = "report")]
-    {
-        m.add_function(wrap_pyfunction!(py_get_collateral, m)?)?;
-        m.add_function(wrap_pyfunction!(py_get_collateral_from_pcs, m)?)?;
-        m.add_function(wrap_pyfunction!(py_get_collateral_and_verify, m)?)?;
-    }
+    m.add_function(wrap_pyfunction!(parse_quote, m)?)?;
 
     Ok(())
 }
