@@ -130,7 +130,7 @@ impl PyVerifiedReport {
 
 #[pyfunction]
 fn py_verify(
-    raw_quote: &PyBytes,
+    raw_quote: &Bound<'_, PyBytes>,
     collateral: &PyQuoteCollateralV3,
     now_secs: u64,
 ) -> PyResult<PyVerifiedReport> {
@@ -149,11 +149,11 @@ fn py_verify(
 fn py_get_collateral<'a>(
     py: Python<'a>,
     pccs_url: String,
-    raw_quote: &PyBytes,
-) -> PyResult<&'a PyAny> {
+    raw_quote: &Bound<'_, PyBytes>,
+) -> PyResult<Bound<'a, PyAny>> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
 
-    pyo3_asyncio::tokio::future_into_py(py, async move {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
         match get_collateral(&pccs_url, &quote_bytes).await {
             Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
             Err(e) => Err(PyValueError::new_err(format!(
@@ -166,10 +166,13 @@ fn py_get_collateral<'a>(
 
 #[cfg(feature = "report")]
 #[pyfunction]
-fn py_get_collateral_from_pcs<'a>(py: Python<'a>, raw_quote: &PyBytes) -> PyResult<&'a PyAny> {
+fn py_get_collateral_from_pcs<'a>(
+    py: Python<'a>,
+    raw_quote: &Bound<'_, PyBytes>,
+) -> PyResult<Bound<'a, PyAny>> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
 
-    pyo3_asyncio::tokio::future_into_py(py, async move {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
         match get_collateral_from_pcs(&quote_bytes).await {
             Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
             Err(e) => Err(PyValueError::new_err(format!(
@@ -184,12 +187,12 @@ fn py_get_collateral_from_pcs<'a>(py: Python<'a>, raw_quote: &PyBytes) -> PyResu
 #[pyfunction]
 fn py_get_collateral_and_verify<'a>(
     py: Python<'a>,
-    raw_quote: &PyBytes,
+    raw_quote: &Bound<'_, PyBytes>,
     pccs_url: Option<String>,
-) -> PyResult<&'a PyAny> {
+) -> PyResult<Bound<'a, PyAny>> {
     let quote_bytes = raw_quote.as_bytes().to_vec();
 
-    pyo3_asyncio::tokio::future_into_py(py, async move {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let pccs_url_ref = pccs_url.as_deref();
         match get_collateral_and_verify(&quote_bytes, pccs_url_ref).await {
             Ok(verified_report) => Ok(PyVerifiedReport {
@@ -203,7 +206,7 @@ fn py_get_collateral_and_verify<'a>(
     })
 }
 
-pub fn register_module(m: &PyModule) -> PyResult<()> {
+pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;

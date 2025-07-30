@@ -76,6 +76,6 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 #[pymodule]
-fn dcap_qvl(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn dcap_qvl(m: &Bound<'_, PyModule>) -> PyResult<()> {
     python::register_module(m)
 }
