@@ -46,7 +46,7 @@ dev-dependencies = [
     "pytest-asyncio>=0.21.0",
     "maturin>=1.0,<2.0",
     "asyncio",
-    "black>=24.8.0",
+    "black>=22.0.0",
 ]
 
 [tool.uv.sources]

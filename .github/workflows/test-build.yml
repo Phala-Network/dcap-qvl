@@ -1,0 +1,109 @@
+name: Test Wheel Building
+
+on:
+  pull_request:
+    paths:
+      - 'python-bindings/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-zig-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux-x86_64, linux-aarch64, macos-aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.7
+        run: uv python install 3.7
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
+          sudo mv zig-linux-x86_64-0.13.0 /opt/zig
+          sudo ln -sf /opt/zig/zig /usr/local/bin/zig
+          zig version
+      - name: Test build
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py \
+            --platforms ${{ matrix.platform }} \
+            --zig \
+            --install-targets \
+            --output-dir test-dist
+      - name: List built wheels
+        run: ls -la python-bindings/test-dist/
+      - name: Upload test wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-wheels-${{ matrix.platform }}
+          path: python-bindings/test-dist
+          retention-days: 1
+
+  test-windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.7
+        run: uv python install 3.7
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Test build
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py --platforms windows-x64 --install-targets --output-dir test-dist
+      - name: List built wheels
+        run: ls python-bindings/test-dist/
+      - name: Upload test wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-wheels-windows-x64
+          path: python-bindings/test-dist
+          retention-days: 1
+
+  test-macos-native:
+    runs-on: macos-13  # Intel runner
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.7
+        run: uv python install 3.7
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Test build
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py \
+            --platforms macos-x86_64 \
+            --install-targets \
+            --output-dir test-dist
+      - name: List built wheels
+        run: ls -la python-bindings/test-dist/
+      - name: Upload test wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-wheels-macos-x86_64
+          path: python-bindings/test-dist
+          retention-days: 1
