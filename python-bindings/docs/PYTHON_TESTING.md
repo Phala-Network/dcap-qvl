@@ -33,23 +33,6 @@ make test_python_versions
 - ✅ Continues testing even if one version fails
 - ✅ Summary report at the end
 
-### 2. Python Script (Detailed Test)
-
-```bash
-# Run the Python script for detailed testing
-./scripts/test_python_versions.py
-
-# Or use the Makefile target
-make test_python_versions_detailed
-```
-
-**Features:**
-- ✅ Comprehensive testing including unit tests
-- ✅ JSON report generation
-- ✅ Detailed error reporting
-- ✅ Timeout handling (5 minutes per version)
-- ✅ Structured results
-
 ## Test Process
 
 Each Python version goes through the following test phases:
@@ -161,12 +144,6 @@ For CI/CD pipelines, you can use the testing scripts:
 - name: Test Python versions
   run: |
     ./scripts/test_python_versions.sh
-
-# Or for detailed reporting
-- name: Test Python versions with report
-  run: |
-    ./scripts/test_python_versions.py
-    cat python_version_test_report.json
 ```
 
 ## Report Generation
@@ -202,7 +179,6 @@ The detailed Python script generates a JSON report (`python_version_test_report.
 | `make build_python` | Build Python bindings for current Python version |
 | `make test_python` | Run basic Python functionality test |
 | `make test_python_versions` | Test across all Python versions (shell script) |
-| `make test_python_versions_detailed` | Detailed testing with JSON report |
 | `make python_clean` | Clean Python build artifacts |
 
 ## Requirements

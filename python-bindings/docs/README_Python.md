@@ -280,9 +280,6 @@ The project includes comprehensive testing across all supported Python versions:
 # Quick test across all Python versions
 make test_python_versions
 
-# Detailed test with JSON report
-make test_python_versions_detailed
-
 # Test current Python version only
 make test_python
 ```

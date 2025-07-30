@@ -2,20 +2,20 @@ name: Test Python Versions
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
     paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'pyproject.toml'
-      - 'scripts/test_python_versions.*'
-      - '.github/workflows/test-python-versions.yml'
+      - "src/**"
+      - "Cargo.toml"
+      - "pyproject.toml"
+      - "scripts/test_python_versions.*"
+      - ".github/workflows/test-python-versions.yml"
   pull_request:
-    branches: [ master, main ]
+    branches: [master, main]
     paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'pyproject.toml'
-      - 'scripts/test_python_versions.*'
+      - "src/**"
+      - "Cargo.toml"
+      - "pyproject.toml"
+      - "scripts/test_python_versions.*"
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,43 +23,38 @@ env:
 jobs:
   test-python-versions:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-      with:
-        enable-cache: true
-        
-    - name: Install Python versions
-      run: |
-        uv python install 3.8 3.9 3.10 3.11 3.12
-        
-    - name: Test Python bindings across versions
-      run: |
-        chmod +x python-bindings/scripts/test_python_versions.sh
-        ./python-bindings/scripts/test_python_versions.sh
-        
-    - name: Generate detailed report
-      run: |
-        chmod +x python-bindings/scripts/test_python_versions.py
-        ./python-bindings/scripts/test_python_versions.py
-        
-    - name: Upload test report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: python-version-test-report
-        path: python-bindings/python_version_test_report.json
-        
-    - name: Display test summary
-      if: always()
-      run: |
-        if [ -f python-bindings/python_version_test_report.json ]; then
-          echo "## Python Version Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "$(jq -r '.test_summary | "- Total versions: \(.total_versions)\n- Successful: \(.successful_versions | join(", "))\n- Failed: \(.failed_versions | join(", "))\n- Success rate: \(.success_rate)"' python-bindings/python_version_test_report.json)" >> $GITHUB_STEP_SUMMARY
-        fi
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python versions
+        run: |
+          uv python install 3.8 3.9 3.10 3.11 3.12
+
+      - name: Test Python bindings across versions
+        run: |
+          chmod +x python-bindings/scripts/test_python_versions.sh
+          ./python-bindings/scripts/test_python_versions.sh
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-version-test-report
+          path: python-bindings/python_version_test_report.json
+
+      - name: Display test summary
+        if: always()
+        run: |
+          if [ -f python-bindings/python_version_test_report.json ]; then
+            echo "## Python Version Test Summary" >> $GITHUB_STEP_SUMMARY
+            echo "$(jq -r '.test_summary | "- Total versions: \(.total_versions)\n- Successful: \(.successful_versions | join(", "))\n- Failed: \(.failed_versions | join(", "))\n- Success rate: \(.success_rate)"' python-bindings/python_version_test_report.json)" >> $GITHUB_STEP_SUMMARY
+          fi

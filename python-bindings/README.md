@@ -18,7 +18,6 @@ python-bindings/
 ├── tests/                      # Test files
 │   └── test_python_bindings.py
 ├── scripts/                    # Testing scripts
-│   ├── test_python_versions.py   # Detailed version testing
 │   └── test_python_versions.sh   # Quick version testing
 └── docs/                       # Documentation
     ├── README_Python.md        # Main Python bindings documentation

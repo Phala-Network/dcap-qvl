@@ -39,10 +39,6 @@ test_python_versions:
 	@echo "Testing Python bindings across multiple versions..."
 	./python-bindings/scripts/test_python_versions.sh
 
-test_python_versions_detailed:
-	@echo "Running detailed Python version tests..."
-	./python-bindings/scripts/test_python_versions.py
-
 python_clean:
 	@echo "Cleaning Python build artifacts..."
 	rm -rf target/wheels/
@@ -50,4 +46,4 @@ python_clean:
 	find python-bindings -name "*.pyc" -delete
 	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python test_python test_python_versions test_python_versions_detailed python_clean
+.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python test_python test_python_versions python_clean
