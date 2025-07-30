@@ -2,31 +2,42 @@
 
 This package provides Python bindings for the DCAP (Data Center Attestation Primitives) quote verification library implemented in Rust.
 
+## Quick Start
+
+```bash
+# Install from PyPI
+pip install dcap-qvl
+
+# Basic usage
+python -c "
+import dcap_qvl
+print('DCAP-QVL Python bindings successfully installed!')
+print(f'Available functions: {dcap_qvl.__all__}')
+"
+```
+
 ## Features
 
 - Verify SGX and TDX quotes
 - Handle quote collateral data
 - Parse verification results
 - Pure Rust implementation with Python bindings
+- Cross-platform compatibility (Linux, macOS, Windows)
+- Async support for fetching collateral data
+- Compatible with Python 3.8+
 
 ## Installation
 
-### Using uv (recommended)
+### From PyPI (recommended)
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Build and install the Python package
-uv pip install maturin
-maturin develop --features python
+pip install dcap-qvl
 ```
 
-### Using pip with maturin
+### Using uv
 
 ```bash
-pip install maturin
-maturin develop --features python
+uv add dcap-qvl
 ```
 
 ## Usage
@@ -216,19 +227,42 @@ Verify a quote with the provided collateral data.
 
 ### Building from Source
 
+If you want to build from source or contribute to development:
+
 ```bash
 # Clone the repository
 git clone https://github.com/Phala-Network/dcap-qvl.git
-cd dcap-qvl
+cd dcap-qvl/python-bindings
 
-# Build the Python extension
+# Install development dependencies (including maturin)
+uv sync
+
+# Build and install the Python extension in development mode
 uv run maturin develop --features python
 
 # Run tests
 uv run python -m pytest tests/test_python_bindings.py
 ```
 
+**Note:** maturin is only required for building from source. Regular users installing from PyPI don't need maturin.
+
 ### Running Examples
+
+After installing the package, you can run the examples:
+
+```bash
+# Download the examples from the repository
+git clone https://github.com/Phala-Network/dcap-qvl.git
+cd dcap-qvl/python-bindings
+
+# Basic functionality test
+python examples/basic_test.py
+
+# Full example (requires sample data files)
+python examples/python_example.py
+```
+
+Or if you're using uv for development:
 
 ```bash
 # Basic functionality test
@@ -257,8 +291,13 @@ See [PYTHON_TESTING.md](PYTHON_TESTING.md) for detailed information about Python
 
 ## Requirements
 
+### For regular usage (installing from PyPI):
 - Python 3.8+
-- Rust toolchain (for building from source)
+
+### For development (building from source):
+- Python 3.8+
+- Rust toolchain (rustc, cargo)
+- maturin (automatically installed with `uv sync`)
 
 ## License
 
