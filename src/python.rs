@@ -5,7 +5,8 @@ use serde_json;
 
 use crate::{QuoteCollateralV3, verify::{verify, VerifiedReport}};
 
-// Note: Collateral functions will be added in a future version with proper async support
+#[cfg(feature = "report")]
+use crate::collateral::{get_collateral, get_collateral_from_pcs, get_collateral_and_verify};
 
 #[pyclass]
 #[derive(Clone)]
@@ -49,12 +50,12 @@ impl PyQuoteCollateralV3 {
 
     #[getter]
     fn root_ca_crl(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new_bound(py, &self.inner.root_ca_crl).into()
+        PyBytes::new(py, &self.inner.root_ca_crl).into()
     }
 
     #[getter]
     fn pck_crl(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new_bound(py, &self.inner.pck_crl).into()
+        PyBytes::new(py, &self.inner.pck_crl).into()
     }
 
     #[getter]
@@ -69,7 +70,7 @@ impl PyQuoteCollateralV3 {
 
     #[getter]
     fn tcb_info_signature(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new_bound(py, &self.inner.tcb_info_signature).into()
+        PyBytes::new(py, &self.inner.tcb_info_signature).into()
     }
 
     #[getter]
@@ -84,7 +85,7 @@ impl PyQuoteCollateralV3 {
 
     #[getter]
     fn qe_identity_signature(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new_bound(py, &self.inner.qe_identity_signature).into()
+        PyBytes::new(py, &self.inner.qe_identity_signature).into()
     }
 
     fn to_json(&self) -> PyResult<String> {
@@ -126,7 +127,7 @@ impl PyVerifiedReport {
 
 #[pyfunction]
 fn py_verify(
-    raw_quote: &Bound<'_, PyBytes>,
+    raw_quote: &PyBytes,
     collateral: &PyQuoteCollateralV3,
     now_secs: u64,
 ) -> PyResult<PyVerifiedReport> {
@@ -138,13 +139,68 @@ fn py_verify(
     }
 }
 
-// Note: Async functions are not included in this initial version
-// They can be added later using pyo3-asyncio when needed
+#[cfg(feature = "report")]
+#[pyfunction]
+fn py_get_collateral<'a>(
+    py: Python<'a>,
+    pccs_url: String,
+    raw_quote: &PyBytes,
+) -> PyResult<&'a PyAny> {
+    let quote_bytes = raw_quote.as_bytes().to_vec();
+    
+    pyo3_asyncio::tokio::future_into_py(py, async move {
+        match get_collateral(&pccs_url, &quote_bytes).await {
+            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral: {}", e))),
+        }
+    })
+}
 
-pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
+#[cfg(feature = "report")]
+#[pyfunction]
+fn py_get_collateral_from_pcs<'a>(
+    py: Python<'a>,
+    raw_quote: &PyBytes,
+) -> PyResult<&'a PyAny> {
+    let quote_bytes = raw_quote.as_bytes().to_vec();
+    
+    pyo3_asyncio::tokio::future_into_py(py, async move {
+        match get_collateral_from_pcs(&quote_bytes).await {
+            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral from PCS: {}", e))),
+        }
+    })
+}
+
+#[cfg(feature = "report")]
+#[pyfunction]
+fn py_get_collateral_and_verify<'a>(
+    py: Python<'a>,
+    raw_quote: &PyBytes,
+    pccs_url: Option<String>,
+) -> PyResult<&'a PyAny> {
+    let quote_bytes = raw_quote.as_bytes().to_vec();
+    
+    pyo3_asyncio::tokio::future_into_py(py, async move {
+        let pccs_url_ref = pccs_url.as_deref();
+        match get_collateral_and_verify(&quote_bytes, pccs_url_ref).await {
+            Ok(verified_report) => Ok(PyVerifiedReport { inner: verified_report }),
+            Err(e) => Err(PyValueError::new_err(format!("Failed to get collateral and verify: {}", e))),
+        }
+    })
+}
+
+pub fn register_module(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
+    
+    #[cfg(feature = "report")]
+    {
+        m.add_function(wrap_pyfunction!(py_get_collateral, m)?)?;
+        m.add_function(wrap_pyfunction!(py_get_collateral_from_pcs, m)?)?;
+        m.add_function(wrap_pyfunction!(py_get_collateral_and_verify, m)?)?;
+    }
     
     Ok(())
 }

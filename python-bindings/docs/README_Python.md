@@ -84,6 +84,70 @@ collateral = dcap_qvl.QuoteCollateralV3.from_json(json_str)
 
 ## API Reference
 
+### Async Functions
+
+All async functions are available when the library is compiled with the `report` feature (default).
+
+#### `async get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3`
+
+Get collateral from a custom PCCS URL.
+
+**Parameters:**
+- `pccs_url`: PCCS URL (e.g., "https://localhost:8081/sgx/certification/v4/")
+- `raw_quote`: Raw quote data as bytes
+
+**Returns:**
+- `QuoteCollateralV3`: Quote collateral data
+
+**Example:**
+```python
+import asyncio
+import dcap_qvl
+
+async def main():
+    pccs_url = "https://api.trustedservices.intel.com/sgx/certification/v4/"
+    quote_data = open("quote.bin", "rb").read()
+    collateral = await dcap_qvl.get_collateral(pccs_url, quote_data)
+    print(f"Got collateral: {len(collateral.tcb_info)} chars")
+
+asyncio.run(main())
+```
+
+#### `async get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3`
+
+Get collateral from Intel's PCS (default).
+
+**Parameters:**
+- `raw_quote`: Raw quote data as bytes
+
+**Returns:**
+- `QuoteCollateralV3`: Quote collateral data
+
+#### `async get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport`
+
+Get collateral and verify quote in one step.
+
+**Parameters:**
+- `raw_quote`: Raw quote data as bytes
+- `pccs_url`: Optional PCCS URL (uses Intel PCS if None)
+
+**Returns:**
+- `VerifiedReport`: Verification results
+
+**Example:**
+```python
+import asyncio
+import dcap_qvl
+
+async def verify_quote():
+    quote_data = open("quote.bin", "rb").read()
+    result = await dcap_qvl.get_collateral_and_verify(quote_data)
+    print(f"Status: {result.status}")
+    print(f"Advisory IDs: {result.advisory_ids}")
+
+asyncio.run(verify_quote())
+```
+
 ### Classes
 
 #### `QuoteCollateralV3`
