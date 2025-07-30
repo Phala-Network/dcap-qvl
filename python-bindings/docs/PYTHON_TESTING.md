@@ -9,7 +9,7 @@ The Python bindings support Python 3.8+ as specified in `pyproject.toml`. We pro
 ## Supported Python Versions
 
 - Python 3.8
-- Python 3.9  
+- Python 3.9
 - Python 3.10
 - Python 3.11
 - Python 3.12
@@ -39,7 +39,7 @@ make test_python_versions
 # Run the Python script for detailed testing
 ./scripts/test_python_versions.py
 
-# Or use the Makefile target  
+# Or use the Makefile target
 make test_python_versions_detailed
 ```
 
@@ -161,7 +161,7 @@ For CI/CD pipelines, you can use the testing scripts:
 - name: Test Python versions
   run: |
     ./scripts/test_python_versions.sh
-    
+
 # Or for detailed reporting
 - name: Test Python versions with report
   run: |
@@ -214,7 +214,7 @@ The detailed Python script generates a JSON report (`python_version_test_report.
 ## Best Practices
 
 1. **Regular Testing**: Run version tests before releases
-2. **CI Integration**: Include version testing in your CI pipeline  
+2. **CI Integration**: Include version testing in your CI pipeline 
 3. **Report Review**: Check detailed reports for any warnings or partial failures
 4. **Environment Isolation**: Scripts use temporary environments to avoid conflicts
 5. **Timeout Handling**: Each version test has a 5-minute timeout to prevent hanging

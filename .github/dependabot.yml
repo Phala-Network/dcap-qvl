@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # Rust dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+
+  # Rust CLI dependencies
+  - package-ecosystem: "cargo"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cli-dependencies:
+        patterns:
+          - "*"
+
+  # Python dependencies in python-bindings
+  - package-ecosystem: "pip"
+    directory: "/python-bindings"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"

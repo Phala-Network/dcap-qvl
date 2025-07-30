@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 0.3.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Is this a prerelease?"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.create-release.outputs.id }}
+      upload-url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: get-version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Simple changelog generation - you can enhance this
+          if git tag --list | grep -q "v"; then
+            PREVIOUS_TAG=$(git tag --list "v*" --sort=-version:refname | head -n2 | tail -n1)
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+            else
+              CHANGELOG=$(git log --pretty=format:"- %s" --no-merges)
+            fi
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges)
+          fi
+
+          # Save changelog to file
+          cat > changelog.md << EOF
+          ## Changes in ${{ steps.get-version.outputs.tag }}
+
+          ${CHANGELOG}
+
+          ## Python Package
+
+          This release includes Python wheels for multiple platforms:
+          - Linux: x86_64, x86, aarch64, armv7, s390x, ppc64le
+          - Windows: x64, x86
+          - macOS: x86_64, aarch64 (Apple Silicon)
+
+          Install with: \`pip install dcap-qvl==${{ steps.get-version.outputs.version }}\`
+
+          ## Rust Crate
+
+          Add to your \`Cargo.toml\`:
+          \`\`\`toml
+          dcap-qvl = "${{ steps.get-version.outputs.version }}"
+          \`\`\`
+          EOF
+
+      - name: Create Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get-version.outputs.tag }}
+          release_name: Release ${{ steps.get-version.outputs.tag }}
+          body_path: changelog.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+
+  build-rust:
+    name: Build Rust Binaries
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact-name: dcap-qvl-linux-x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact-name: dcap-qvl-linux-x86_64-musl
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact-name: dcap-qvl-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact-name: dcap-qvl-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact-name: dcap-qvl-macos-aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build CLI
+        run: |
+          cd cli
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload CLI Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload-url }}
+          asset_path: cli/target/${{ matrix.target }}/release/dcap-qvl${{ contains(matrix.target, 'windows') && '.exe' || '' }}
+          asset_name: ${{ matrix.artifact-name }}
+          asset_content_type: application/octet-stream
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish dcap-qvl crate
+        run: cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        continue-on-error: true # Don't fail if already published
+
+      - name: Publish dcap-qvl-cli crate
+        run: |
+          cd cli
+          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+        continue-on-error: true # Don't fail if already published

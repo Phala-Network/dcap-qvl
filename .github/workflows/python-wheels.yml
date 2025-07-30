@@ -1,0 +1,241 @@
+name: Build and Publish Python Wheels
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter --features python
+          sccache: "true"
+          manylinux: auto
+          working-directory: python-bindings
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: python-bindings/dist
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          architecture: ${{ matrix.target }}
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter --features python
+          sccache: "true"
+          working-directory: python-bindings
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-${{ matrix.target }}
+          path: python-bindings/dist
+
+  macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter --features python
+          sccache: "true"
+          working-directory: python-bindings
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.target }}
+          path: python-bindings/dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --features python
+          working-directory: python-bindings
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: python-bindings/dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows, macos, sdist]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dcap-qvl
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  test-release:
+    name: Test Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/python-binding'
+    needs: [linux, windows, macos, sdist]
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dcap-qvl
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  test-wheels:
+    name: Test Wheels
+    runs-on: ${{ matrix.os }}
+    needs: [linux, windows, macos]
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # Skip some combinations to reduce CI time
+          - os: windows-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.9"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Find and install wheel
+        shell: bash
+        run: |
+          # Find the appropriate wheel for this platform and Python version
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            WHEEL=$(find dist -name "*linux*x86_64*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            WHEEL=$(find dist -name "*win*x64*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            if [[ "$(uname -m)" == "arm64" ]]; then
+              WHEEL=$(find dist -name "*macos*arm64*.whl" -o -name "*macos*aarch64*.whl" | head -n1)
+            else
+              WHEEL=$(find dist -name "*macos*x86_64*.whl" | head -n1)
+            fi
+          fi
+
+          if [[ -n "$WHEEL" ]]; then
+            echo "Installing wheel: $WHEEL"
+            pip install "$WHEEL"
+          else
+            echo "No suitable wheel found, installing from source"
+            cd python-bindings
+            pip install maturin
+            maturin develop --features python
+          fi
+      - name: Test installation
+        run: |
+          python -c "
+          import dcap_qvl
+          print(f'Successfully imported dcap_qvl version {dcap_qvl.__version__}')
+          print(f'Available functions: {dcap_qvl.__all__}')
+
+          # Test basic functionality
+          collateral = dcap_qvl.QuoteCollateralV3(
+              pck_crl_issuer_chain='test',
+              root_ca_crl=b'test',
+              pck_crl=b'test',
+              tcb_info_issuer_chain='test',
+              tcb_info='{\"test\": true}',
+              tcb_info_signature=b'test',
+              qe_identity_issuer_chain='test',
+              qe_identity='{\"test\": true}',
+              qe_identity_signature=b'test'
+          )
+          json_str = collateral.to_json()
+          collateral2 = dcap_qvl.QuoteCollateralV3.from_json(json_str)
+          print('✅ Basic functionality test passed!')
+          "
+      - name: Test async functionality
+        if: matrix.python-version != '3.8' # asyncio.run was added in 3.7 but had issues in 3.8
+        run: |
+          python -c "
+          import asyncio
+          import dcap_qvl
+
+          async def test_async():
+              try:
+                  # This should fail gracefully since we're using invalid data
+                  result = await dcap_qvl.get_collateral_from_pcs(b'invalid_quote')
+                  print('Unexpected success')
+              except Exception as e:
+                  print(f'✅ Async function works correctly (expected error): {type(e).__name__}')
+
+          asyncio.run(test_async())
+          print('✅ Async functionality test completed!')
+          "

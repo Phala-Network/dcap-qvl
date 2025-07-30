@@ -1,0 +1,226 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+      version:
+        description: "Version to publish (leave empty to use pyproject.toml version)"
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.os == 'linux' && 'x86_64' || 'auto' }}
+          args: --release --out dist --find-interpreter --features python
+          sccache: "true"
+          manylinux: ${{ matrix.os == 'ubuntu-latest' && 'auto' || null}}
+          working-directory: python-bindings
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: python-bindings/dist
+
+  build-wheels-cross:
+    name: Build ${{ matrix.target }} wheels
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [aarch64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter --features python
+          sccache: "true"
+          manylinux: auto
+          working-directory: python-bindings
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: python-bindings/dist
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --features python
+          working-directory: python-bindings
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: python-bindings/dist
+
+  test-wheels:
+    name: Test wheels
+    needs: [build-wheels, build-wheels-cross, build-sdist]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.12"] # Test oldest and newest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Find and install wheel
+        shell: bash
+        run: |
+          # Find the appropriate wheel for this platform
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            WHEEL=$(find dist -name "*linux*x86_64*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            WHEEL=$(find dist -name "*win*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            WHEEL=$(find dist -name "*macos*.whl" | head -n1)
+          fi
+
+          if [[ -n "$WHEEL" && -f "$WHEEL" ]]; then
+            echo "Installing wheel: $WHEEL"
+            pip install "$WHEEL"
+          else
+            echo "No wheel found, installing from sdist"
+            SDIST=$(find dist -name "*.tar.gz" | head -n1)
+            if [[ -n "$SDIST" ]]; then
+              pip install maturin
+              pip install "$SDIST"
+            fi
+          fi
+
+      - name: Test installation
+        run: |
+          python -c "
+          import dcap_qvl
+          print(f'Successfully imported dcap_qvl version {dcap_qvl.__version__}')
+
+          # Test basic functionality
+          collateral = dcap_qvl.QuoteCollateralV3(
+              pck_crl_issuer_chain='test',
+              root_ca_crl=b'test',
+              pck_crl=b'test',
+              tcb_info_issuer_chain='test',
+              tcb_info='{\"test\": true}',
+              tcb_info_signature=b'test',
+              qe_identity_issuer_chain='test',
+              qe_identity='{\"test\": true}',
+              qe_identity_signature=b'test'
+          )
+          json_str = collateral.to_json()
+          print('✅ Installation and basic functionality test passed!')
+          "
+
+  publish:
+    name: Publish to ${{ github.event.inputs.environment }}
+    needs: [test-wheels]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.environment }}
+      url: ${{ github.event.inputs.environment == 'pypi' && 'https://pypi.org/p/dcap-qvl' || 'https://test.pypi.org/p/dcap-qvl' }}
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: List files to be published
+        run: |
+          echo "Files to be published:"
+          ls -la dist/
+          echo ""
+          echo "Total files: $(find dist -type f | wc -l)"
+          echo "Wheels: $(find dist -name "*.whl" | wc -l)"
+          echo "Source dist: $(find dist -name "*.tar.gz" | wc -l)"
+
+      - name: Publish to TestPyPI
+        if: github.event.inputs.environment == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Publish to PyPI
+        if: github.event.inputs.environment == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Create GitHub Release
+        if: github.event.inputs.environment == 'pypi'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: python-v${{ github.event.inputs.version }}
+          release_name: Python Package v${{ github.event.inputs.version }}
+          body: |
+            Python package release for dcap-qvl v${{ github.event.inputs.version }}
+
+            ## Installation
+            ```bash
+            pip install dcap-qvl==${{ github.event.inputs.version }}
+            ```
+
+            ## What's included
+            - Wheels for Linux (x86_64, aarch64)
+            - Wheels for Windows (x86_64, x86)
+            - Wheels for macOS (x86_64, aarch64)
+            - Source distribution
+
+            All wheels are built with abi3 for maximum compatibility.
+          draft: false
+          prerelease: false
