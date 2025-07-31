@@ -22,15 +22,20 @@ PLATFORMS = {
     # Linux platforms (manylinux)
     "linux-x86_64": {
         "target": "x86_64-unknown-linux-gnu",
-        "platform_tag": "linux_x86_64"
+        "platform_tag": "manylinux_2_17_x86_64"
     },
     "linux-aarch64": {
         "target": "aarch64-unknown-linux-gnu",
-        "platform_tag": "linux_aarch64"
+        "platform_tag": "manylinux_2_17_aarch64"
     },
-    "linux-i686": {
-        "target": "i686-unknown-linux-gnu",
-        "platform_tag": "linux_i686"
+    # Linux platforms (musllinux)
+    "linux-x86_64-musl": {
+        "target": "x86_64-unknown-linux-musl",
+        "platform_tag": "musllinux_1_1_x86_64"
+    },
+    "linux-aarch64-musl": {
+        "target": "aarch64-unknown-linux-musl",
+        "platform_tag": "musllinux_1_1_aarch64"
     },
 
     # Windows platforms
@@ -156,8 +161,12 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
 
     # Add platform-specific flags
     if platform.startswith("linux"):
-        # Use manylinux for Linux builds
-        cmd.extend(["--compatibility", "linux"])
+        # Use manylinux for Linux builds (PyPI requires manylinux tags)
+        # Also build musllinux for Alpine/musl-based distributions
+        if platform.endswith("-musl"):
+            cmd.extend(["--compatibility", "musllinux_1_1"])
+        else:
+            cmd.extend(["--compatibility", "manylinux_2_17"])
     elif platform == "windows-x86":
         # 32-bit Windows often has issues, try with minimal features
         cmd.extend(["--no-default-features", "--features", "std,python"])

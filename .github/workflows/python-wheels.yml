@@ -37,7 +37,7 @@ jobs:
         run: |
           uv sync
           uv run python scripts/build_wheels.py \
-            --platforms linux-x86_64 linux-aarch64 macos-aarch64 \
+            --platforms linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl macos-aarch64 \
             --zig \
             --install-targets \
             --output-dir dist
@@ -150,6 +150,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+          verbose: true
 
   test-release:
     name: Test Release
@@ -175,6 +176,7 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+          verbose: true
 
   test-wheels:
     name: Test Wheels
@@ -208,7 +210,7 @@ jobs:
         run: |
           # Find the appropriate wheel for this platform and Python version
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            WHEEL=$(find dist -name "*linux_x86_64*.whl" | head -n1)
+            WHEEL=$(find dist -name "*manylinux_*_x86_64*.whl" | head -n1)
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
             WHEEL=$(find dist -name "*win_amd64*.whl" | head -n1)
           elif [[ "${{ runner.os }}" == "macOS" ]]; then
