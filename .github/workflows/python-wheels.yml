@@ -1,0 +1,235 @@
+name: Build and Publish Python Wheels
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - "python-bindings" # For testing
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.8
+        run: uv python install 3.8
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
+          sudo mv zig-linux-x86_64-0.13.0 /opt/zig
+          sudo ln -sf /opt/zig/zig /usr/local/bin/zig
+          zig version
+      - name: Build Linux and macOS wheels with Zig
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py \
+            --platforms linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl macos-aarch64 \
+            --zig \
+            --install-targets \
+            --output-dir dist
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-cross
+          path: python-bindings/dist
+
+  # Windows build using native runner
+  windows:
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.8
+        run: uv python install 3.8
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Build Windows wheel
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py --platforms windows-x64 --install-targets --output-dir dist
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows
+          path: python-bindings/dist
+
+  # macOS Intel build using native runner (Zig cross-compilation has issues)
+  macos-intel:
+    runs-on: macos-13 # Intel runner
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python 3.8
+        run: uv python install 3.8
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Build wheel natively
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py \
+            --platforms macos-x86_64 \
+            --install-targets \
+            --output-dir dist
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-x86_64
+          path: python-bindings/dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Build source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: python-bindings
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: python-bindings/dist
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [build-wheels, windows, macos-intel, sdist]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dcap-qvl
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          verbose: true
+
+  test-release:
+    name: Test Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/python-bindings'
+    needs: [build-wheels, windows, macos-intel, sdist]
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/dcap-qvl
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: List artifacts
+        run: ls -la dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+  test-wheels:
+    name: Test Wheels
+    runs-on: ${{ matrix.os }}
+    needs: [build-wheels, windows, macos-intel]
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # Skip some combinations to reduce CI time
+          - os: windows-latest
+            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.9"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Setup Python ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Find and install wheel
+        shell: bash
+        run: |
+          # Find the appropriate wheel for this platform and Python version
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            WHEEL=$(find dist -name "*manylinux_*_x86_64*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            WHEEL=$(find dist -name "*win_amd64*.whl" | head -n1)
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            if [[ "$(uname -m)" == "arm64" ]]; then
+              WHEEL=$(find dist -name "*macosx*arm64*.whl" | head -n1)
+            else
+              WHEEL=$(find dist -name "*macosx*x86_64*.whl" | head -n1)
+            fi
+          fi
+
+          if [[ -n "$WHEEL" ]]; then
+            echo "Installing wheel: $WHEEL"
+            uv pip install "$WHEEL"
+          else
+            echo "No suitable wheel found, installing from source"
+            cd python-bindings
+            uv add maturin
+            uv run maturin develop --features python
+          fi
+      - name: Test installation
+        working-directory: python-bindings
+        run: uv run python scripts/test_installation.py

@@ -26,4 +26,26 @@ clean:
 	@echo "Cleaning up..."
 	rm -rf pkg
 
-.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean
+# Python bindings targets
+build_python:
+	@echo "Building Python bindings..."
+	cd python-bindings && uv run maturin develop --features python
+
+test_python:
+	@echo "Testing Python bindings..."
+	cd python-bindings && uv run python examples/basic_test.py
+	@echo "Testing Python bindings across multiple versions..."
+	./python-bindings/scripts/test_python_versions.sh
+	@echo "Testing collateral API..."
+	cd python-bindings && uv run python -m pytest tests/test_collateral_api.py -v
+	@echo "Testing across Python versions with cross-version script..."
+	cd python-bindings && ./scripts/test_cross_versions.sh
+
+python_clean:
+	@echo "Cleaning Python build artifacts..."
+	rm -rf target/wheels/
+	rm -rf python-bindings/python_version_test_report.json
+	find python-bindings -name "*.pyc" -delete
+	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean

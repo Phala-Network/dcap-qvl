@@ -56,6 +56,36 @@ async fn main() {
 
 <!-- cargo-rdme end -->
 
+# Python Bindings
+
+Python bindings are available for this crate, providing a Pythonic interface to the DCAP quote verification functionality.
+
+## Quick Start
+
+```bash
+# Build and test Python bindings
+make build_python
+make test_python
+
+# Test across Python versions (3.8-3.12)
+make test_python_versions
+```
+
+## Usage
+
+```python
+import dcap_qvl
+
+# Create collateral from JSON
+collateral = dcap_qvl.QuoteCollateralV3.from_json(json_data)
+
+# Verify quote
+result = dcap_qvl.verify(quote_bytes, collateral, timestamp)
+print(f"Status: {result.status}")
+```
+
+See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.
+
 # License
 
 This crate is licensed under the MIT license. See the LICENSE file for details.

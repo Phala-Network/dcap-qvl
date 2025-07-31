@@ -52,6 +52,11 @@ wasm-bindgen = { version = "0.2.95", optional = true }
 wasm-bindgen-futures = { version = "0.4.50" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
+# Python bindings
+pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py37", "generate-import-lib"] }
+pyo3-async-runtimes = { version = "0.25", optional = true, features = ["tokio-runtime"] }
+tokio = { version = "1.41.1", optional = true, features = ["full"] }
+
 [dependencies.dcap-qvl-webpki]
 version = "0.103.3"
 features = ["alloc", "ring"]
@@ -69,6 +74,7 @@ serde_json = "1.0.133"
 tokio = { version = "1.41.1", features = ["full"] }
 
 [lib]
+name = "dcap_qvl"
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -90,3 +96,4 @@ std = [
 ]
 report = ["std", "tracing", "futures"]
 js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
+python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]

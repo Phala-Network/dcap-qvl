@@ -1,0 +1,52 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "dcap-qvl"
+version = "0.3.0"
+description = "Python bindings for DCAP (Data Center Attestation Primitives) quote verification library"
+authors = [
+    {name = "Kevin Wang", email = "wy721@qq.com"},
+]
+readme = "docs/README_Python.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries",
+]
+keywords = ["sgx", "tdx", "dcap", "attestation", "verification", "cryptography"]
+
+[project.urls]
+Homepage = "https://github.com/Phala-Network/dcap-qvl"
+Repository = "https://github.com/Phala-Network/dcap-qvl"
+Issues = "https://github.com/Phala-Network/dcap-qvl/issues"
+
+[tool.maturin]
+features = ["pyo3/extension-module", "python"]
+python-source = "python"
+module-name = "dcap_qvl"
+manifest-path = "../Cargo.toml"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "maturin>=1.0,<2.0",
+    "asyncio",
+    "black>=22.0.0",
+]
+
+[tool.uv.sources]
+dcap-qvl = { workspace = true }
