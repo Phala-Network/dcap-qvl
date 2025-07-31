@@ -141,9 +141,14 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
         "maturin", "build",
         "--release",
         "--target", target,
-        "--out", str(output_dir),
-        "--interpreter", "python3.7"
+        "--out", str(output_dir)
     ]
+
+    # Add interpreter selection
+    if platform.startswith("windows"):
+        cmd.append("--find-interpreter")
+    else:
+        cmd.extend(["--interpreter", "python3.7"])
 
     # Add cross-compilation flags
     if use_zig:
