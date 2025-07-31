@@ -53,6 +53,9 @@ jobs:
 
   test-windows-native:
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -66,8 +69,6 @@ jobs:
           override: true
       - name: Test build
         working-directory: python-bindings
-        env:
-          PYTHONIOENCODING: "utf-8"
         run: |
           uv sync
           uv run python scripts/build_wheels.py --platforms windows-x64 --install-targets --output-dir test-dist

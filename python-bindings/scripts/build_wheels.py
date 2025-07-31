@@ -61,11 +61,23 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None) -> subprocess.Comple
     if cwd:
         print(f"Working directory: {cwd}")
 
+    # Use UTF-8 encoding on Windows to handle Unicode characters in output
+    encoding = "utf-8" if sys.platform == "win32" else None
+
+    # Set environment variables for UTF-8 on Windows
+    env = os.environ.copy()
+    if sys.platform == "win32":
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
     result = subprocess.run(
         cmd,
         cwd=cwd,
         capture_output=True,
-        text=True
+        text=True,
+        encoding=encoding,
+        errors="replace",  # Replace invalid characters instead of failing
+        env=env
     )
 
     if result.stdout:
