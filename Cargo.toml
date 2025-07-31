@@ -19,7 +19,7 @@ chrono = { version = "0.4.31", default-features = false, features = [
     "alloc",
     "serde",
 ] }
-const-oid = { version = "0.9.5", default-features = false }
+const-oid = { version = "0.10.1", default-features = false }
 x509-cert = { version = "0.2.4", default-features = false }
 byteorder = { version = "1.5.0", default-features = false }
 pem = { version = "3", default-features = false }
