@@ -68,8 +68,8 @@ impl PcsEndpoints {
     }
 }
 
-fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
-    let value = resposne
+fn get_header(response: &reqwest::Response, name: &str) -> Result<String> {
+    let value = response
         .headers()
         .get(name)
         .ok_or_else(|| anyhow!("Missing {name}"))?
@@ -165,10 +165,10 @@ pub async fn get_collateral_for_fmspc(
     let tcb_info_issuer_chain;
     let raw_tcb_info;
     {
-        let resposne = client.get(endpoints.url_tcb()).send().await?;
-        tcb_info_issuer_chain = get_header(&resposne, "SGX-TCB-Info-Issuer-Chain")
-            .or(get_header(&resposne, "TCB-Info-Issuer-Chain"))?;
-        raw_tcb_info = resposne.text().await?;
+        let response = client.get(endpoints.url_tcb()).send().await?;
+        tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
+            .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
+        raw_tcb_info = response.text().await?;
     };
     let qe_identity_issuer_chain;
     let raw_qe_identity;
