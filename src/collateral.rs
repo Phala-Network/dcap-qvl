@@ -1,16 +1,25 @@
+#[cfg(feature = "net")]
 use alloc::string::{String, ToString};
+#[cfg(feature = "net")]
 use anyhow::{anyhow, Context, Result};
+#[cfg(feature = "net")]
 use scale::Decode;
-
+#[cfg(feature = "net")]
 use crate::quote::{Header, Quote};
+#[cfg(feature = "net")]
 use crate::verify::VerifiedReport;
+#[cfg(feature = "net")]
 use crate::QuoteCollateralV3;
 
 #[cfg(not(feature = "js"))]
+#[cfg(feature = "net")]
 use core::time::Duration;
+#[cfg(feature = "net")]
 use std::borrow::Cow;
+#[cfg(feature = "net")]
 use std::time::SystemTime;
 
+#[cfg(feature = "net")]
 fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
     let value = resposne
         .headers()
@@ -33,6 +42,7 @@ fn get_header(resposne: &reqwest::Response, name: &str) -> Result<String> {
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
+#[cfg(feature = "net")]
 pub async fn get_collateral(
     pccs_url: &str,
     mut quote: &[u8],
@@ -113,6 +123,7 @@ pub async fn get_collateral(
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
+#[cfg(feature = "net")]
 pub async fn get_collateral_from_pcs(
     quote: &[u8],
     #[cfg(not(feature = "js"))] timeout: Duration,
@@ -128,6 +139,7 @@ pub async fn get_collateral_from_pcs(
 }
 
 /// Get collateral and verify the quote.
+#[cfg(feature = "net")]
 pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
@@ -153,6 +165,7 @@ pub async fn get_collateral_and_verify(
     crate::verify::verify(quote, &collateral, now)
 }
 
+#[cfg(feature = "net")]
 fn pcs_url(is_sgx: bool) -> &'static str {
     if is_sgx {
         "https://api.trustedservices.intel.com/sgx/certification/v4"
@@ -161,6 +174,7 @@ fn pcs_url(is_sgx: bool) -> &'static str {
     }
 }
 
+#[cfg(feature = "net")]
 fn normalize_pccs_url(url: &str, is_sgx: bool) -> Cow<'_, str> {
     let url = url.trim_end_matches('/');
     let path = if is_sgx {

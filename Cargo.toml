@@ -45,7 +45,7 @@ serde_json = { version = "1.0.133", optional = true, features = [
 ] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
-getrandom = { version = "0.2", optional = true, features = ["js"] }
+getrandom = { version = "0.2", optional = true}
 serde-wasm-bindgen = { version = "0.6.5", optional = true}
 wasm-bindgen = { version = "0.2.95", optional = true }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
@@ -65,7 +65,8 @@ tokio = { version = "1.41.1", features = ["full"] }
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["std", "report"]
+default = ["std", "report", "net"]
+net = ["reqwest"]
 std = [
     "serde/std",
     "scale/std",
@@ -78,8 +79,8 @@ std = [
     "der/std",
     "serde_json",
     "anyhow",
-    "reqwest",
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
-js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
+js = ["ring/wasm32_unknown_unknown_js", "getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
+contract = ["getrandom"]
