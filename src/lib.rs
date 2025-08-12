@@ -38,22 +38,14 @@
 #[macro_use]
 extern crate alloc;
 
-use borsh::{BorshDeserialize, BorshSerialize};
 use scale::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Encode,
-    Decode,
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
+#[cfg(feature = "borsh")]
+use borsh::{BorshDeserialize, BorshSerialize};
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct QuoteCollateralV3 {
     pub pck_crl_issuer_chain: String,
     #[serde(with = "serde_bytes")]

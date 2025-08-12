@@ -8,7 +8,7 @@ authors = ["Kevin Wang <wy721@qq.com>"]
 repository = "https://github.com/Phala-Network/dcap-qvl"
 
 [dependencies]
-borsh = { version = "1.5.7", features = ["derive"] }
+borsh = { version = "1.5.7", features = ["derive"], optional = true}
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.215", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
@@ -95,6 +95,7 @@ std = [
     "reqwest",
     "urlencoding",
 ]
+borsh = ["dep:borsh"]
 report = ["std", "tracing", "futures"]
 js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]
