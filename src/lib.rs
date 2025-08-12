@@ -38,10 +38,22 @@
 #[macro_use]
 extern crate alloc;
 
+use borsh::{BorshDeserialize, BorshSerialize};
 use scale::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(
+    Encode,
+    Decode,
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
 pub struct QuoteCollateralV3 {
     pub pck_crl_issuer_chain: String,
     #[serde(with = "serde_bytes")]
