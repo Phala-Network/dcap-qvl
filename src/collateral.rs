@@ -1,6 +1,10 @@
+#[cfg(feature = "net")]
 use alloc::string::{String, ToString};
+#[cfg(feature = "net")]
 use anyhow::{anyhow, bail, Context, Result};
+#[cfg(feature = "net")]
 use der::Decode as DerDecode;
+#[cfg(feature = "net")]
 use scale::Decode;
 use x509_cert::{
     ext::pkix::{
@@ -12,10 +16,12 @@ use x509_cert::{
 
 use crate::quote::Quote;
 use crate::verify::VerifiedReport;
+#[cfg(feature = "net")]
 use crate::QuoteCollateralV3;
 
-#[cfg(not(feature = "js"))]
+#[cfg(all(not(feature = "js"), feature = "net"))]
 use core::time::Duration;
+#[cfg(feature = "net")]
 use std::time::SystemTime;
 
 const PCS_URL: &str = "https://api.trustedservices.intel.com";
@@ -68,6 +74,7 @@ impl PcsEndpoints {
     }
 }
 
+#[cfg(feature = "net")]
 fn get_header(response: &reqwest::Response, name: &str) -> Result<String> {
     let value = response
         .headers()
@@ -132,6 +139,7 @@ fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
+#[cfg(feature = "net")]
 pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCollateralV3> {
     let quote = Quote::decode(&mut quote)?;
     let ca = quote.ca().context("Failed to get CA")?;
@@ -263,6 +271,7 @@ pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> 
 }
 
 /// Get collateral and verify the quote.
+#[cfg(feature = "net")]
 pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
