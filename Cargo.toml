@@ -84,8 +84,7 @@ name = "dcap_qvl"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["std", "report", "net"]
-net = ["reqwest"]
+default = ["std", "report"]
 std = [
     "serde/std",
     "scale/std",
@@ -100,7 +99,7 @@ std = [
     "anyhow",
     "urlencoding",
 ]
-report = ["std", "tracing", "futures"]
+report = ["std", "tracing", "futures", "reqwest"]
 js = [
     "ring/wasm32_unknown_unknown_js",
     "getrandom",
