@@ -2,8 +2,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "borsh")]
+use borsh::{BorshDeserialize, BorshSerialize};
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TcbInfo {
     pub id: String,
     pub version: u8,
@@ -18,6 +22,7 @@ pub struct TcbInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TcbLevel {
     pub tcb: Tcb,
     pub tcb_date: String,
@@ -28,6 +33,7 @@ pub struct TcbLevel {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Tcb {
     #[serde(rename = "sgxtcbcomponents")]
     pub sgx_components: Vec<TcbComponents>,
@@ -39,6 +45,7 @@ pub struct Tcb {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TcbComponents {
     pub svn: u8,
 }

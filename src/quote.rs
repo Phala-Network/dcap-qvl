@@ -6,12 +6,16 @@ use scale::{Decode, Input};
 use serde::{Deserialize, Serialize};
 use x509_cert::Certificate;
 
+#[cfg(feature = "borsh")]
+use borsh::{BorshDeserialize, BorshSerialize};
+
 use crate::{
     constants::{self, *},
     utils,
 };
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
@@ -46,6 +50,7 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
 }
 
 #[derive(Decode, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Header {
     pub version: u16,
     pub attestation_key_type: u16,
@@ -71,6 +76,7 @@ pub struct Body {
 }
 
 #[derive(Serialize, Deserialize, Decode, Debug, Clone)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct EnclaveReport {
     #[serde(with = "serde_bytes")]
     pub cpu_svn: [u8; 16],
@@ -185,6 +191,7 @@ impl TDAttributes {
 }
 
 #[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TDReport10 {
     #[serde(with = "serde_bytes")]
     pub tee_tcb_svn: [u8; 16],
@@ -219,6 +226,7 @@ pub struct TDReport10 {
 }
 
 #[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TDReport15 {
     pub base: TDReport10,
     #[serde(with = "serde_bytes")]
@@ -228,6 +236,7 @@ pub struct TDReport15 {
 }
 
 #[derive(Decode, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct CertificationData {
     pub cert_type: u16,
     pub body: Data<u32>,
@@ -244,6 +253,7 @@ impl core::fmt::Debug for CertificationData {
 }
 
 #[derive(Decode, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct QEReportCertificationData {
     #[serde(with = "serde_bytes")]
     pub qe_report: [u8; ENCLAVE_REPORT_BYTE_LEN],
@@ -254,6 +264,7 @@ pub struct QEReportCertificationData {
 }
 
 #[derive(Decode, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV3 {
     #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
@@ -268,6 +279,7 @@ pub struct AuthDataV3 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV4 {
     #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
@@ -307,6 +319,7 @@ impl Decode for AuthDataV4 {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum AuthData {
     V3(AuthDataV3),
     V4(AuthDataV4),
@@ -336,6 +349,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum Report {
     SgxEnclave(EnclaveReport),
     TD10(TDReport10),
@@ -371,6 +385,7 @@ impl Report {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Quote {
     pub header: Header,
     pub report: Report,
