@@ -13,6 +13,7 @@ The Python bindings support Python 3.8+ as specified in `pyproject.toml`. We pro
 - Python 3.10
 - Python 3.11
 - Python 3.12
+- Python 3.13
 
 ## Testing Scripts
 
@@ -20,7 +21,7 @@ The Python bindings support Python 3.8+ as specified in `pyproject.toml`. We pro
 
 ```bash
 # Run the shell script for a quick test
-./scripts/test_python_versions.sh
+./tests/test_python_versions.sh
 
 # Or use the Makefile target
 make test_python_versions
@@ -46,7 +47,12 @@ Each Python version goes through the following test phases:
    - Create `QuoteCollateralV3` objects
    - JSON serialization/deserialization
    - Error handling with invalid data
-7. **Unit Tests**: Run pytest unit tests (if available)
+   - Async collateral functions with `await` syntax
+7. **Unit Tests**: Run pytest unit tests with async support (pytest-asyncio)
+8. **Async Tests**: Test async collateral functions:
+   - `get_collateral_for_fmspc`
+   - `get_collateral_from_pcs`
+   - `get_collateral_and_verify`
 
 ## Example Output
 
@@ -143,7 +149,12 @@ For CI/CD pipelines, you can use the testing scripts:
 # GitHub Actions example
 - name: Test Python versions
   run: |
-    ./scripts/test_python_versions.sh
+    ./python-bindings/tests/test_python_versions.sh
+    
+- name: Test async functions
+  run: |
+    cd python-bindings
+    uv run python tests/test_all_async_functions.py
 ```
 
 ## Report Generation
@@ -179,6 +190,8 @@ The detailed Python script generates a JSON report (`python_version_test_report.
 | `make build_python` | Build Python bindings for current Python version |
 | `make test_python` | Run basic Python functionality test |
 | `make test_python_versions` | Test across all Python versions (shell script) |
+| `make test_async` | Test async collateral functions with samples |
+| `make test_async_comprehensive` | Run comprehensive async function tests |
 | `make python_clean` | Clean Python build artifacts |
 
 ## Requirements

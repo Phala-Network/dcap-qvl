@@ -153,7 +153,8 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
     if platform.startswith("windows"):
         cmd.append("--find-interpreter")
     else:
-        cmd.extend(["--interpreter", "python3.7"])
+        # Use Python 3.8 as minimum version (matches abi3-py38 feature)
+        cmd.extend(["--interpreter", "python3.8"])
 
     # Add cross-compilation flags
     if use_zig:

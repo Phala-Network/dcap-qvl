@@ -53,7 +53,7 @@ wasm-bindgen-futures = { version = "0.4.50" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 # Python bindings
-pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py37", "generate-import-lib"] }
+pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 pyo3-async-runtimes = { version = "0.25", optional = true, features = ["tokio-runtime"] }
 tokio = { version = "1.41.1", optional = true, features = ["full"] }
 

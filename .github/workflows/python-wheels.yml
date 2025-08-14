@@ -232,4 +232,4 @@ jobs:
           fi
       - name: Test installation
         working-directory: python-bindings
-        run: uv run python scripts/test_installation.py
+        run: uv run python tests/test_installation.py

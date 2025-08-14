@@ -74,14 +74,24 @@ make test_python_versions
 ## Usage
 
 ```python
+import asyncio
 import dcap_qvl
 
-# Create collateral from JSON
-collateral = dcap_qvl.QuoteCollateralV3.from_json(json_data)
+async def main():
+    # Get collateral from Intel PCS (async)
+    quote_data = open("quote.bin", "rb").read()
+    collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
+    
+    # Verify quote
+    result = dcap_qvl.verify(quote_data, collateral, timestamp)
+    print(f"Status: {result.status}")
+    
+    # Or get collateral and verify in one step (async)
+    result = await dcap_qvl.get_collateral_and_verify(quote_data)
+    print(f"Status: {result.status}")
 
-# Verify quote
-result = dcap_qvl.verify(quote_bytes, collateral, timestamp)
-print(f"Status: {result.status}")
+# Run async code
+asyncio.run(main())
 ```
 
 See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.
