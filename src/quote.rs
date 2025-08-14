@@ -49,7 +49,7 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     }
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Header {
     pub version: u16,
@@ -235,7 +235,7 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
-#[derive(Decode, Serialize, Deserialize)]
+#[derive(Decode, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct CertificationData {
     pub cert_type: u16,
@@ -252,7 +252,7 @@ impl core::fmt::Debug for CertificationData {
     }
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct QEReportCertificationData {
     #[serde(with = "serde_bytes")]
@@ -263,7 +263,7 @@ pub struct QEReportCertificationData {
     pub certification_data: CertificationData,
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV3 {
     #[serde(with = "serde_bytes")]
@@ -278,7 +278,7 @@ pub struct AuthDataV3 {
     pub certification_data: CertificationData,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV4 {
     #[serde(with = "serde_bytes")]
@@ -318,7 +318,7 @@ impl Decode for AuthDataV4 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum AuthData {
     V3(AuthDataV3),
@@ -384,7 +384,7 @@ impl Report {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Quote {
     pub header: Header,
