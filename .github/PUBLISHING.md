@@ -62,7 +62,7 @@ All wheels are built with abi3 (stable ABI) enabled, meaning:
 2. **Local testing**:
    ```bash
    cd python-bindings
-   ./scripts/test_python_versions.sh
+   ./tests/test_python_versions.sh
    ```
 
 ## Rust Crate (crates.io)

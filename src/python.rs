@@ -1,9 +1,11 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
 
 use crate::{
+    collateral::get_collateral_for_fmspc,
     quote::Quote,
     verify::{verify, VerifiedReport},
     QuoteCollateralV3,
@@ -160,7 +162,11 @@ impl PyQuote {
     }
 
     fn is_tdx(&self) -> bool {
-        !self.inner.header.is_sgx()
+        !self.is_sgx()
+    }
+
+    fn is_sgx(&self) -> bool {
+        self.inner.header.is_sgx()
     }
 
     fn quote_type(&self) -> String {
@@ -193,12 +199,36 @@ fn parse_quote(raw_quote: &Bound<'_, PyBytes>) -> PyResult<PyQuote> {
     PyQuote::parse(raw_quote)
 }
 
+#[pyfunction(name = "get_collateral_for_fmspc")]
+fn get_collateral_for_fmspc_py<'py>(
+    py: Python<'py>,
+    pccs_url: String,
+    fmspc: String,
+    ca: String,
+    for_sgx: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    future_into_py(py, async move {
+        // Convert ca String to &'static str by leaking it
+        // This is necessary because the Rust function expects &'static str
+        let ca_static: &'static str = Box::leak(ca.into_boxed_str());
+
+        match get_collateral_for_fmspc(&pccs_url, fmspc, ca_static, for_sgx).await {
+            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to get collateral for FMSPC: {}",
+                e
+            ))),
+        }
+    })
+}
+
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(parse_quote, m)?)?;
+    m.add_function(wrap_pyfunction!(get_collateral_for_fmspc_py, m)?)?;
 
     Ok(())
 }

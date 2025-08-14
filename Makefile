@@ -35,11 +35,17 @@ test_python:
 	@echo "Testing Python bindings..."
 	cd python-bindings && uv run python examples/basic_test.py
 	@echo "Testing Python bindings across multiple versions..."
-	./python-bindings/scripts/test_python_versions.sh
+	./python-bindings/tests/test_python_versions.sh
 	@echo "Testing collateral API..."
 	cd python-bindings && uv run python -m pytest tests/test_collateral_api.py -v
+	@echo "Testing async collateral functions..."
+	cd python-bindings && uv run python tests/test_with_samples.py
 	@echo "Testing across Python versions with cross-version script..."
-	cd python-bindings && ./scripts/test_cross_versions.sh
+	cd python-bindings && ./tests/test_cross_versions.sh
+	@echo "Testing async collateral functions with sample data..."
+	cd python-bindings && uv run python tests/test_with_samples.py
+	@echo "Running comprehensive async function tests..."
+	cd python-bindings && uv run python tests/test_all_async_functions.py
 
 python_clean:
 	@echo "Cleaning Python build artifacts..."

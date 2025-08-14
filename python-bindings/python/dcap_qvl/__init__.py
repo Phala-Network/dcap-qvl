@@ -30,6 +30,7 @@ from .dcap_qvl import (
     PyQuote as Quote,
     py_verify as verify,
     parse_quote,
+    get_collateral_for_fmspc,
 )
 
 # Default Intel PCS URL
@@ -54,7 +55,7 @@ def _make_pcs_request(url: str) -> bytes:
         raise RuntimeError(f"Failed to fetch from {url}: {e}")
 
 
-def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
+async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
     """Get collateral from PCCS URL.
 
     Args:
@@ -73,78 +74,13 @@ def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
         raise TypeError("raw_quote must be bytes")
 
     quote = Quote.parse(raw_quote)
-    # Extract FMSPC from quote
     fmspc = quote.fmspc()
-
-    # Determine if SGX or TDX
-    is_tdx = quote.is_tdx()
+    is_sgx = quote.is_sgx()
     ca = quote.ca()
-
-    # Build PCS endpoints
-    base_url = pccs_url.rstrip('/')
-
-    if is_tdx:
-        # TDX endpoints
-        pckcrl_url = f"{base_url}/tdx/certification/v4/pckcrl?ca={ca}&encoding=der"
-        rootcacrl_url = f"{base_url}/tdx/certification/v4/rootcacrl"
-        tcb_url = f"{base_url}/tdx/certification/v4/tcb?fmspc={fmspc}"
-        qe_identity_url = f"{base_url}/tdx/certification/v4/qe/identity?update=standard"
-    else:
-        # SGX endpoints
-        pckcrl_url = f"{base_url}/sgx/certification/v4/pckcrl?ca={ca}&encoding=der"
-        rootcacrl_url = f"{base_url}/sgx/certification/v4/rootcacrl"
-        tcb_url = f"{base_url}/sgx/certification/v4/tcb?fmspc={fmspc}"
-        qe_identity_url = f"{base_url}/sgx/certification/v4/qe/identity?update=standard"
-
-    # Fetch collateral data
-    try:
-        # Get PCK CRL and issuer chain
-        pckcrl_response = _make_pcs_request(pckcrl_url)
-        pck_crl = pckcrl_response
-        pck_crl_issuer_chain = ""  # Would need to parse from response headers
-
-        # Get Root CA CRL
-        root_ca_crl = _make_pcs_request(rootcacrl_url)
-
-        # Get TCB Info
-        tcb_response = _make_pcs_request(tcb_url)
-        tcb_data = json.loads(tcb_response.decode('utf-8'))
-        tcb_info = json.dumps(tcb_data.get('tcbInfo', {}))
-        tcb_info_issuer_chain = ""  # Would need to parse from response headers
-
-        # Extract TCB signature
-        tcb_signature_hex = tcb_data.get('signature', '')
-        tcb_info_signature = bytes.fromhex(
-            tcb_signature_hex) if tcb_signature_hex else b''
-
-        # Get QE Identity
-        qe_response = _make_pcs_request(qe_identity_url)
-        qe_data = json.loads(qe_response.decode('utf-8'))
-        qe_identity = json.dumps(qe_data.get('enclaveIdentity', {}))
-        qe_identity_issuer_chain = ""  # Would need to parse from response headers
-
-        # Extract QE signature
-        qe_signature_hex = qe_data.get('signature', '')
-        qe_identity_signature = bytes.fromhex(
-            qe_signature_hex) if qe_signature_hex else b''
-
-        return QuoteCollateralV3(
-            pck_crl_issuer_chain=pck_crl_issuer_chain,
-            root_ca_crl=root_ca_crl,
-            pck_crl=pck_crl,
-            tcb_info_issuer_chain=tcb_info_issuer_chain,
-            tcb_info=tcb_info,
-            tcb_info_signature=tcb_info_signature,
-            qe_identity_issuer_chain=qe_identity_issuer_chain,
-            qe_identity=qe_identity,
-            qe_identity_signature=qe_identity_signature,
-        )
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to get collateral: {e}")
+    return await get_collateral_for_fmspc(pccs_url, fmspc, ca, is_sgx)
 
 
-def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
+async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
     """Get collateral from Intel PCS.
 
     Args:
@@ -158,10 +94,10 @@ def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
         RuntimeError: If network request fails
         ImportError: If requests library is not available
     """
-    return get_collateral(PCS_URL, raw_quote)
+    return await get_collateral(PCS_URL, raw_quote)
 
 
-def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport:
+async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport:
     """Get collateral and verify the quote.
 
     Args:
@@ -182,11 +118,12 @@ def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) 
         url = PCS_URL
 
     # Get collateral
-    collateral = get_collateral(url, raw_quote)
+    collateral = await get_collateral(url, raw_quote)
 
     # Get current time
     now_secs = int(time.time())
 
+    print("Collateral:", collateral.to_json())
     # Verify quote
     return verify(raw_quote, collateral, now_secs)
 
@@ -199,6 +136,7 @@ __all__ = [
     "get_collateral",
     "get_collateral_from_pcs",
     "get_collateral_and_verify",
+    "get_collateral_for_fmspc",
 ]
 
 __version__ = "0.3.0"
