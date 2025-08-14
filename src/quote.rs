@@ -14,7 +14,7 @@ use crate::{
     utils,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Data<T> {
     pub data: Vec<u8>,
@@ -49,7 +49,9 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     }
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(
+    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Header {
     pub version: u16,
@@ -75,7 +77,9 @@ pub struct Body {
     pub size: u32,
 }
 
-#[derive(Serialize, Deserialize, Decode, Debug, Clone)]
+#[derive(
+    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct EnclaveReport {
     #[serde(with = "serde_bytes")]
@@ -190,7 +194,9 @@ impl TDAttributes {
     }
 }
 
-#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TDReport10 {
     #[serde(with = "serde_bytes")]
@@ -225,7 +231,9 @@ pub struct TDReport10 {
     pub report_data: [u8; 64],
 }
 
-#[derive(Decode, Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct TDReport15 {
     pub base: TDReport10,
@@ -235,7 +243,7 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
-#[derive(Decode, Serialize, Deserialize)]
+#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct CertificationData {
     pub cert_type: u16,
@@ -252,7 +260,7 @@ impl core::fmt::Debug for CertificationData {
     }
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct QEReportCertificationData {
     #[serde(with = "serde_bytes")]
@@ -263,7 +271,7 @@ pub struct QEReportCertificationData {
     pub certification_data: CertificationData,
 }
 
-#[derive(Decode, Debug, Serialize, Deserialize)]
+#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV3 {
     #[serde(with = "serde_bytes")]
@@ -278,7 +286,7 @@ pub struct AuthDataV3 {
     pub certification_data: CertificationData,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct AuthDataV4 {
     #[serde(with = "serde_bytes")]
@@ -318,7 +326,7 @@ impl Decode for AuthDataV4 {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum AuthData {
     V3(AuthDataV3),
@@ -348,7 +356,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum Report {
     SgxEnclave(EnclaveReport),
@@ -384,7 +392,7 @@ impl Report {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub struct Quote {
     pub header: Header,
