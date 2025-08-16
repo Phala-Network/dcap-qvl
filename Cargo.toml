@@ -32,9 +32,11 @@ log = { version = "0.4.20", default-features = false }
 
 anyhow = { version = "1.0.93", optional = true }
 
-ring = { version = "0.17", default-features = false, features = [
-    "alloc",
-] }
+# RustCrypto dependencies
+sha2 = { version = "0.10", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "alloc"] }
+ecdsa = { version = "0.16", default-features = false, features = ["der", "verifying", "alloc"] }
+signature = { version = "2.2", default-features = false }
 reqwest = { version = "0.12.9", optional = true, default-features = false, features = [
     "rustls-tls",
     "blocking",
@@ -83,7 +85,6 @@ std = [
     "serde/std",
     "scale/std",
     "scale-info/std",
-    "ring/std",
     "webpki/std",
     "const-oid/std",
     "pem/std",
@@ -95,5 +96,5 @@ std = [
     "urlencoding",
 ]
 report = ["std", "tracing", "futures"]
-js = ["ring/wasm32_unknown_unknown_js", "getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
+js = ["getrandom", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]

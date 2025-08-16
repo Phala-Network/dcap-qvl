@@ -4,6 +4,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use scale::Decode;
 use webpki::types::UnixTime;
 
+use ecdsa::signature::Verifier;
+use p256::ecdsa::{Signature as P256Signature, VerifyingKey};
+use sha2::{Digest, Sha256};
+
 use {
     crate::constants::*, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned, alloc::string::String,
     alloc::vec::Vec,
@@ -184,23 +188,29 @@ pub fn verify(
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
-    if qe_hash.as_ref() != &qe_report.report_data[0..32] {
+    let mut hasher = Sha256::new();
+    hasher.update(&qe_hash_data);
+    let qe_hash = hasher.finalize();
+    if qe_hash.as_slice() != &qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
     }
 
     // Check signature from auth data
     let mut pub_key = [0x04u8; 65]; //Prepend 0x04 to specify uncompressed format
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
-    let peer_public_key =
-        ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
-    peer_public_key
-        .verify(
-            raw_quote
-                .get(..signed_quote_len)
-                .ok_or(anyhow!("Failed to get signed quote"))?,
-            &auth_data.ecdsa_signature,
-        )
+
+    let verifying_key = VerifyingKey::from_sec1_bytes(&pub_key)
+        .map_err(|e| anyhow!("Failed to parse public key: {}", e))?;
+
+    let signature = P256Signature::from_slice(&auth_data.ecdsa_signature)
+        .map_err(|e| anyhow!("Failed to parse signature: {}", e))?;
+
+    let message = raw_quote
+        .get(..signed_quote_len)
+        .ok_or(anyhow!("Failed to get signed quote"))?;
+
+    verifying_key
+        .verify(message, &signature)
         .map_err(|_| anyhow!("Isv enclave report signature is invalid"))?;
 
     // Extract information from the quote
