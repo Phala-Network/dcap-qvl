@@ -251,6 +251,22 @@ class Quote:
         """
         ...
 
+    def is_sgx(self) -> bool:
+        """
+        Check if this is an SGX quote.
+
+        Returns:
+            True if the quote is SGX format, False if TDX format
+
+        Example:
+            >>> quote = dcap_qvl.Quote.parse(quote_data)
+            >>> if quote.is_sgx():
+            ...     print("This is an SGX quote")
+            ... else:
+            ...     print("This is a TDX quote")
+        """
+        ...
+
     def quote_type(self) -> str:
         """
         Get the quote type as a string.
@@ -331,4 +347,9 @@ def parse_quote(raw_quote: bytes) -> Quote:
         >>> print(f"Quote type: {quote.quote_type()}")
         >>> print(f"FMSPC: {quote.fmspc()}")
     """
+    ...
+
+
+async def get_collateral_for_fmspc(pccs_url: str, fmspc: str, ca: str, is_sgx: bool) -> QuoteCollateralV3:
+    """Get collateral for a specific FMSPC from PCCS URL."""
     ...

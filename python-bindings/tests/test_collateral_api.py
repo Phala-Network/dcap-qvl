@@ -38,27 +38,30 @@ class TestCollateralAPI:
         for func in expected_functions:
             assert func in dcap_qvl.__all__, f"{func} not in __all__"
 
-    def test_get_collateral_invalid_input(self):
+    @pytest.mark.asyncio
+    async def test_get_collateral_invalid_input(self):
         """Test get_collateral with invalid inputs."""
         # Test with non-bytes input
         with pytest.raises(TypeError, match="raw_quote must be bytes"):
-            dcap_qvl.get_collateral("http://example.com", "not bytes")
+            await dcap_qvl.get_collateral("http://example.com", "not bytes")
 
         # Test with invalid quote (too short)
         with pytest.raises(ValueError, match="Failed to parse quote"):
-            dcap_qvl.get_collateral("http://example.com", b"short")
+            await dcap_qvl.get_collateral("http://example.com", b"short")
 
-    def test_get_collateral_from_pcs_invalid_input(self):
+    @pytest.mark.asyncio
+    async def test_get_collateral_from_pcs_invalid_input(self):
         """Test get_collateral_from_pcs with invalid inputs."""
         # Test with invalid quote (too short)
         with pytest.raises(ValueError, match="Failed to parse quote"):
-            dcap_qvl.get_collateral_from_pcs(b"short")
+            await dcap_qvl.get_collateral_from_pcs(b"short")
 
-    def test_get_collateral_and_verify_invalid_input(self):
+    @pytest.mark.asyncio
+    async def test_get_collateral_and_verify_invalid_input(self):
         """Test get_collateral_and_verify with invalid inputs."""
         # Test with invalid quote (too short)
         with pytest.raises(ValueError, match="Failed to parse quote"):
-            dcap_qvl.get_collateral_and_verify(b"short")
+            await dcap_qvl.get_collateral_and_verify(b"short")
 
     def test_make_pcs_request_without_requests(self):
         """Test that proper error is raised when requests is not available."""
@@ -108,7 +111,8 @@ class TestCollateralAPI:
         assert collateral2.pck_crl_issuer_chain == collateral.pck_crl_issuer_chain
         assert collateral2.tcb_info == collateral.tcb_info
 
-    def test_get_collateral_and_verify_happy_path(self):
+    @pytest.mark.asyncio
+    async def test_get_collateral_and_verify_happy_path(self):
         """Test get_collateral_and_verify with real sample quote data."""
 
         # Load real sample quote data from the samples directory
@@ -122,33 +126,11 @@ class TestCollateralAPI:
             # If no sample files found, skip this test
             pytest.skip("Sample quote files not found")
 
-        # Note: This test uses real quote data but will likely fail with network errors
-        # since it tries to fetch collateral from Intel's services. The test verifies
-        # the function is callable and handles real quote parsing correctly.
+        result = await dcap_qvl.get_collateral_and_verify(bytes(test_quote))
 
-        try:
-            # This should attempt to extract FMSPC, get collateral, and verify
-            # It will likely fail due to invalid quote structure or network issues
-            result = dcap_qvl.get_collateral_and_verify(bytes(test_quote))
-
-            # If it somehow succeeds, verify the result structure
-            assert hasattr(result, 'status')
-            assert hasattr(result, 'advisory_ids')
-
-        except ValueError as e:
-            # Expected to fail with quote parsing errors
-            assert any(phrase in str(e) for phrase in [
-                "Quote too short",
-                "Could not extract FMSPC",
-                "Failed to parse quote",
-                "Invalid certificate"
-            ])
-
-        except Exception as e:
-            # May also fail with network errors or other issues
-            # The important thing is that the function is callable and handles errors properly
-            assert isinstance(e, (ValueError, ImportError,
-                              ConnectionError, Exception))
+        # If it somehow succeeds, verify the result structure
+        assert hasattr(result, 'status')
+        assert hasattr(result, 'advisory_ids')
 
 
 if __name__ == "__main__":
