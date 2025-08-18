@@ -33,7 +33,6 @@
 //! }
 //! ```
 
-#![recursion_limit = "512"]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 #[macro_use]
