@@ -33,6 +33,7 @@
 //! }
 //! ```
 
+#![recursion_limit = "512"]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
 #[macro_use]
@@ -41,11 +42,14 @@ extern crate alloc;
 use scale::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "borsh_schema")]
+use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QuoteCollateralV3 {
     pub pck_crl_issuer_chain: String,
     #[serde(with = "serde_bytes")]

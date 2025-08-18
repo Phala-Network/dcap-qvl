@@ -6,6 +6,8 @@ use scale::{Decode, Input};
 use serde::{Deserialize, Serialize};
 use x509_cert::Certificate;
 
+#[cfg(feature = "borsh_schema")]
+use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -16,6 +18,7 @@ use crate::{
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
@@ -53,6 +56,7 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct Header {
     pub version: u16,
     pub attestation_key_type: u16,
@@ -81,6 +85,7 @@ pub struct Body {
     Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct EnclaveReport {
     #[serde(with = "serde_bytes")]
     pub cpu_svn: [u8; 16],
@@ -198,6 +203,7 @@ impl TDAttributes {
     Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct TDReport10 {
     #[serde(with = "serde_bytes")]
     pub tee_tcb_svn: [u8; 16],
@@ -235,6 +241,7 @@ pub struct TDReport10 {
     Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct TDReport15 {
     pub base: TDReport10,
     #[serde(with = "serde_bytes")]
@@ -245,6 +252,7 @@ pub struct TDReport15 {
 
 #[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct CertificationData {
     pub cert_type: u16,
     pub body: Data<u32>,
@@ -262,6 +270,7 @@ impl core::fmt::Debug for CertificationData {
 
 #[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QEReportCertificationData {
     #[serde(with = "serde_bytes")]
     pub qe_report: [u8; ENCLAVE_REPORT_BYTE_LEN],
@@ -273,6 +282,7 @@ pub struct QEReportCertificationData {
 
 #[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct AuthDataV3 {
     #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
@@ -288,6 +298,7 @@ pub struct AuthDataV3 {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct AuthDataV4 {
     #[serde(with = "serde_bytes")]
     pub ecdsa_signature: [u8; ECDSA_SIGNATURE_BYTE_LEN],
@@ -333,6 +344,35 @@ pub enum AuthData {
     V4(AuthDataV4),
 }
 
+// Manual implementation of BorshSchema for AuthData to work around
+// the derive bug described in https://github.com/near/borsh-rs/issues/355
+#[cfg(feature = "borsh_schema")]
+impl borsh::BorshSchema for AuthData {
+    fn declaration() -> borsh::schema::Declaration {
+        "AuthData".to_string()
+    }
+
+    fn add_definitions_recursively(
+        definitions: &mut borsh::__private::maybestd::collections::BTreeMap<
+            borsh::schema::Declaration,
+            borsh::schema::Definition,
+        >,
+    ) {
+        let definition = borsh::schema::Definition::Enum {
+            tag_width: 1,
+            variants: vec![
+                (0, "V3".to_string(), AuthDataV3::declaration()),
+                (1, "V4".to_string(), AuthDataV4::declaration()),
+            ],
+        };
+
+        borsh::schema::add_definition(Self::declaration(), definition, definitions);
+
+        AuthDataV3::add_definitions_recursively(definitions);
+        AuthDataV4::add_definitions_recursively(definitions);
+    }
+}
+
 impl AuthData {
     pub fn into_v3(self) -> AuthDataV3 {
         match self {
@@ -358,6 +398,7 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
 
 #[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub enum Report {
     SgxEnclave(EnclaveReport),
     TD10(TDReport10),
@@ -394,6 +435,7 @@ impl Report {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct Quote {
     pub header: Header,
     pub report: Report,
