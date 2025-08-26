@@ -139,4 +139,4 @@ __all__ = [
     "get_collateral_for_fmspc",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.3.2"
