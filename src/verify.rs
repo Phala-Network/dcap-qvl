@@ -189,7 +189,7 @@ pub fn verify(
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
     let mut hasher = Sha256::new();
-    hasher.update(&qe_hash_data);
+    hasher.update(qe_hash_data);
     let qe_hash = hasher.finalize();
     if qe_hash.as_slice() != &qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
