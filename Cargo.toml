@@ -16,7 +16,7 @@ scale = { package = "parity-scale-codec", version = "3.6.12", default-features =
     "derive",
 ] }
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
-chrono = { version = "0.4.31", default-features = false, features = [
+chrono = { version = "0.4.42", default-features = false, features = [
     "alloc",
     "serde",
 ] }
@@ -29,20 +29,20 @@ asn1_der = { version = "0.7", default-features = false, features = [
 ] }
 der = { version = "0.7.8", default-features = false, features = ["alloc"] }
 
-log = { version = "0.4.20", default-features = false }
+log = { version = "0.4.28", default-features = false }
 
-anyhow = { version = "1.0.93", optional = true }
+anyhow = { version = "1.0.99", optional = true }
 
 ring = { version = "0.17", default-features = false, features = [
     "alloc",
 ] }
-reqwest = { version = "0.12.9", optional = true, default-features = false, features = [
+reqwest = { version = "0.12.23", optional = true, default-features = false, features = [
     "rustls-tls",
     "blocking",
     "hickory-dns",
 ] }
 urlencoding = { version = "2", optional = true }
-serde_json = { version = "1.0.133", optional = true, features = [
+serde_json = { version = "1.0.143", optional = true, features = [
     "preserve_order",
 ] }
 tracing = { version = "0.1", optional = true }
@@ -50,13 +50,13 @@ futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true}
 wasm-bindgen = { version = "0.2.95", optional = true }
-wasm-bindgen-futures = { version = "0.4.50" }
+wasm-bindgen-futures = { version = "0.4.51" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 # Python bindings
 pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 pyo3-async-runtimes = { version = "0.25", optional = true, features = ["tokio-runtime"] }
-tokio = { version = "1.41.1", optional = true, features = ["full"] }
+tokio = { version = "1.47.1", optional = true, features = ["full"] }
 
 [dependencies.dcap-qvl-webpki]
 version = "0.103.3"
@@ -69,10 +69,10 @@ default-features = false
 features = ["alloc", "ring"]
 
 [dev-dependencies]
-insta = "1.41.1"
-reqwest = "0.12.9"
-serde_json = "1.0.133"
-tokio = { version = "1.41.1", features = ["full"] }
+insta = "1.43.2"
+reqwest = "0.12.23"
+serde_json = "1.0.143"
+tokio = { version = "1.47.1", features = ["full"] }
 
 [lib]
 name = "dcap_qvl"
