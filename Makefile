@@ -22,6 +22,20 @@ build_node_pkg: install_wasm_tool
 	@echo "Building for Node.js..."
 	$(BUILD_NODE)
 
+publish_npm: build_web_pkg build_node_pkg
+	@echo "Updating package names..."
+	@if command -v jq &> /dev/null; then \
+		jq '.name = "@phala/dcap-qvl-web"' pkg/web/package.json > pkg/web/package.json.tmp && mv pkg/web/package.json.tmp pkg/web/package.json; \
+		jq '.name = "@phala/dcap-qvl-node"' pkg/node/package.json > pkg/node/package.json.tmp && mv pkg/node/package.json.tmp pkg/node/package.json; \
+	else \
+		sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-web"/' pkg/web/package.json && rm pkg/web/package.json.bak; \
+		sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-node"/' pkg/node/package.json && rm pkg/node/package.json.bak; \
+	fi
+	@echo "Publishing web package to npm..."
+	cd pkg/web && npm publish --access public
+	@echo "Publishing node package to npm..."
+	cd pkg/node && npm publish --access public
+
 clean:
 	@echo "Cleaning up..."
 	rm -rf pkg
@@ -54,4 +68,4 @@ python_clean:
 	find python-bindings -name "*.pyc" -delete
 	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-.PHONY: all install_wasm_tool build_web_pkg build_node_pkg clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean
+.PHONY: all install_wasm_tool build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean
