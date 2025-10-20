@@ -190,6 +190,15 @@ pub async fn get_collateral_for_fmspc(
     let mut root_ca_crl = None;
     if !endpoints.is_pcs() {
         root_ca_crl = http_get(&client, &endpoints.url_rootcacrl()).await.ok();
+
+        if let Some(ref crl) = root_ca_crl {
+            // PCCS returns hex-encoded CRL instead of binary DER.
+            let hex_str =
+                core::str::from_utf8(crl).context("Failed to convert hex-encoded CRL to string")?;
+            let ca_crl = hex::decode(hex_str)
+                .map_err(|_| anyhow!("Failed to decode hex-encoded root CA CRL"))?;
+            root_ca_crl = Some(ca_crl);
+        }
     }
     let root_ca_crl = match root_ca_crl {
         Some(crl) => crl,
