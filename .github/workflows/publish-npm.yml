@@ -85,24 +85,42 @@ jobs:
         run: |
           wasm-pack build --release --target nodejs --out-dir pkg/node --out-name dcap-qvl-node -- --features=js
 
-      - name: Update package versions
+      - name: Update package names and versions
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          # Update web package version
+
+          # Update web package
           cd pkg/web
+          # Change package name to @phala/dcap-qvl-web
+          if command -v jq &> /dev/null; then
+            jq '.name = "@phala/dcap-qvl-web"' package.json > package.json.tmp && mv package.json.tmp package.json
+          else
+            sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-web"/' package.json && rm -f package.json.bak
+          fi
+          # Update version
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           cd ../..
-          # Update node package version
+
+          # Update node package
           cd pkg/node
+          # Change package name to @phala/dcap-qvl-node
+          if command -v jq &> /dev/null; then
+            jq '.name = "@phala/dcap-qvl-node"' package.json > package.json.tmp && mv package.json.tmp package.json
+          else
+            sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-node"/' package.json && rm -f package.json.bak
+          fi
+          # Update version
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           cd ../..
 
       - name: List built packages
         run: |
           echo "Web package:"
+          cat pkg/web/package.json | grep -E '"name"|"version"'
           ls -lh pkg/web/
           echo ""
           echo "Node package:"
+          cat pkg/node/package.json | grep -E '"name"|"version"'
           ls -lh pkg/node/
 
       - name: Publish Web Package (Dry Run)
