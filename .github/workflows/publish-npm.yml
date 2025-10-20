@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write  # Required for OIDC trusted publishing
     steps:
       - uses: actions/checkout@v5
 
@@ -105,19 +105,25 @@ jobs:
           echo "Node package:"
           ls -lh pkg/node/
 
+      - name: Publish Web Package (Dry Run)
+        if: inputs.dry_run
+        working-directory: pkg/web
+        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --dry-run
+
+      - name: Publish Node Package (Dry Run)
+        if: inputs.dry_run
+        working-directory: pkg/node
+        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --dry-run
+
       - name: Publish Web Package
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        if: ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.event_name == 'workflow_dispatch') && !inputs.dry_run
         working-directory: pkg/web
         run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish Node Package
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        if: ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.event_name == 'workflow_dispatch') && !inputs.dry_run
         working-directory: pkg/node
         run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish Summary
         if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
@@ -133,12 +139,14 @@ jobs:
             echo "  npm install @phala/dcap-qvl-node@${{ steps.version.outputs.npm_tag }}"
           fi
 
-      - name: Dry run message
+      - name: Dry run summary
         if: inputs.dry_run
         run: |
-          echo "✅ Packages built successfully (dry run mode - not published)"
+          echo "✅ Dry run completed successfully"
           echo "Version: ${{ steps.version.outputs.version }}"
           echo "NPM tag: ${{ steps.version.outputs.npm_tag }}"
+          echo ""
+          echo "The packages were validated and would be published if dry_run was false."
           echo ""
           echo "Web package version: $(cat pkg/web/package.json | grep version)"
           echo "Node package version: $(cat pkg/node/package.json | grep version)"
