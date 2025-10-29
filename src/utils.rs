@@ -8,7 +8,7 @@ use webpki::{self, types::UnixTime, BorrowedCertRevocationList};
 use webpki::{types::CertificateDer, CertRevocationList};
 use x509_cert::Certificate;
 
-use crate::constants::*;
+use crate::{constants::*, oids};
 
 pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>> {
     let cert: Certificate =

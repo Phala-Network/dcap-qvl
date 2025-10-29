@@ -122,6 +122,11 @@ impl PyVerifiedReport {
         self.inner.advisory_ids.clone()
     }
 
+    #[getter]
+    fn ppid(&self) -> Vec<u8> {
+        self.inner.ppid.clone()
+    }
+
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string_pretty(&self.inner)
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize to JSON: {}", e)))

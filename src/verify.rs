@@ -5,8 +5,8 @@ use scale::Decode;
 use webpki::types::UnixTime;
 
 use {
-    crate::constants::*, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned, alloc::string::String,
-    alloc::vec::Vec,
+    crate::constants::*, crate::intel, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned,
+    alloc::string::String, alloc::vec::Vec,
 };
 
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
@@ -35,6 +35,8 @@ pub struct VerifiedReport {
     pub status: String,
     pub advisory_ids: Vec<String>,
     pub report: Report,
+    #[serde(with = "serde_bytes")]
+    pub ppid: Vec<u8>,
 }
 
 #[cfg(feature = "js")]
@@ -170,6 +172,11 @@ pub fn verify(
     // Then verify the certificate chain
     verify_certificate_chain(&qe_leaf_cert, &qe_certification_certs[1..], now, &crls)?;
 
+    let ppid = intel::parse_pck_extension(qe_certification_certs[0].as_ref())
+        .ok()
+        .map(|ext| ext.ppid.clone())
+        .unwrap_or_default();
+
     // Check QE signature
     let asn1_signature = encode_as_der(&auth_data.qe_report_signature)?;
     if qe_leaf_cert
@@ -278,6 +285,7 @@ pub fn verify(
         status: tcb_status,
         advisory_ids,
         report: quote.report,
+        ppid,
     })
 }
 
