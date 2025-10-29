@@ -11,6 +11,7 @@ use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
 use dcap_qvl::verify::verify;
 use der::Decode;
+use serde::Serialize;
 use x509_cert::Certificate;
 
 #[derive(Parser)]
@@ -117,51 +118,107 @@ fn command_pck_info(args: PckInfoArgs) -> Result<()> {
     let quote_bytes = hex_decode(&raw, args.hex)?;
     let quote = Quote::parse(&quote_bytes).context("Failed to parse quote")?;
 
-    emit_header_summary(&quote);
-
     let certs = intel::extract_cert_chain(&quote)?;
-    println!("Certificate chain contains {} entries:", certs.len());
-    for (idx, cert) in certs.iter().enumerate() {
-        let parsed = Certificate::from_der(cert.as_slice())
-            .map_err(|e| anyhow!("Failed to decode certificate #{idx}: {e}"))?;
-        let subject = parsed.tbs_certificate.subject.to_string();
-        let issuer = parsed.tbs_certificate.issuer.to_string();
-        let role = match idx {
-            0 => "Leaf PCK",
-            1 => "PCK CA",
-            _ => "Issuer",
-        };
-        println!("  [{idx}] {role}: subject=\"{subject}\", issuer=\"{issuer}\"");
-    }
-
     let leaf = certs
         .first()
         .ok_or_else(|| anyhow!("Certificate chain is empty"))?;
     let extension = intel::parse_pck_extension(leaf)?;
 
-    println!("\nIntel extension values (from leaf PCK certificate):");
-    println!("  PPID               : {}", hex_string(&extension.ppid));
-    println!("  CPU SVN            : {}", hex_string(&extension.cpu_svn));
-    println!("  PCE SVN            : {}", extension.pce_svn);
-    println!("  PCE ID             : {}", hex_string(&extension.pce_id));
-    println!("  FMSPC              : {}", hex_string(&extension.fmspc));
-    println!(
-        "  SGX Type           : {} ({})",
-        extension.sgx_type,
-        match extension.sgx_type {
-            0 => "SGX",
-            1 => "TDX",
-            _ => "Unknown",
-        }
-    );
-    let platform_instance_display = extension
-        .platform_instance_id
-        .as_ref()
-        .map(|bytes| hex_string(bytes))
-        .unwrap_or_else(|| "<missing>".to_string());
-    println!("  Platform InstanceID: {}", platform_instance_display);
+    let output = PckInfoOutput::from_quote_and_extension(&quote, &certs, &extension)?;
+    let json = serde_json::to_string(&output).context("Failed to serialize to JSON")?;
+    println!("{}", json);
 
     Ok(())
+}
+const TEE_TYPE_SGX: u32 = 0x0000_0000;
+const TEE_TYPE_TDX: u32 = 0x0000_0081;
+
+#[derive(Serialize)]
+struct PckInfoOutput {
+    quote_version: u16,
+    tee_type: String,
+    user_data: String,
+    certificate_chain: Vec<CertificateInfo>,
+    #[serde(flatten)]
+    intel_extension: IntelExtensionInfo,
+}
+
+#[derive(Serialize)]
+struct CertificateInfo {
+    index: usize,
+    role: String,
+    subject: String,
+    issuer: String,
+}
+
+#[derive(Serialize)]
+struct IntelExtensionInfo {
+    ppid: String,
+    cpu_svn: String,
+    pce_svn: u16,
+    pce_id: String,
+    fmspc: String,
+    sgx_type: u64,
+    sgx_type_name: String,
+    platform_instance_id: Option<String>,
+}
+
+impl PckInfoOutput {
+    fn from_quote_and_extension(
+        quote: &Quote,
+        certs: &[Vec<u8>],
+        extension: &dcap_qvl::intel::PckExtension,
+    ) -> Result<Self> {
+        let tee_type = match quote.header.tee_type {
+            TEE_TYPE_SGX => "SGX",
+            TEE_TYPE_TDX => "TDX",
+            _ => "Unknown",
+        };
+
+        let mut certificate_chain = Vec::new();
+        for (idx, cert) in certs.iter().enumerate() {
+            let parsed = Certificate::from_der(cert.as_slice())
+                .map_err(|e| anyhow!("Failed to decode certificate #{idx}: {e}"))?;
+            let subject = parsed.tbs_certificate.subject.to_string();
+            let issuer = parsed.tbs_certificate.issuer.to_string();
+            let role = match idx {
+                0 => "Leaf PCK",
+                1 => "PCK CA",
+                2 => "Root CA",
+                _ => "Unknown",
+            };
+            certificate_chain.push(CertificateInfo {
+                index: idx,
+                role: role.to_string(),
+                subject,
+                issuer,
+            });
+        }
+
+        let sgx_type_name = match extension.sgx_type {
+            0 => "Standard",
+            1 => "Scalable",
+            2 => "Scalable with integrity",
+            _ => "Unknown",
+        };
+
+        Ok(PckInfoOutput {
+            quote_version: quote.header.version,
+            tee_type: tee_type.to_string(),
+            user_data: hex::encode(quote.header.user_data),
+            certificate_chain,
+            intel_extension: IntelExtensionInfo {
+                ppid: hex::encode(&extension.ppid),
+                cpu_svn: hex::encode(extension.cpu_svn),
+                pce_svn: extension.pce_svn,
+                pce_id: hex::encode(&extension.pce_id),
+                fmspc: hex::encode(extension.fmspc),
+                sgx_type: extension.sgx_type,
+                sgx_type_name: sgx_type_name.to_string(),
+                platform_instance_id: extension.platform_instance_id.as_ref().map(hex::encode),
+            },
+        })
+    }
 }
 
 #[tokio::main]
@@ -175,28 +232,3 @@ async fn main() -> Result<()> {
         Commands::PckInfo(args) => command_pck_info(args).context("Failed to extract PCK info"),
     }
 }
-
-fn emit_header_summary(quote: &Quote) {
-    let tee_type = match quote.header.tee_type {
-        TEE_TYPE_SGX => "SGX",
-        TEE_TYPE_TDX => "TDX",
-        other => {
-            println!("Quote uses unknown TEE type: 0x{other:08x}");
-            "Unknown"
-        }
-    };
-    println!("Quote version {} ({tee_type})", quote.header.version);
-    println!(
-        "  QE SVN: {} | PCE SVN: {} | User data: {}",
-        quote.header.qe_svn,
-        quote.header.pce_svn,
-        hex_string(&quote.header.user_data)
-    );
-}
-
-fn hex_string(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02X}", b)).collect()
-}
-
-const TEE_TYPE_SGX: u32 = 0x0000_0000;
-const TEE_TYPE_TDX: u32 = 0x0000_0081;
