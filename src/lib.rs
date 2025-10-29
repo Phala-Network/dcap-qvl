@@ -68,7 +68,10 @@ pub struct QuoteCollateralV3 {
 #[cfg(feature = "report")]
 pub mod collateral;
 
+pub mod oids;
+
 mod constants;
+pub mod intel;
 mod tcb_info;
 mod utils;
 
