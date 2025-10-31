@@ -42,12 +42,10 @@ export async function verifyEcdsaP256Signature(
 
     // Ensure public key is in uncompressed format
     if (publicKey.length !== 65 || publicKey[0] !== 0x04) {
-      console.error('Invalid public key format, length:', publicKey.length, 'first byte:', publicKey[0]);
       return false;
     }
 
     if (signature.length !== 64) {
-      console.error('Invalid signature length:', signature.length);
       return false;
     }
 
@@ -77,9 +75,7 @@ export async function verifyEcdsaP256Signature(
     );
 
     return isValid;
-  } catch (error) {
-    // Log error for debugging
-    console.error('Signature verification error:', error);
+  } catch {
     return false;
   }
 }

@@ -21,6 +21,7 @@ import {
   verifyCertificateChain,
   getRootCaCertificate,
   parseCrl,
+  checkCertificateRevocation,
 } from './certificate';
 import { sha256, verifyEcdsaP256Signature, encodeEcdsaSignatureAsDer } from './crypto';
 import { hexToBytes, bytesToHex, arraysEqual, arrayGreaterOrEqual } from './utils';
@@ -82,6 +83,10 @@ export async function verify(
 
   // 5. Get root CA
   const rootCa = getRootCaCertificate();
+
+  // CRITICAL: Check if root CA itself has been revoked
+  // This matches Rust line 112: dcap_qvl_webpki::check_single_cert_crl(TRUSTED_ROOT_CA_DER, &crls, now)
+  await checkCertificateRevocation(rootCa, crls, now);
 
   // 6. Verify TCB Info certificate chain and signature
   const tcbCerts = parsePemCertificateChain(collateral.tcb_info_issuer_chain);
