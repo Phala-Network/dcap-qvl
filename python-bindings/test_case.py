@@ -114,30 +114,22 @@ async def cmd_get_collateral(args):
         return 2
 
     try:
-        # For get_collateral, we need to extract FMSPC from quote
-        # This is a simplified approach - in real usage you'd parse the quote structure
-        # For now, we'll use get_collateral_for_fmspc which needs FMSPC explicitly
-        # TDX v4 FMSPC is at offset 0x230
-        if len(quote_bytes) > 0x236:
-            fmspc = quote_bytes[0x230:0x236].hex()
-            ca = "platform"  # Default for TDX
+        # Use the same get_collateral function as Rust (parses quote properly)
+        collateral = await dcap_qvl.get_collateral(pccs_url, quote_bytes)
 
-            collateral = await dcap_qvl.get_collateral_for_fmspc(
-                pccs_url, fmspc, ca, False  # False for TDX
-            )
-
-            if not collateral or not hasattr(collateral, 'tcb_info_issuer_chain'):
-                print("Error: Collateral missing required fields", file=sys.stderr)
-                return 1
-
-            print("Get collateral test: PASS")
-            return 0
-        else:
-            print("Error: Quote too short", file=sys.stderr)
+        if not collateral or not hasattr(collateral, 'tcb_info_issuer_chain'):
+            print(json.dumps({"error": "Collateral missing required fields"}))
             return 1
 
+        # Output collateral JSON directly
+        if hasattr(collateral, 'to_json'):
+            print(collateral.to_json())
+        else:
+            print(json.dumps(collateral.__dict__))
+        return 0
+
     except Exception as e:
-        print(f"Get collateral failed: {e}", file=sys.stderr)
+        print(json.dumps({"error": str(e)}))
         return 1
 
 

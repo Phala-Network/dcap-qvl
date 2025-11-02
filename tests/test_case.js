@@ -78,7 +78,7 @@ async function cmdVerify(args) {
 
     let wasmModule;
     try {
-        wasmModule = require("./pkg/node/dcap-qvl-node");
+        wasmModule = require("../pkg/node/dcap-qvl-node");
     } catch (e) {
         console.error("Failed to load WASM module:", e.message);
         console.error("Please build the WASM bindings first:");
@@ -127,7 +127,7 @@ async function cmdGetCollateral(args) {
 
     let wasmModule;
     try {
-        wasmModule = require("./pkg/node/dcap-qvl-node");
+        wasmModule = require("../pkg/node/dcap-qvl-node");
     } catch (e) {
         console.error("Failed to load WASM module:", e.message);
         console.error("Please build the WASM bindings first:");
@@ -143,7 +143,8 @@ async function cmdGetCollateral(args) {
             process.exit(1);
         }
 
-        console.log("Get collateral test: PASS");
+        // Output collateral JSON directly (like Rust and Python versions)
+        console.log(JSON.stringify(result));
         process.exit(0);
     } catch (e) {
         console.error(`Get collateral failed: ${e}`);

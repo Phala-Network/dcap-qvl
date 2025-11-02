@@ -1257,6 +1257,20 @@ fn main() -> Result<()> {
         })),
     });
 
+    samples.push(TestSample {
+        name: "invalid_cert_format".to_string(),
+        description: "Invalid certificate format in TCB chain".to_string(),
+        should_succeed: false,
+        expected_error: Some("Certificate chain is too short in quote_collateral".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Use malformed certificate data (missing proper PEM headers/footers)
+            let invalid_cert = "INVALID_CERTIFICATE_DATA_NOT_PROPERLY_FORMATTED";
+            collateral["tcb_info_issuer_chain"] = json!(invalid_cert);
+            Ok(())
+        })),
+    });
+
     // Category 8: Signature errors
     println!("\nCategory 8: Signature errors");
     samples.push(TestSample {

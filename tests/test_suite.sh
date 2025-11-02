@@ -1,6 +1,7 @@
 #!/bin/bash
 # DCAP Quote Verification Test Suite
 # Usage: ./tests/test_suite.sh [rust|python|wasm|all]
+# Note: Can be run from any directory
 
 set -e
 
@@ -13,12 +14,14 @@ readonly CYAN='\033[0;36m'
 readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m'
 
-# Constants
-readonly SAMPLES_DIR="test_data/samples"
-readonly CERTS_DIR="test_data/certs"
-readonly RUST_TEST_CASE_CLI="./cli/target/release/test_case"
-readonly PYTHON_TEST_CASE_CLI="python3 ./python-bindings/test_case.py"
-readonly WASM_TEST_CASE_CLI="node ./tests/test_case.js"
+# Constants - make them work from any directory
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+readonly SAMPLES_DIR="$PROJECT_ROOT/test_data/samples"
+readonly CERTS_DIR="$PROJECT_ROOT/test_data/certs"
+readonly RUST_TEST_CASE_CLI="$PROJECT_ROOT/cli/target/release/test_case"
+readonly PYTHON_TEST_CASE_CLI="python3 $PROJECT_ROOT/python-bindings/test_case.py"
+readonly WASM_TEST_CASE_CLI="node $PROJECT_ROOT/tests/test_case.js"
 
 print_box() {
 	local color=$1
@@ -52,9 +55,9 @@ get_category() {
 }
 
 build_rust_tools() {
-	if [ ! -f "$RUST_TEST_CASE_CLI" ] || [ ! -f "./cli/target/release/generate_all_samples" ]; then
+	if [ ! -f "$RUST_TEST_CASE_CLI" ] || [ ! -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ]; then
 		echo "  Building Rust CLI tools..."
-		(cd cli && cargo build --release --bin test_case --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
+		(cd "$PROJECT_ROOT/cli" && cargo build --release --bin test_case --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
 		echo -e "  ${GREEN}✓${NC} Rust CLI tools built"
 	else
 		echo -e "  ${GREEN}✓${NC} Rust CLI tools already built"
@@ -63,9 +66,9 @@ build_rust_tools() {
 
 build_python_binding() {
 	echo "  Building Python binding..."
-	(cd python-bindings && pip install -e . --break-system-packages --quiet 2>&1 | grep -vE "WARNING:|DEPRECATION:") || true
+	(cd "$PROJECT_ROOT/python-bindings" && pip install -e . --break-system-packages --quiet 2>&1 | grep -vE "WARNING:|DEPRECATION:") || true
 	echo -e "  ${GREEN}✓${NC} Python binding built"
-	[ -f "./cli/target/release/generate_all_samples" ] || build_rust_tools
+	[ -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ] || build_rust_tools
 }
 
 check_wasm_opt_version() {
@@ -111,13 +114,13 @@ build_wasm_binding() {
 	else
 		echo -e "  ${GREEN}✓${NC} WASM binding already built"
 	fi
-	[ -f "./cli/target/release/generate_all_samples" ] || build_rust_tools
+	[ -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ] || build_rust_tools
 }
 
 ensure_certificates() {
 	if [ ! -d "$CERTS_DIR" ] || [ ! -f "$CERTS_DIR/root_ca.der" ]; then
 		echo "  Generating test certificates..."
-		./tests/generate_test_certs.sh >/dev/null 2>&1
+		"$SCRIPT_DIR/generate_test_certs.sh" >/dev/null 2>&1
 		echo -e "  ${GREEN}✓${NC} Test certificates generated"
 	else
 		echo -e "  ${GREEN}✓${NC} Certificates found"
@@ -127,7 +130,7 @@ ensure_certificates() {
 ensure_samples() {
 	if [ ! -d "$SAMPLES_DIR" ] || [ -z "$(ls -A "$SAMPLES_DIR" 2>/dev/null)" ]; then
 		echo "  Running sample generator..."
-		./cli/target/release/generate_all_samples
+		"$PROJECT_ROOT/cli/target/release/generate_all_samples"
 		echo -e "  ${GREEN}✓${NC} Test samples generated"
 	else
 		local count=$(($(find "$SAMPLES_DIR" -maxdepth 1 -type d | wc -l) - 1))
@@ -213,15 +216,14 @@ run_single_test() {
 
 run_get_collateral_test() {
 	local test_name=$1
-	local test_sample_dir="$SAMPLES_DIR/valid_tdx_v4"
-	local quote_file="$test_sample_dir/quote.bin"
+	local quote_file="$PROJECT_ROOT/sample/tdx_quote"
 
 	if [ ! -f "$quote_file" ]; then
 		echo -e "  ${YELLOW}⚠${NC} Skipping get-collateral test - no TDX quote available"
 		return 0
 	fi
 
-	echo "  Testing get-collateral with TDX v4 quote..."
+	echo "  Testing get-collateral with real TDX quote..."
 
 	local cmd
 	local cmd_args
@@ -259,10 +261,161 @@ run_get_collateral_test() {
 	fi
 
 	if [ $exit_code -eq 0 ]; then
-		echo "$output" | grep -q "Get collateral test: PASS"
-		return $?
+		# Parse JSON and validate each field
+		local pck_crl_issuer_chain_length=$(echo "$output" | jq -r '.pck_crl_issuer_chain | length' 2>/dev/null || echo "0")
+		local root_ca_crl_length=$(echo "$output" | jq -r '.root_ca_crl | length' 2>/dev/null || echo "0")
+		local pck_crl_length=$(echo "$output" | jq -r '.pck_crl | length' 2>/dev/null || echo "0")
+		local tcb_info_issuer_chain_length=$(echo "$output" | jq -r '.tcb_info_issuer_chain | length' 2>/dev/null || echo "0")
+		local tcb_info=$(echo "$output" | jq -r '.tcb_info' 2>/dev/null || echo "")
+		local tcb_info_signature_length=$(echo "$output" | jq -r '.tcb_info_signature | length' 2>/dev/null || echo "0")
+		local qe_identity_issuer_chain_length=$(echo "$output" | jq -r '.qe_identity_issuer_chain | length' 2>/dev/null || echo "0")
+		local qe_identity=$(echo "$output" | jq -r '.qe_identity' 2>/dev/null || echo "")
+		local qe_identity_signature_length=$(echo "$output" | jq -r '.qe_identity_signature | length' 2>/dev/null || echo "0")
+
+		# Check all required fields are non-empty
+		if [ "$pck_crl_issuer_chain_length" -eq 0 ]; then
+			echo "  Validation failed: pck_crl_issuer_chain is empty" >&2
+			return 1
+		fi
+
+		if [ "$root_ca_crl_length" -eq 0 ]; then
+			echo "  Validation failed: root_ca_crl is empty" >&2
+			return 1
+		fi
+
+		if [ "$pck_crl_length" -eq 0 ]; then
+			echo "  Validation failed: pck_crl is empty" >&2
+			return 1
+		fi
+
+		if [ "$tcb_info_issuer_chain_length" -eq 0 ]; then
+			echo "  Validation failed: tcb_info_issuer_chain is empty" >&2
+			return 1
+		fi
+
+		if [ -z "$tcb_info" ] || [ "$tcb_info" = "null" ]; then
+			echo "  Validation failed: tcb_info is missing or null" >&2
+			return 1
+		fi
+
+		if [ "$tcb_info_signature_length" -eq 0 ]; then
+			echo "  Validation failed: tcb_info_signature is empty" >&2
+			return 1
+		fi
+
+		if [ "$qe_identity_issuer_chain_length" -eq 0 ]; then
+			echo "  Validation failed: qe_identity_issuer_chain is empty" >&2
+			return 1
+		fi
+
+		if [ -z "$qe_identity" ] || [ "$qe_identity" = "null" ]; then
+			echo "  Validation failed: qe_identity is missing or null" >&2
+			return 1
+		fi
+
+		if [ "$qe_identity_signature_length" -eq 0 ]; then
+			echo "  Validation failed: qe_identity_signature is empty" >&2
+			return 1
+		fi
+
+		# Check TCB info format (tcb_info is already a JSON string)
+		local tcb_id=$(echo "$tcb_info" | jq -r '.id' 2>/dev/null || echo "")
+		local tcb_version=$(echo "$tcb_info" | jq -r '.version' 2>/dev/null || echo "")
+		if [ "$tcb_id" != "TDX" ] || [ -z "$tcb_version" ] || [ "$tcb_version" = "null" ] || [ "$tcb_version" -eq 0 ]; then
+			echo "  Validation failed: Invalid TCB info format (id='$tcb_id', version='$tcb_version')" >&2
+			return 1
+		fi
+
+		# Check QE identity format (qe_identity is already a JSON string)
+		local qe_id=$(echo "$qe_identity" | jq -r '.id' 2>/dev/null || echo "")
+		local qe_version=$(echo "$qe_identity" | jq -r '.version' 2>/dev/null || echo "")
+		if [ -z "$qe_id" ] || [ "$qe_id" = "null" ] || [ -z "$qe_version" ] || [ "$qe_version" = "null" ] || [ "$qe_version" -eq 0 ]; then
+			echo "  Validation failed: Invalid QE identity format (id='$qe_id', version='$qe_version')" >&2
+			return 1
+		fi
+
+		# Detailed format validation for each field type
+		local validation_passed=true
+
+		# 1. Check certificate chains (should start with -----BEGIN CERTIFICATE-----)
+		local pck_crl_chain=$(echo "$output" | jq -r '.pck_crl_issuer_chain')
+		if [[ "$pck_crl_chain" != "-----BEGIN CERTIFICATE-----"* ]]; then
+			echo "  Validation failed: pck_crl_issuer_chain is not a valid certificate format" >&2
+			validation_passed=false
+		fi
+
+		local tcb_info_chain=$(echo "$output" | jq -r '.tcb_info_issuer_chain')
+		if [[ "$tcb_info_chain" != "-----BEGIN CERTIFICATE-----"* ]]; then
+			echo "  Validation failed: tcb_info_issuer_chain is not a valid certificate format" >&2
+			validation_passed=false
+		fi
+
+		local qe_identity_chain=$(echo "$output" | jq -r '.qe_identity_issuer_chain')
+		if [[ "$qe_identity_chain" != "-----BEGIN CERTIFICATE-----"* ]]; then
+			echo "  Validation failed: qe_identity_issuer_chain is not a valid certificate format" >&2
+			validation_passed=false
+		fi
+
+		# 2. Check JSON strings (should be parseable JSON)
+		local tcb_info_json=$(echo "$output" | jq -r '.tcb_info')
+		if ! echo "$tcb_info_json" | jq empty 2>/dev/null; then
+			echo "  Validation failed: tcb_info is not valid JSON" >&2
+			validation_passed=false
+		fi
+
+		local qe_identity_json=$(echo "$output" | jq -r '.qe_identity')
+		if ! echo "$qe_identity_json" | jq empty 2>/dev/null; then
+			echo "  Validation failed: qe_identity is not valid JSON" >&2
+			validation_passed=false
+		fi
+
+		# 3. Check hex strings (should contain only hex characters)
+		local pck_crl_hex=$(echo "$output" | jq -r '.pck_crl')
+		if ! [[ "$pck_crl_hex" =~ ^[0-9a-fA-F]+$ ]]; then
+			echo "  Validation failed: pck_crl is not a valid hex string" >&2
+			validation_passed=false
+		fi
+
+		local root_ca_crl_hex=$(echo "$output" | jq -r '.root_ca_crl')
+		if ! [[ "$root_ca_crl_hex" =~ ^[0-9a-fA-F]+$ ]]; then
+			echo "  Validation failed: root_ca_crl is not a valid hex string" >&2
+			validation_passed=false
+		fi
+
+		local tcb_sig_hex=$(echo "$output" | jq -r '.tcb_info_signature')
+		if ! [[ "$tcb_sig_hex" =~ ^[0-9a-fA-F]+$ ]]; then
+			echo "  Validation failed: tcb_info_signature is not a valid hex string" >&2
+			validation_passed=false
+		fi
+
+		local qe_sig_hex=$(echo "$output" | jq -r '.qe_identity_signature')
+		if ! [[ "$qe_sig_hex" =~ ^[0-9a-fA-F]+$ ]]; then
+			echo "  Validation failed: qe_identity_signature is not a valid hex string" >&2
+			validation_passed=false
+		fi
+
+		# 4. Check hex string lengths for signatures (64 bytes = 128 hex chars for ECDSA)
+		if [ "$tcb_info_signature_length" -ne 128 ]; then
+			echo "  Validation failed: tcb_info_signature has unexpected length ($tcb_info_signature_length, expected 128)" >&2
+			validation_passed=false
+		fi
+
+		if [ "$qe_identity_signature_length" -ne 128 ]; then
+			echo "  Validation failed: qe_identity_signature has unexpected length ($qe_identity_signature_length, expected 128)" >&2
+			validation_passed=false
+		fi
+
+		[ "$validation_passed" = true ] && return 0 || return 1
+
+		return 0
 	else
-		echo "$output" >&2
+		# Check if output contains an error message
+		if echo "$output" | jq -e '.error' > /dev/null 2>&1; then
+			local error_msg=$(echo "$output" | jq -r '.error' 2>/dev/null)
+			echo "  Get collateral failed: $error_msg" >&2
+		else
+			echo "$output" >&2
+		fi
 		return 1
 	fi
 }
@@ -349,9 +502,9 @@ run_test_suite() {
 	local collateral_exit=$?
 
 	if [ $collateral_exit -eq 0 ]; then
-		echo -e "  ${GREEN}✓${NC} Get collateral test passed"
+		echo -e "  ${GREEN}✓${NC} Get collateral test with real TDX quote passed"
 	else
-		echo -e "  ${RED}✗${NC} Get collateral test failed"
+		echo -e "  ${RED}✗${NC} Get collateral test with real TDX quote failed"
 		failed=$((failed + 1))
 		total=$((total + 1))
 	fi
@@ -444,7 +597,7 @@ run_all_tests() {
 }
 
 main() {
-	local test_mode="${1:-rust}"
+	local test_mode="${1:-all}"
 
 	if [[ ! "$test_mode" =~ ^(rust|python|wasm|all)$ ]]; then
 		echo -e "${RED}Error: Invalid test mode '$test_mode'${NC}" >&2

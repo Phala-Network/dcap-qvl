@@ -145,11 +145,8 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
         // Fetch collateral
         match get_collateral(&pccs_url, &quote_bytes).await {
             Ok(collateral) => {
-                if collateral.tcb_info_issuer_chain.is_empty() {
-                    eprintln!("Error: Collateral missing required fields");
-                    return 1;
-                }
-                println!("Get collateral test: PASS");
+                // Output collateral JSON directly
+                println!("{}", serde_json::to_string(&collateral).unwrap());
                 0
             }
             Err(e) => {
