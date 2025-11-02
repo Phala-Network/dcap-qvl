@@ -1,6 +1,6 @@
 #!/bin/bash
 # DCAP Quote Verification Test Suite
-# Usage: ./scripts/test_suite.sh [rust|python|wasm|all]
+# Usage: ./tests/test_suite.sh [rust|python|wasm|all]
 
 set -e
 
@@ -16,9 +16,9 @@ readonly NC='\033[0m'
 # Constants
 readonly SAMPLES_DIR="test_data/samples"
 readonly CERTS_DIR="test_data/certs"
-readonly RUST_VERIFY_CLI="./cli/target/release/verify_sample"
-readonly PYTHON_VERIFY_CLI="python3 ./python-bindings/verify_sample.py"
-readonly WASM_VERIFY_CLI="node ./verify_sample.js"
+readonly RUST_TEST_CASE_CLI="./cli/target/release/test_case"
+readonly PYTHON_TEST_CASE_CLI="python3 ./python-bindings/test_case.py"
+readonly WASM_TEST_CASE_CLI="node ./tests/test_case.js"
 
 print_box() {
 	local color=$1
@@ -52,9 +52,9 @@ get_category() {
 }
 
 build_rust_tools() {
-	if [ ! -f "$RUST_VERIFY_CLI" ]; then
+	if [ ! -f "$RUST_TEST_CASE_CLI" ] || [ ! -f "./cli/target/release/generate_all_samples" ]; then
 		echo "  Building Rust CLI tools..."
-		(cd cli && cargo build --release --bin verify_sample --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
+		(cd cli && cargo build --release --bin test_case --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
 		echo -e "  ${GREEN}✓${NC} Rust CLI tools built"
 	else
 		echo -e "  ${GREEN}✓${NC} Rust CLI tools already built"
@@ -117,7 +117,7 @@ build_wasm_binding() {
 ensure_certificates() {
 	if [ ! -d "$CERTS_DIR" ] || [ ! -f "$CERTS_DIR/root_ca.der" ]; then
 		echo "  Generating test certificates..."
-		./scripts/generate_test_certs.sh >/dev/null 2>&1
+		./tests/generate_test_certs.sh >/dev/null 2>&1
 		echo -e "  ${GREEN}✓${NC} Test certificates generated"
 	else
 		echo -e "  ${GREEN}✓${NC} Certificates found"
@@ -137,7 +137,7 @@ ensure_samples() {
 
 run_single_test() {
 	local sample_dir=$1
-	local verify_cli=$2
+	local test_case_cli=$2
 
 	local sample_name=$(basename "$sample_dir")
 	local quote_file="$sample_dir/quote.bin"
@@ -160,7 +160,7 @@ run_single_test() {
 	# Run verification
 	local output exit_code
 	set +e
-	output=$($verify_cli "$quote_file" "$collateral_file" "$CERTS_DIR/root_ca.der" 2>&1)
+	output=$($test_case_cli verify "$quote_file" "$collateral_file" "$CERTS_DIR/root_ca.der" 2>&1)
 	exit_code=$?
 	set -e
 
@@ -211,15 +211,71 @@ run_single_test() {
 	echo "$result:$(get_category "$sample_name")"
 }
 
+run_get_collateral_test() {
+	local test_name=$1
+	local test_sample_dir="$SAMPLES_DIR/valid_tdx_v4"
+	local quote_file="$test_sample_dir/quote.bin"
+
+	if [ ! -f "$quote_file" ]; then
+		echo -e "  ${YELLOW}⚠${NC} Skipping get-collateral test - no TDX quote available"
+		return 0
+	fi
+
+	echo "  Testing get-collateral with TDX v4 quote..."
+
+	local cmd
+	local cmd_args
+
+	case "$test_name" in
+	"Rust CLI")
+		if [ ! -f "$RUST_TEST_CASE_CLI" ]; then
+			echo "  Building Rust test_case tool..."
+			(cd cli && cargo build --release --bin test_case --quiet 2>&1 | grep -v "warning:") || true
+		fi
+		cmd="$RUST_TEST_CASE_CLI"
+		cmd_args="get-collateral --pccs-url https://pccs.phala.network/tdx/certification/v4 $quote_file"
+		;;
+	"Python Binding")
+		cmd="$PYTHON_TEST_CASE_CLI"
+		cmd_args="get-collateral $quote_file"
+		;;
+	"WASM Binding")
+		cmd="$WASM_TEST_CASE_CLI"
+		cmd_args="get-collateral $quote_file"
+		;;
+	*)
+		echo -e "  ${YELLOW}⚠${NC} Unknown test type: $test_name"
+		return 2
+		;;
+	esac
+
+	# Run the test with timeout
+	local output
+	local exit_code
+	if output=$(timeout 30 $cmd $cmd_args 2>&1); then
+		exit_code=0
+	else
+		exit_code=$?
+	fi
+
+	if [ $exit_code -eq 0 ]; then
+		echo "$output" | grep -q "Get collateral test: PASS"
+		return $?
+	else
+		echo "$output" >&2
+		return 1
+	fi
+}
+
 run_test_suite() {
-	local verify_cli=$1
+	local test_case_cli=$1
 	local test_name=$2
 
 	print_box "$CYAN" "DCAP Quote Verification Test Suite"
 	echo ""
 	echo -e "${BLUE}Configuration:${NC}"
 	echo "  Test Mode: $test_name"
-	echo "  Verify CLI: $verify_cli"
+	echo "  Test CLI: $test_case_cli"
 	echo "  Samples directory: $SAMPLES_DIR"
 	echo ""
 
@@ -255,7 +311,7 @@ run_test_suite() {
 		[ -d "$sample_dir" ] || continue
 
 		local result
-		if result=$(run_single_test "$sample_dir" "$verify_cli"); then
+		if result=$(run_single_test "$sample_dir" "$test_case_cli"); then
 			total=$((total + 1))
 
 			IFS=':' read -r outcome category <<<"$result"
@@ -283,6 +339,22 @@ run_test_suite() {
 			esac
 		fi
 	done
+
+	# Run get-collateral test
+	echo ""
+	echo -e "${BLUE}━━━ Step 5: Running get-collateral tests ━━━${NC}"
+	echo ""
+
+	run_get_collateral_test "$test_name"
+	local collateral_exit=$?
+
+	if [ $collateral_exit -eq 0 ]; then
+		echo -e "  ${GREEN}✓${NC} Get collateral test passed"
+	else
+		echo -e "  ${RED}✗${NC} Get collateral test failed"
+		failed=$((failed + 1))
+		total=$((total + 1))
+	fi
 
 	# Print results
 	echo ""
@@ -385,13 +457,13 @@ main() {
 		run_all_tests
 		;;
 	python)
-		run_test_suite "$PYTHON_VERIFY_CLI" "Python Binding"
+		run_test_suite "$PYTHON_TEST_CASE_CLI" "Python Binding"
 		;;
 	wasm)
-		run_test_suite "$WASM_VERIFY_CLI" "WASM Binding"
+		run_test_suite "$WASM_TEST_CASE_CLI" "WASM Binding"
 		;;
 	rust)
-		run_test_suite "$RUST_VERIFY_CLI" "Rust CLI"
+		run_test_suite "$RUST_TEST_CASE_CLI" "Rust CLI"
 		;;
 	esac
 }

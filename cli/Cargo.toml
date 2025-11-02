@@ -12,8 +12,9 @@ name = "dcap-qvl"
 path = "src/main.rs"
 
 [[bin]]
-name = "verify_sample"
-path = "src/bin/verify_sample.rs"
+name = "test_case"
+path = "src/bin/test_case.rs"
+
 
 [[bin]]
 name = "generate_collaterals"

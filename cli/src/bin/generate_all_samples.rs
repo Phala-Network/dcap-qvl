@@ -496,7 +496,7 @@ fn main() -> Result<()> {
     // Check if certificates exist
     if !Path::new(CERT_DIR).exists() {
         println!("Error: Test certificates not found at {}", CERT_DIR);
-        println!("Please run: ./scripts/generate_test_certs.sh");
+        println!("Please run: ./tests/generate_test_certs.sh");
         std::process::exit(1);
     }
 
