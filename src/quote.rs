@@ -538,7 +538,13 @@ impl Decode for Quote {
             _ => return Err(scale::Error::from("Unsupported quote version")),
         }
         let data = Data::<u32>::decode(input)?;
-        let auth_data = decode_auth_data(header.version, &mut &data.data[..])?;
+        // Quote v5 uses v4 auth data format
+        let auth_version = if header.version == 5 {
+            4
+        } else {
+            header.version
+        };
+        let auth_data = decode_auth_data(auth_version, &mut &data.data[..])?;
         Ok(Quote {
             header,
             report,

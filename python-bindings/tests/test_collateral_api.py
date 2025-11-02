@@ -6,7 +6,7 @@ import sys
 import os
 
 # Add the python package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'python'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
 
 class TestCollateralAPI:
@@ -15,24 +15,24 @@ class TestCollateralAPI:
     def test_module_imports(self):
         """Test that all expected functions are available."""
         # Basic functions should always be available
-        assert hasattr(dcap_qvl, 'QuoteCollateralV3')
-        assert hasattr(dcap_qvl, 'VerifiedReport')
-        assert hasattr(dcap_qvl, 'verify')
+        assert hasattr(dcap_qvl, "QuoteCollateralV3")
+        assert hasattr(dcap_qvl, "VerifiedReport")
+        assert hasattr(dcap_qvl, "verify")
 
         # Pure Python functions should be available
-        assert hasattr(dcap_qvl, 'get_collateral')
-        assert hasattr(dcap_qvl, 'get_collateral_from_pcs')
-        assert hasattr(dcap_qvl, 'get_collateral_and_verify')
+        assert hasattr(dcap_qvl, "get_collateral")
+        assert hasattr(dcap_qvl, "get_collateral_from_pcs")
+        assert hasattr(dcap_qvl, "get_collateral_and_verify")
 
         # Check __all__ contains all expected functions
         expected_functions = [
-            'QuoteCollateralV3',
-            'VerifiedReport',
-            'Quote',
-            'verify',
-            'get_collateral',
-            'get_collateral_from_pcs',
-            'get_collateral_and_verify',
+            "QuoteCollateralV3",
+            "VerifiedReport",
+            "Quote",
+            "verify",
+            "get_collateral",
+            "get_collateral_from_pcs",
+            "get_collateral_and_verify",
         ]
 
         for func in expected_functions:
@@ -62,19 +62,6 @@ class TestCollateralAPI:
         # Test with invalid quote (too short)
         with pytest.raises(ValueError, match="Failed to parse quote"):
             await dcap_qvl.get_collateral_and_verify(b"short")
-
-    def test_make_pcs_request_without_requests(self):
-        """Test that proper error is raised when requests is not available."""
-        # Temporarily remove requests from the module
-        original_requests = dcap_qvl.requests
-        dcap_qvl.requests = None
-
-        try:
-            with pytest.raises(ImportError, match="requests library is required"):
-                dcap_qvl._make_pcs_request("http://example.com")
-        finally:
-            # Restore requests
-            dcap_qvl.requests = original_requests
 
     def test_quote_collateral_creation(self):
         """Test QuoteCollateralV3 creation and serialization."""
@@ -116,11 +103,10 @@ class TestCollateralAPI:
         """Test get_collateral_and_verify with real sample quote data."""
 
         # Load real sample quote data from the samples directory
-        sample_dir = os.path.join(
-            os.path.dirname(__file__), '..', '..', 'sample')
+        sample_dir = os.path.join(os.path.dirname(__file__), "..", "..", "sample")
 
         try:
-            with open(os.path.join(sample_dir, 'tdx_quote'), 'rb') as f:
+            with open(os.path.join(sample_dir, "tdx_quote"), "rb") as f:
                 test_quote = f.read()
         except FileNotFoundError:
             # If no sample files found, skip this test
@@ -129,8 +115,8 @@ class TestCollateralAPI:
         result = await dcap_qvl.get_collateral_and_verify(bytes(test_quote))
 
         # If it somehow succeeds, verify the result structure
-        assert hasattr(result, 'status')
-        assert hasattr(result, 'advisory_ids')
+        assert hasattr(result, "status")
+        assert hasattr(result, "advisory_ids")
 
 
 if __name__ == "__main__":

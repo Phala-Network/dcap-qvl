@@ -179,7 +179,7 @@ fn verify_impl(
         .is_err()
     {
         return Err(anyhow!(
-            "Rsa signature is invalid for tcb_info in quote_collateral"
+            "Signature is invalid for tcb_info in quote_collateral"
         ));
     }
 
@@ -235,7 +235,7 @@ fn verify_impl(
         )
         .is_err()
     {
-        return Err(anyhow!("Rsa signature is invalid for qe_report in quote"));
+        return Err(anyhow!("Signature is invalid for qe_report in quote"));
     }
 
     // Extract QE report from quote

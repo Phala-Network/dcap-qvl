@@ -11,11 +11,31 @@ keywords = ["sgx", "dcap", "attestation", "quote", "verification"]
 name = "dcap-qvl"
 path = "src/main.rs"
 
+[[bin]]
+name = "verify_sample"
+path = "src/bin/verify_sample.rs"
+
+[[bin]]
+name = "generate_collaterals"
+path = "src/bin/generate_collaterals.rs"
+
+[[bin]]
+name = "generate_all_samples"
+path = "src/bin/generate_all_samples.rs"
+
+[[bin]]
+name = "verify_sample_skip_sig"
+path = "src/bin/verify_sample_skip_sig.rs"
+
 [dependencies]
 anyhow = "1.0.95"
+base64 = "0.22"
+chrono = "0.4"
 clap = { version = "4.5.27", features = ["derive"] }
 dcap-qvl = { version = "0.3.4", path = "../" }
 hex = "0.4.3"
+ring = "0.17"
+scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.137"
 tokio = { version = "1.43.0", features = ["full"] }
