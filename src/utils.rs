@@ -4,7 +4,11 @@ use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
-use webpki::{self, types::UnixTime, BorrowedCertRevocationList};
+use webpki::{
+    self,
+    types::{TrustAnchor, UnixTime},
+    BorrowedCertRevocationList,
+};
 use webpki::{types::CertificateDer, CertRevocationList};
 use x509_cert::Certificate;
 
@@ -150,6 +154,7 @@ pub fn verify_certificate_chain(
     intermediate_certs: &[CertificateDer],
     time: UnixTime,
     crl_der: &[&[u8]],
+    trust_anchor: TrustAnchor<'_>,
 ) -> Result<()> {
     let sig_algs = webpki::ALL_VERIFICATION_ALGS;
 
@@ -175,7 +180,7 @@ pub fn verify_certificate_chain(
     leaf_cert
         .verify_for_usage(
             sig_algs,
-            &[sgx_pck_root()],
+            &[trust_anchor],
             intermediate_certs,
             time,
             webpki::KeyUsage::server_auth(),

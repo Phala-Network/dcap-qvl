@@ -19,6 +19,7 @@ use crate::{
     QuoteCollateralV3,
 };
 use serde::{Deserialize, Serialize};
+use webpki::types::CertificateDer;
 
 #[cfg(feature = "js")]
 use wasm_bindgen::prelude::*;
@@ -37,6 +38,48 @@ pub struct VerifiedReport {
     pub report: Report,
     #[serde(with = "serde_bytes")]
     pub ppid: Vec<u8>,
+}
+
+/// Quote verifier with configurable root certificate
+///
+/// This allows using custom root certificates for testing or private deployments.
+#[derive(Clone)]
+pub struct QuoteVerifier {
+    root_ca_der: Vec<u8>,
+}
+
+impl QuoteVerifier {
+    /// Create a new verifier using Intel's production root certificate
+    pub fn new_prod() -> Self {
+        Self::new_with_root_ca(TRUSTED_ROOT_CA_DER.to_vec())
+    }
+
+    /// Create a new verifier with a custom root certificate
+    ///
+    /// # Arguments
+    /// * `root_ca_der` - DER-encoded root certificate
+    pub fn new_with_root_ca(root_ca_der: Vec<u8>) -> Self {
+        Self { root_ca_der }
+    }
+
+    /// Verify a quote with the configured root certificate
+    ///
+    /// # Arguments
+    /// * `raw_quote` - The raw quote bytes
+    /// * `collateral` - The quote collateral
+    /// * `now_secs` - Current time in seconds since UNIX epoch
+    ///
+    /// # Returns
+    /// * `Ok(VerifiedReport)` - The verified report
+    /// * `Err(Error)` - The error
+    pub fn verify(
+        &self,
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        verify_impl(raw_quote, collateral, now_secs, &self.root_ca_der)
+    }
 }
 
 #[cfg(feature = "js")]
@@ -74,23 +117,16 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
         .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
 
-/// Verify a quote
-///
-/// # Arguments
-///
-/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
-/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
-/// * `now` - The current time in seconds since the Unix epoch
-///
-/// # Returns
-///
-/// * `Ok(VerifiedReport)` - The verified report
-/// * `Err(Error)` - The error
-pub fn verify(
+// Internal implementation that uses QuoteVerifier
+fn verify_impl(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,
     now_secs: u64,
+    root_ca_der: &[u8],
 ) -> Result<VerifiedReport> {
+    let root_ca = CertificateDer::from_slice(root_ca_der);
+    let trust_anchor =
+        webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
     // Parse data
     let mut quote = raw_quote;
     let quote = Quote::decode(&mut quote).context("Failed to decode quote")?;
@@ -109,7 +145,7 @@ pub fn verify(
     let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
     // Because the original rustls-webpki doesn't check the ROOT CA against the CRL, we use our forked webpki to check it
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
-    dcap_qvl_webpki::check_single_cert_crl(TRUSTED_ROOT_CA_DER, &crls, now)?;
+    dcap_qvl_webpki::check_single_cert_crl(root_ca_der, &crls, now)?;
 
     // Verify enclave
 
@@ -126,7 +162,13 @@ pub fn verify(
     }
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(&tcb_leaf_certs[0])
         .context("Failed to parse leaf certificate in quote_collateral")?;
-    verify_certificate_chain(&tcb_leaf_cert, &tcb_leaf_certs[1..], now, &crls)?;
+    verify_certificate_chain(
+        &tcb_leaf_cert,
+        &tcb_leaf_certs[1..],
+        now,
+        &crls,
+        trust_anchor.clone(),
+    )?;
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
@@ -170,7 +212,13 @@ pub fn verify(
     let qe_leaf_cert = webpki::EndEntityCert::try_from(&qe_certification_certs[0])
         .context("Failed to parse PCK certificate")?;
     // Then verify the certificate chain
-    verify_certificate_chain(&qe_leaf_cert, &qe_certification_certs[1..], now, &crls)?;
+    verify_certificate_chain(
+        &qe_leaf_cert,
+        &qe_certification_certs[1..],
+        now,
+        &crls,
+        trust_anchor.clone(),
+    )?;
 
     let ppid = intel::parse_pck_extension(qe_certification_certs[0].as_ref())
         .ok()
@@ -331,4 +379,24 @@ fn validate_attrs(report: &Report) -> Result<()> {
         Report::TD10(report) => validate_td10(report),
         Report::SgxEnclave(report) => validate_sgx(report),
     }
+}
+
+/// Verify a quote using Intel's trusted root CA
+///
+/// # Arguments
+///
+/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
+/// * `now` - The current time in seconds since the Unix epoch
+///
+/// # Returns
+///
+/// * `Ok(VerifiedReport)` - The verified report
+/// * `Err(Error)` - The error
+pub fn verify(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::new_prod().verify(raw_quote, collateral, now_secs)
 }
