@@ -24,6 +24,18 @@ use webpki::types::CertificateDer;
 #[cfg(feature = "js")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "js")]
+fn format_error_chain(e: &anyhow::Error) -> String {
+    use alloc::format;
+    let mut msg = format!("{}", e);
+    let mut source = e.source();
+    while let Some(err) = source {
+        msg.push_str(&format!("\n  Caused by: {}", err));
+        source = err.source();
+    }
+    msg
+}
+
 #[cfg(feature = "borsh_schema")]
 use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
@@ -94,7 +106,33 @@ pub fn js_verify(
     let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
 
     let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
-        serde_wasm_bindgen::to_value(&e.to_string())
+        let error_msg = format_error_chain(&e);
+        serde_wasm_bindgen::to_value(&error_msg)
+            .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
+    })?;
+
+    serde_wasm_bindgen::to_value(&verified_report)
+        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen]
+pub fn js_verify_with_root_ca(
+    raw_quote: JsValue,
+    quote_collateral: JsValue,
+    root_ca_der: JsValue,
+    now: u64,
+) -> Result<JsValue, JsValue> {
+    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+    let root_ca_der: Vec<u8> = serde_wasm_bindgen::from_value(root_ca_der)
+        .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
+
+    let verifier = QuoteVerifier::new_with_root_ca(root_ca_der);
+    let verified_report = verifier.verify(&raw_quote, &quote_collateral, now).map_err(|e| {
+        let error_msg = format_error_chain(&e);
+        serde_wasm_bindgen::to_value(&error_msg)
             .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
     })?;
 

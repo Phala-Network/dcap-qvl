@@ -1,6 +1,6 @@
 #!/bin/bash
 # DCAP Quote Verification Test Suite
-# Usage: ./scripts/test_suite.sh [rust|python|all]
+# Usage: ./scripts/test_suite.sh [rust|python|wasm|all]
 
 set -e
 
@@ -18,6 +18,7 @@ readonly SAMPLES_DIR="test_data/samples"
 readonly CERTS_DIR="test_data/certs"
 readonly RUST_VERIFY_CLI="./cli/target/release/verify_sample"
 readonly PYTHON_VERIFY_CLI="python3 ./python-bindings/verify_sample.py"
+readonly WASM_VERIFY_CLI="node ./verify_sample.js"
 
 print_box() {
 	local color=$1
@@ -64,6 +65,52 @@ build_python_binding() {
 	echo "  Building Python binding..."
 	(cd python-bindings && pip install -e . --break-system-packages --quiet 2>&1 | grep -vE "WARNING:|DEPRECATION:") || true
 	echo -e "  ${GREEN}✓${NC} Python binding built"
+	[ -f "./cli/target/release/generate_all_samples" ] || build_rust_tools
+}
+
+check_wasm_opt_version() {
+	local min_version=123
+
+	if ! command -v wasm-opt &> /dev/null; then
+		echo -e "  ${RED}✗${NC} wasm-opt not found"
+		echo "  Please install Binaryen from: https://github.com/WebAssembly/binaryen/releases"
+		exit 1
+	fi
+
+	local version=$(wasm-opt --version 2>&1 | grep -oP 'version \K[0-9]+' | head -1)
+	if [ -z "$version" ]; then
+		version=$(wasm-opt --version 2>&1 | grep -oP 'wasm-opt version \K[0-9]+' | head -1)
+	fi
+
+	if [ -z "$version" ]; then
+		echo -e "  ${YELLOW}⚠${NC} Could not detect wasm-opt version"
+	elif [ "$version" -lt "$min_version" ]; then
+		echo -e "  ${RED}✗${NC} wasm-opt version $version is too old (minimum: $min_version)"
+		echo ""
+		echo "  This will cause 'WebAssembly.Table.grow() failed' errors."
+		echo "  See: https://github.com/wasm-bindgen/wasm-bindgen/issues/4528"
+		echo ""
+		echo "  To fix, update wasm-opt:"
+		echo "    wget https://github.com/WebAssembly/binaryen/releases/download/version_$min_version/binaryen-version_$min_version-x86_64-linux.tar.gz"
+		echo "    tar xzf binaryen-version_$min_version-x86_64-linux.tar.gz"
+		echo "    sudo cp binaryen-version_$min_version/bin/wasm-opt /usr/local/bin/"
+		echo ""
+		exit 1
+	else
+		echo -e "  ${GREEN}✓${NC} wasm-opt version $version"
+	fi
+}
+
+build_wasm_binding() {
+	check_wasm_opt_version
+
+	if [ ! -d "pkg/node" ] || [ ! -f "pkg/node/dcap-qvl-node.js" ]; then
+		echo "  Building WASM binding for Node.js..."
+		make build_node_pkg 2>&1 | grep -v "warning:" || true
+		echo -e "  ${GREEN}✓${NC} WASM binding built"
+	else
+		echo -e "  ${GREEN}✓${NC} WASM binding already built"
+	fi
 	[ -f "./cli/target/release/generate_all_samples" ] || build_rust_tools
 }
 
@@ -180,6 +227,8 @@ run_test_suite() {
 	echo -e "${BLUE}━━━ Step 1: Building tools ━━━${NC}"
 	if [ "$test_name" = "Python Binding" ]; then
 		build_python_binding
+	elif [ "$test_name" = "WASM Binding" ]; then
+		build_wasm_binding
 	else
 		build_rust_tools
 	fi
@@ -276,7 +325,7 @@ run_test_suite() {
 }
 
 run_all_tests() {
-	print_box "$MAGENTA" "Testing Both Rust and Python Versions"
+	print_box "$MAGENTA" "Testing All Versions"
 	echo ""
 
 	print_separator "Testing Rust CLI"
@@ -295,17 +344,26 @@ run_all_tests() {
 	echo ""
 	echo ""
 
+	print_separator "Testing WASM Binding"
+	echo ""
+	"$0" wasm
+	local wasm_exit=$?
+
+	echo ""
+	echo ""
+
 	# Overall summary
 	print_box "$MAGENTA" "Overall Summary"
 	echo ""
 
 	[ $rust_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} Rust CLI:       All tests passed" || echo -e "  ${RED}✗${NC} Rust CLI:       Some tests failed"
 	[ $python_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} Python Binding: All tests passed" || echo -e "  ${RED}✗${NC} Python Binding: Some tests failed"
+	[ $wasm_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} WASM Binding:   All tests passed" || echo -e "  ${RED}✗${NC} WASM Binding:   Some tests failed"
 
 	echo ""
 
-	if [ $rust_exit -eq 0 ] && [ $python_exit -eq 0 ]; then
-		print_box "$GREEN" "All tests passed in both versions! 🎉"
+	if [ $rust_exit -eq 0 ] && [ $python_exit -eq 0 ] && [ $wasm_exit -eq 0 ]; then
+		print_box "$GREEN" "All tests passed in all versions! 🎉"
 		exit 0
 	else
 		print_box "$RED" "Some tests failed! ❌"
@@ -316,9 +374,9 @@ run_all_tests() {
 main() {
 	local test_mode="${1:-rust}"
 
-	if [[ ! "$test_mode" =~ ^(rust|python|all)$ ]]; then
+	if [[ ! "$test_mode" =~ ^(rust|python|wasm|all)$ ]]; then
 		echo -e "${RED}Error: Invalid test mode '$test_mode'${NC}" >&2
-		echo "Usage: $0 [rust|python|all]" >&2
+		echo "Usage: $0 [rust|python|wasm|all]" >&2
 		exit 1
 	fi
 
@@ -328,6 +386,9 @@ main() {
 		;;
 	python)
 		run_test_suite "$PYTHON_VERIFY_CLI" "Python Binding"
+		;;
+	wasm)
+		run_test_suite "$WASM_VERIFY_CLI" "WASM Binding"
 		;;
 	rust)
 		run_test_suite "$RUST_VERIFY_CLI" "Rust CLI"
