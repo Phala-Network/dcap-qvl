@@ -3,6 +3,13 @@
 
 set -e
 
+# Get the directory where this script is located
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Change to project root directory
+cd "$PROJECT_ROOT"
+
 # Colors
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -34,7 +41,7 @@ fi
 # Ensure test data exists
 if [ ! -d "test_data/samples" ]; then
     echo -e "${BLUE}Generating test data...${NC}"
-    ./tests/test_suite.sh wasm 2>&1 > /dev/null
+    "$SCRIPT_DIR/test_suite.sh" wasm 2>&1 > /dev/null
     echo -e "${GREEN}✓${NC} Test data generated"
 else
     echo -e "${GREEN}✓${NC} Test data found"
@@ -54,6 +61,7 @@ cat > "$RUNNER_SCRIPT" << EOF
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { URL } = require('url');
 
 const PORT = 8765;
 const ROOT = process.cwd();
@@ -68,6 +76,15 @@ const MIME_TYPES = {
     '.der': 'application/x-x509-ca-cert',
 };
 
+const EXPOSED_HEADERS = [
+    'SGX-PCK-CRL-Issuer-Chain',
+    'PCK-CRL-Issuer-Chain',
+    'SGX-TCB-Info-Issuer-Chain',
+    'TCB-Info-Issuer-Chain',
+    'SGX-Enclave-Identity-Issuer-Chain',
+    'Enclave-Identity-Issuer-Chain'
+].join(', ');
+
 const server = http.createServer((req, res) => {
     // Handle test results POST
     if (req.method === 'POST' && req.url === '/results') {
@@ -81,12 +98,97 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+      // Handle PCCS API mock endpoints
+    if (req.url.startsWith('/tdx/certification/v4/') || req.url.startsWith('/sgx/certification/v4/')) {
+        const urlObj = new URL(req.url, \`http://localhost:\${PORT}\`);
+        const pathname = urlObj.pathname;
+
+        // Mock data based on the collateral sample
+        const mockCollateral = JSON.parse(fs.readFileSync(path.join(ROOT, 'sample/tdx_quote_collateral.json'), 'utf8'));
+        const tcbInfoBody = JSON.stringify({
+            tcbInfo: JSON.parse(mockCollateral.tcb_info),
+            signature: mockCollateral.tcb_info_signature
+        });
+        const qeIdentityBody = JSON.stringify({
+            enclaveIdentity: JSON.parse(mockCollateral.qe_identity),
+            signature: mockCollateral.qe_identity_signature
+        });
+
+        if (pathname.includes('/pckcrl')) {
+            // Mock PCK CRL endpoint with certificate chain header
+            res.writeHead(200, {
+                'Content-Type': 'application/octet-stream',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Expose-Headers': EXPOSED_HEADERS,
+                'SGX-PCK-CRL-Issuer-Chain': mockCollateral.pck_crl_issuer_chain.replace(/\\n/g, ' '),
+                'PCK-CRL-Issuer-Chain': mockCollateral.pck_crl_issuer_chain.replace(/\\n/g, ' ')
+            });
+            // Convert base64 back to binary
+            const pckCrlBinary = Buffer.from(mockCollateral.pck_crl, 'base64');
+            res.end(pckCrlBinary);
+            return;
+        }
+
+        if (pathname.includes('/tcb')) {
+            // Mock TCB info endpoint with certificate chain header
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Expose-Headers': EXPOSED_HEADERS,
+                'SGX-TCB-Info-Issuer-Chain': mockCollateral.tcb_info_issuer_chain.replace(/\\n/g, ' '),
+                'TCB-Info-Issuer-Chain': mockCollateral.tcb_info_issuer_chain.replace(/\\n/g, ' ')
+            });
+            res.end(tcbInfoBody);
+            return;
+        }
+
+        if (pathname.includes('/qe/identity')) {
+            // Mock QE identity endpoint with certificate chain header
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Expose-Headers': EXPOSED_HEADERS,
+                'SGX-Enclave-Identity-Issuer-Chain': mockCollateral.qe_identity_issuer_chain.replace(/\\n/g, ' '),
+                'Enclave-Identity-Issuer-Chain': mockCollateral.qe_identity_issuer_chain.replace(/\\n/g, ' ')
+            });
+            res.end(qeIdentityBody);
+            return;
+        }
+
+        if (pathname.includes('/rootcacrl')) {
+            // Mock Root CA CRL endpoint
+            res.writeHead(200, {
+                'Content-Type': 'text/plain',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Expose-Headers': EXPOSED_HEADERS
+            });
+            res.end(mockCollateral.root_ca_crl || '');
+            return;
+        }
+
+        // Default response for unknown endpoints
+        res.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
+        res.end('Not Found');
+        return;
+    }
+
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        });
+        res.end();
+        return;
+    }
+
     // Serve files
     let filePath;
 
     if (req.url === '/') {
         filePath = path.join(ROOT, '/tests/js/verify_quote_web_test.html');
-    } else if (req.url.startsWith('/test_data/') || req.url.startsWith('/pkg/')) {
+    } else if (req.url.startsWith('/test_data/') || req.url.startsWith('/pkg/') || req.url.startsWith('/sample/')) {
         filePath = path.join(ROOT, req.url);
     } else {
         filePath = path.join(ROOT, '/tests/js', req.url);

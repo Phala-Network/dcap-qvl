@@ -59,8 +59,11 @@ async function runTest(name, testFn) {
         log(`${name}: PASS`, true);
         return true;
     } catch (error) {
-        log(`${name}: FAIL - ${error.message}`, false);
-        console.error(error);
+        const message = typeof error === 'object' && error !== null && 'message' in error
+            ? /** @type {{ message?: string }} */ (error).message || 'Unknown error'
+            : String(error);
+        log(`${name}: FAIL - ${message}`, false);
+        console.error(`Error details for ${name}:`, error);
         return false;
     }
 }
@@ -414,15 +417,58 @@ async function runTests() {
     log('');
     log('━━━ Collateral Fetching ━━━');
 
-    // Test get_collateral
+    // Test get_collateral functionality - should work exactly like Node.js
     await runTest('Fetch collateral from PCCS', async () => {
-        const quote = await fetchFile('/test_data/samples/valid_tdx_v4/quote.bin');
-        const pccsUrl = 'https://pccs.phala.network/tdx/certification/v4';
+        const quote = await fetchFile('/sample/tdx_quote');
 
-        const collateral = await js_get_collateral(pccsUrl, quote);
-        if (!collateral || !collateral.tcb_info_issuer_chain) {
-            throw new Error('Collateral missing required fields');
+        // Check if get_collateral function is available in Web WASM
+        if (typeof js_get_collateral !== 'function') {
+            throw new Error('js_get_collateral function not available in Web WASM');
         }
+
+        // Test with HTTP URL (our mock server runs on HTTP)
+        const mockPccsUrl = 'http://localhost:8765/tdx/certification/v4';
+        const result = js_get_collateral(mockPccsUrl, quote);
+
+        // The function should return a promise in Web WASM just like in Node.js
+        if (!result || typeof result.then !== 'function') {
+            throw new Error('WASM get_collateral did not return a promise, got: ' + typeof result);
+        }
+
+        // Wait for the get_collateral function to complete
+        const collateral = await result;
+
+        // Validate that collateral has all required fields (same validation as Node.js)
+        if (!collateral) {
+            throw new Error('get_collateral returned null/undefined');
+        }
+
+        if (!collateral.tcb_info_issuer_chain) {
+            throw new Error('Collateral missing tcb_info_issuer_chain');
+        }
+
+        if (!collateral.pck_crl_issuer_chain) {
+            throw new Error('Collateral missing pck_crl_issuer_chain');
+        }
+
+        if (!collateral.tcb_info) {
+            throw new Error('Collateral missing tcb_info');
+        }
+
+        if (!collateral.qe_identity) {
+            throw new Error('Collateral missing qe_identity');
+        }
+
+        // Verify certificate chains start with BEGIN CERTIFICATE
+        if (!collateral.tcb_info_issuer_chain.startsWith('-----BEGIN CERTIFICATE-----')) {
+            throw new Error('Invalid tcb_info_issuer_chain format');
+        }
+
+        if (!collateral.pck_crl_issuer_chain.startsWith('-----BEGIN CERTIFICATE-----')) {
+            throw new Error('Invalid pck_crl_issuer_chain format');
+        }
+
+        log('Successfully fetched collateral using Web WASM get_collateral');
     });
 
     // Summary

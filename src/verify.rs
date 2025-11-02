@@ -150,7 +150,7 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 
     let collateral: QuoteCollateralV3 = crate::collateral::get_collateral(&pccs_url, &raw_quote)
         .await
-        .map_err(|_| JsValue::from_str("Failed to get collateral"))?;
+        .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
     serde_wasm_bindgen::to_value(&collateral)
         .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
