@@ -2,8 +2,9 @@ WASM_PACK = wasm-pack
 INSTALL_TOOL = cargo install wasm-pack
 BUILD_WEB = $(WASM_PACK) build --release --target web --out-dir pkg/web --out-name dcap-qvl-web -- --features=js
 BUILD_NODE = $(WASM_PACK) build --release --target nodejs --out-dir pkg/node --out-name dcap-qvl-node -- --features=js
+MIN_WASM_OPT_VERSION = 123
 
-all: install_wasm_tool build_web_pkg build_node_pkg
+all: install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg
 
 install_wasm_tool:
 	@echo "Installing wasm-pack if not already installed..."
@@ -14,11 +15,40 @@ install_wasm_tool:
 		echo "wasm-pack is already installed."; \
 	fi
 
-build_web_pkg: install_wasm_tool
+check_wasm_opt:
+	@echo "Checking wasm-opt version..."
+	@if ! command -v wasm-opt > /dev/null 2>&1; then \
+		echo "ERROR: wasm-opt not found. Please install Binaryen."; \
+		echo "Download from: https://github.com/WebAssembly/binaryen/releases"; \
+		exit 1; \
+	fi
+	@WASM_OPT_VERSION=$$(wasm-opt --version 2>&1 | grep -oP 'version \K[0-9]+' | head -1); \
+	if [ -z "$$WASM_OPT_VERSION" ]; then \
+		WASM_OPT_VERSION=$$(wasm-opt --version 2>&1 | grep -oP 'wasm-opt version \K[0-9]+' | head -1); \
+	fi; \
+	if [ -z "$$WASM_OPT_VERSION" ]; then \
+		echo "WARNING: Could not detect wasm-opt version"; \
+	elif [ "$$WASM_OPT_VERSION" -lt $(MIN_WASM_OPT_VERSION) ]; then \
+		echo "ERROR: wasm-opt version $$WASM_OPT_VERSION is too old (minimum required: $(MIN_WASM_OPT_VERSION))"; \
+		echo ""; \
+		echo "This will cause 'WebAssembly.Table.grow() failed' errors."; \
+		echo "See: https://github.com/wasm-bindgen/wasm-bindgen/issues/4528"; \
+		echo ""; \
+		echo "To fix, update wasm-opt:"; \
+		echo "  wget https://github.com/WebAssembly/binaryen/releases/download/version_$(MIN_WASM_OPT_VERSION)/binaryen-version_$(MIN_WASM_OPT_VERSION)-x86_64-linux.tar.gz"; \
+		echo "  tar xzf binaryen-version_$(MIN_WASM_OPT_VERSION)-x86_64-linux.tar.gz"; \
+		echo "  sudo cp binaryen-version_$(MIN_WASM_OPT_VERSION)/bin/wasm-opt /usr/local/bin/"; \
+		echo ""; \
+		exit 1; \
+	else \
+		echo "wasm-opt version $$WASM_OPT_VERSION (OK)"; \
+	fi
+
+build_web_pkg: install_wasm_tool check_wasm_opt
 	@echo "Building for web browsers..."
 	$(BUILD_WEB)
 
-build_node_pkg: install_wasm_tool
+build_node_pkg: install_wasm_tool check_wasm_opt
 	@echo "Building for Node.js..."
 	$(BUILD_NODE)
 
@@ -68,4 +98,4 @@ python_clean:
 	find python-bindings -name "*.pyc" -delete
 	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-.PHONY: all install_wasm_tool build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean
+.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean
