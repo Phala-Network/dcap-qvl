@@ -5,6 +5,11 @@
 
 This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust. It supports both SGX (Software Guard Extensions) and TDX (Trust Domain Extensions) quotes.
 
+## 📚 Documentation
+
+- **[TEST_GUIDE.md](TEST_GUIDE.md)** - Complete testing guide for Rust and JavaScript implementations
+- **[IMPLEMENTATION_PARITY.md](IMPLEMENTATION_PARITY.md)** - Verification that Rust and JavaScript implementations are identical
+
 # Features
 - Verify SGX and TDX quotes
 - Get collateral from PCCS
