@@ -2,7 +2,6 @@
 ///!
 ///! This test suite focuses on exceptions that can be tested with real data mutations
 ///! Some tests are impossible to implement without binary quote modification tools
-
 use dcap_qvl::{verify::verify, QuoteCollateralV3};
 
 fn load_sgx_sample() -> (Vec<u8>, QuoteCollateralV3) {
@@ -32,7 +31,10 @@ fn exception_01_invalid_quote_empty() {
     let empty_quote = vec![];
     let result = verify(&empty_quote, &collateral, VALID_NOW);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Failed to decode quote"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Failed to decode quote"));
 }
 
 #[test]
@@ -49,7 +51,10 @@ fn exception_03_invalid_tcb_info_json() {
     collateral.tcb_info = "invalid json {".to_string();
     let result = verify(&quote, &collateral, VALID_NOW);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Failed to decode TcbInfo"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Failed to decode TcbInfo"));
 }
 
 #[test]
@@ -60,7 +65,10 @@ fn exception_04_invalid_next_update_format() {
     collateral.tcb_info = serde_json::to_string(&tcb_info).unwrap();
     let result = verify(&quote, &collateral, VALID_NOW);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Failed to parse next update"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Failed to parse next update"));
 }
 
 #[test]
@@ -91,11 +99,15 @@ fn exception_07_pck_crl_invalid() {
 fn exception_08_tcb_cert_chain_too_short() {
     let (quote, mut collateral) = load_sgx_sample();
     let full_chain = collateral.tcb_info_issuer_chain.clone();
-    let first_cert_end = full_chain.find("-----END CERTIFICATE-----").unwrap() + "-----END CERTIFICATE-----".len();
+    let first_cert_end =
+        full_chain.find("-----END CERTIFICATE-----").unwrap() + "-----END CERTIFICATE-----".len();
     collateral.tcb_info_issuer_chain = full_chain[..first_cert_end].to_string();
     let result = verify(&quote, &collateral, VALID_NOW);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Certificate chain is too short in quote_collateral"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("Certificate chain is too short in quote_collateral"));
 }
 
 #[test]
@@ -173,7 +185,10 @@ fn valid_sgx_quote() {
     assert!(result.is_ok());
     let verified = result.unwrap();
     assert_eq!(verified.status, "ConfigurationAndSWHardeningNeeded");
-    assert_eq!(verified.advisory_ids, vec!["INTEL-SA-00289", "INTEL-SA-00615"]);
+    assert_eq!(
+        verified.advisory_ids,
+        vec!["INTEL-SA-00289", "INTEL-SA-00615"]
+    );
 }
 
 #[test]

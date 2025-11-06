@@ -5,11 +5,6 @@
 
 This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust. It supports both SGX (Software Guard Extensions) and TDX (Trust Domain Extensions) quotes.
 
-## 📚 Documentation
-
-- **[TEST_GUIDE.md](TEST_GUIDE.md)** - Complete testing guide for Rust and JavaScript implementations
-- **[IMPLEMENTATION_PARITY.md](IMPLEMENTATION_PARITY.md)** - Verification that Rust and JavaScript implementations are identical
-
 # Features
 - Verify SGX and TDX quotes
 - Get collateral from PCCS
@@ -100,6 +95,67 @@ asyncio.run(main())
 ```
 
 See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.
+
+# JavaScript/TypeScript Bindings
+
+A pure JavaScript/TypeScript implementation is available, supporting both Node.js and browser environments.
+
+## Installation
+
+```bash
+npm install @phala/dcap-qvl
+```
+
+## Usage
+
+### Node.js
+
+```javascript
+import { verify, getCollateralFromPcs } from '@phala/dcap-qvl';
+import { readFileSync } from 'fs';
+
+// Get collateral from Intel PCS
+const quoteData = readFileSync('quote.bin');
+const collateral = await getCollateralFromPcs(quoteData);
+
+// Verify quote
+const timestamp = Math.floor(Date.now() / 1000);
+const result = verify(quoteData, collateral, timestamp);
+console.log(`Status: ${result.status}`);
+console.log(`Advisory IDs: ${result.advisory_ids}`);
+```
+
+### Browser
+
+```javascript
+import { verify, getCollateralFromPcs } from '@phala/dcap-qvl/web';
+
+// Fetch and verify quote
+const response = await fetch('quote.bin');
+const quoteData = new Uint8Array(await response.arrayBuffer());
+const collateral = await getCollateralFromPcs(quoteData);
+
+const timestamp = Math.floor(Date.now() / 1000);
+const result = verify(quoteData, collateral, timestamp);
+console.log(`Status: ${result.status}`);
+```
+
+## Development
+
+```bash
+# Build JavaScript package
+cd dcap-qvl-js
+npm install
+npm run build
+
+# Run tests
+npm test
+
+# Test with coverage
+npm run test:coverage
+```
+
+See [dcap-qvl-js/](dcap-qvl-js/) for complete documentation and examples.
 
 # License
 

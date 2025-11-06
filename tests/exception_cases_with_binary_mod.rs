@@ -1,6 +1,5 @@
 ///! Complete Exception Test Suite with Binary Quote Modification
 ///! This test suite covers ALL exception cases including attribute validation
-
 use dcap_qvl::{verify::verify, QuoteCollateralV3};
 
 mod quote_modifier;
