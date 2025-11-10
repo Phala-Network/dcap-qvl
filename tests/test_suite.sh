@@ -215,7 +215,9 @@ run_single_test() {
 }
 
 run_get_collateral_test() {
-	local test_name=$1
+	local test_case_cli=$1
+	local test_name=$2
+	local pccs_arg=$3
 	local quote_file="$PROJECT_ROOT/sample/tdx_quote"
 
 	if [ ! -f "$quote_file" ]; then
@@ -223,33 +225,10 @@ run_get_collateral_test() {
 		return 0
 	fi
 
-	echo "  Testing get-collateral with real TDX quote..."
+	echo "  Testing get-collateral for $test_name, pccs arg: ${pccs_arg:-none}"
 
-	local cmd
-	local cmd_args
-
-	case "$test_name" in
-	"Rust CLI")
-		if [ ! -f "$RUST_TEST_CASE_CLI" ]; then
-			echo "  Building Rust test_case tool..."
-			(cd cli && cargo build --release --bin test_case --quiet 2>&1 | grep -v "warning:") || true
-		fi
-		cmd="$RUST_TEST_CASE_CLI"
-		cmd_args="get-collateral --pccs-url https://pccs.phala.network/tdx/certification/v4 $quote_file"
-		;;
-	"Python Binding")
-		cmd="$PYTHON_TEST_CASE_CLI"
-		cmd_args="get-collateral $quote_file"
-		;;
-	"WASM Binding")
-		cmd="$WASM_TEST_CASE_CLI"
-		cmd_args="get-collateral $quote_file"
-		;;
-	*)
-		echo -e "  ${YELLOW}⚠${NC} Unknown test type: $test_name"
-		return 2
-		;;
-	esac
+	local cmd="$test_case_cli"
+	local cmd_args="get-collateral $pccs_arg $quote_file"
 
 	# Run the test with timeout
 	local output
@@ -498,7 +477,8 @@ run_test_suite() {
 	echo -e "${BLUE}━━━ Step 5: Running get-collateral tests ━━━${NC}"
 	echo ""
 
-	run_get_collateral_test "$test_name"
+	run_get_collateral_test "$test_case_cli" "$test_name" ""
+	run_get_collateral_test "$test_case_cli" "$test_name" "--pccs-url https://pccs.phala.network/tdx/certification/v4"
 	local collateral_exit=$?
 
 	if [ $collateral_exit -eq 0 ]; then
