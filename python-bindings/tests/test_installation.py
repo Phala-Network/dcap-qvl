@@ -7,21 +7,22 @@ Test script for verifying dcap_qvl installation works correctly.
 def main():
     try:
         import dcap_qvl
+
         print("Successfully imported dcap_qvl")
         print("Available functions:", dir(dcap_qvl))
 
         # Test basic functionality
         try:
             collateral = dcap_qvl.QuoteCollateralV3(
-                pck_crl_issuer_chain='test',
-                root_ca_crl=b'test',
-                pck_crl=b'test',
-                tcb_info_issuer_chain='test',
+                pck_crl_issuer_chain="test",
+                root_ca_crl=b"test",
+                pck_crl=b"test",
+                tcb_info_issuer_chain="test",
                 tcb_info='{"test": true}',
-                tcb_info_signature=b'test',
-                qe_identity_issuer_chain='test',
+                tcb_info_signature=b"test",
+                qe_identity_issuer_chain="test",
                 qe_identity='{"test": true}',
-                qe_identity_signature=b'test'
+                qe_identity_signature=b"test",
             )
             json_str = collateral.to_json()
             collateral2 = dcap_qvl.QuoteCollateralV3.from_json(json_str)
@@ -31,7 +32,7 @@ def main():
 
         # Test quote parsing if available
         try:
-            if hasattr(dcap_qvl, 'parse_quote'):
+            if hasattr(dcap_qvl, "parse_quote"):
                 print("* parse_quote function is available")
             print("* Basic functionality test completed!")
         except Exception as e:

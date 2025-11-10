@@ -19,7 +19,9 @@ def main():
     # Example paths - adjust these to your actual sample files
     this_file = Path(__file__)
     quote_file = this_file.parent.parent.parent / "sample/tdx_quote"
-    collateral_file = this_file.parent.parent.parent / "sample/tdx_quote_collateral.json"
+    collateral_file = (
+        this_file.parent.parent.parent / "sample/tdx_quote_collateral.json"
+    )
 
     if not quote_file.exists():
         print(f"Quote file not found: {quote_file}")

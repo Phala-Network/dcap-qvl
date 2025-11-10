@@ -183,6 +183,7 @@ jobs:
           echo "NPM tag: ${{ steps.version.outputs.npm_tag }}"
           echo ""
           echo "The packages were validated and would be published if dry_run was false."
+          echo "Build artifacts have been uploaded to GitHub Actions artifacts."
           echo ""
           echo "Web package version: $(cat pkg/web/package.json | grep version)"
           echo "Node package version: $(cat pkg/node/package.json | grep version)"

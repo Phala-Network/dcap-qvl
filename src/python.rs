@@ -195,7 +195,26 @@ fn py_verify(
         Ok(verified_report) => Ok(PyVerifiedReport {
             inner: verified_report,
         }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {}", e))),
+        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
+    }
+}
+
+#[pyfunction]
+fn py_verify_with_root_ca(
+    raw_quote: &Bound<'_, PyBytes>,
+    collateral: &PyQuoteCollateralV3,
+    root_ca_der: &Bound<'_, PyBytes>,
+    now_secs: u64,
+) -> PyResult<PyVerifiedReport> {
+    let quote_bytes = raw_quote.as_bytes();
+    let root_ca = root_ca_der.as_bytes();
+
+    let verifier = crate::verify::QuoteVerifier::new_with_root_ca(root_ca.to_vec());
+    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
+        Ok(verified_report) => Ok(PyVerifiedReport {
+            inner: verified_report,
+        }),
+        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
     }
 }
 
@@ -232,6 +251,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVerifiedReport>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
+    m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;
     m.add_function(wrap_pyfunction!(parse_quote, m)?)?;
     m.add_function(wrap_pyfunction!(get_collateral_for_fmspc_py, m)?)?;
 

@@ -1,3 +1,4 @@
 Cargo.lock
 target/
 .claude/
+/test_data

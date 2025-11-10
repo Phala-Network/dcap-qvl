@@ -98,4 +98,14 @@ python_clean:
 	find python-bindings -name "*.pyc" -delete
 	find python-bindings -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean
+test_wasm_web:
+	@echo "Testing Web WASM bindings..."
+	./tests/test_web.sh
+
+test_wasm_node:
+	@echo "Testing Node.js WASM bindings..."
+	./tests/test_suite.sh wasm
+
+test_wasm: test_wasm_node
+
+.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean test_wasm_web test_wasm_node test_wasm

@@ -10,7 +10,6 @@ from typing import List
 __version__: str
 __all__: List[str]
 
-
 class QuoteCollateralV3:
     """
     Represents quote collateral data required for DCAP quote verification.
@@ -120,7 +119,6 @@ class QuoteCollateralV3:
         """
         ...
 
-
 class VerifiedReport:
     """
     Contains the results of DCAP quote verification.
@@ -164,7 +162,6 @@ class VerifiedReport:
             ValueError: If serialization fails
         """
         ...
-
 
 class Quote:
     """
@@ -282,11 +279,8 @@ class Quote:
 
 # Synchronous functions
 
-
 def verify(
-    raw_quote: bytes,
-    collateral: QuoteCollateralV3,
-    now_secs: int
+    raw_quote: bytes, collateral: QuoteCollateralV3, now_secs: int
 ) -> VerifiedReport:
     """
     Verify an SGX or TDX quote with the provided collateral data.
@@ -321,7 +315,6 @@ def verify(
     """
     ...
 
-
 def parse_quote(raw_quote: bytes) -> Quote:
     """
     Parse a raw quote from bytes (convenience function).
@@ -349,7 +342,8 @@ def parse_quote(raw_quote: bytes) -> Quote:
     """
     ...
 
-
-async def get_collateral_for_fmspc(pccs_url: str, fmspc: str, ca: str, is_sgx: bool) -> QuoteCollateralV3:
+async def get_collateral_for_fmspc(
+    pccs_url: str, fmspc: str, ca: str, is_sgx: bool
+) -> QuoteCollateralV3:
     """Get collateral for a specific FMSPC from PCCS URL."""
     ...

@@ -10,10 +10,11 @@ import sys
 import os
 
 # Add the python package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'python'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "python"))
 
 try:
     import dcap_qvl
+
     print("✓ Successfully imported dcap_qvl")
 except ImportError as e:
     print(f"✗ Failed to import dcap_qvl: {e}")
@@ -40,16 +41,12 @@ async def test_get_collateral_for_fmspc():
 
         # Call the async function
         collateral = await dcap_qvl.get_collateral_for_fmspc(
-            pccs_url=pccs_url,
-            fmspc=fmspc,
-            ca=ca,
-            for_sgx=for_sgx
+            pccs_url=pccs_url, fmspc=fmspc, ca=ca, for_sgx=for_sgx
         )
 
         print("✓ Successfully retrieved collateral!")
         print(f"  Type: {type(collateral)}")
-        print(
-            f"  PCK CRL Issuer Chain length: {len(collateral.pck_crl_issuer_chain)}")
+        print(f"  PCK CRL Issuer Chain length: {len(collateral.pck_crl_issuer_chain)}")
         print(f"  Root CA CRL size: {len(collateral.root_ca_crl)} bytes")
         print(f"  PCK CRL size: {len(collateral.pck_crl)} bytes")
         print(f"  TCB Info length: {len(collateral.tcb_info)}")
@@ -67,9 +64,7 @@ async def test_function_availability():
     """Test that the new functions are available in the module."""
     print("\n=== Testing function availability ===")
 
-    expected_functions = [
-        'get_collateral_for_fmspc'
-    ]
+    expected_functions = ["get_collateral_for_fmspc"]
 
     all_available = True
     for func_name in expected_functions:
@@ -81,7 +76,7 @@ async def test_function_availability():
             all_available = False
 
     # Check if the function is in __all__
-    if hasattr(dcap_qvl, '__all__'):
+    if hasattr(dcap_qvl, "__all__"):
         print(f"\n__all__ exports: {dcap_qvl.__all__}")
         for func_name in expected_functions:
             if func_name in dcap_qvl.__all__:

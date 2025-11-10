@@ -19,40 +19,18 @@ import time
 import json
 from typing import Optional, Union
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
 from .dcap_qvl import (
     PyQuoteCollateralV3 as QuoteCollateralV3,
     PyVerifiedReport as VerifiedReport,
     PyQuote as Quote,
     py_verify as verify,
+    py_verify_with_root_ca as verify_with_root_ca,
     parse_quote,
     get_collateral_for_fmspc,
 )
 
 # Default Intel PCS URL
 PCS_URL = "https://api.trustedservices.intel.com"
-
-
-# Note: These functions are now implemented in Rust and imported above
-# The manual parsing logic has been replaced with proper Rust-based parsing
-
-
-def _make_pcs_request(url: str) -> bytes:
-    """Make HTTP request to PCS endpoint."""
-    if requests is None:
-        raise ImportError(
-            "requests library is required for collateral fetching. Install with: pip install requests")
-
-    try:
-        response = requests.get(url, timeout=30, verify=False)
-        response.raise_for_status()
-        return response.content
-    except requests.RequestException as e:
-        raise RuntimeError(f"Failed to fetch from {url}: {e}")
 
 
 async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
@@ -68,7 +46,6 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
     Raises:
         ValueError: If quote is invalid or FMSPC cannot be extracted
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
     if not isinstance(raw_quote, (bytes, bytearray)):
         raise TypeError("raw_quote must be bytes")
@@ -92,12 +69,13 @@ async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
     Raises:
         ValueError: If quote is invalid or FMSPC cannot be extracted
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
     return await get_collateral(PCS_URL, raw_quote)
 
 
-async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport:
+async def get_collateral_and_verify(
+    raw_quote: bytes, pccs_url: Optional[str] = None
+) -> VerifiedReport:
     """Get collateral and verify the quote.
 
     Args:
@@ -110,7 +88,6 @@ async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = 
     Raises:
         ValueError: If quote is invalid or verification fails
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
     # Use provided PCCS URL or default to Intel PCS
     url = pccs_url.strip() if pccs_url else PCS_URL
@@ -133,10 +110,12 @@ __all__ = [
     "VerifiedReport",
     "Quote",
     "verify",
+    "verify_with_root_ca",
     "get_collateral",
     "get_collateral_from_pcs",
     "get_collateral_and_verify",
     "get_collateral_for_fmspc",
+    "parse_quote",
 ]
 
 __version__ = "0.3.2"

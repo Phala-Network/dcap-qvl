@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use webpki::types::{CertificateDer, TrustAnchor};
-
 pub type MrSigner = [u8; 32];
 pub type MrEnclave = [u8; 32];
 pub type Fmspc = [u8; 6];
@@ -92,12 +90,6 @@ pub const PLATFORM_ISSUER_ID: &str = "platform";
 // The root cert is downloaded from `https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer`.
 // See https://api.portal.trustedservices.intel.com/content/documentation.html#pcs for more details
 pub static TRUSTED_ROOT_CA_DER: &[u8] = include_bytes!("TrustedRootCA.der");
-pub static TRUSTED_ROOT_CA: CertificateDer<'static> =
-    CertificateDer::from_slice(TRUSTED_ROOT_CA_DER);
-
-pub fn sgx_pck_root() -> TrustAnchor<'static> {
-    webpki::anchor_from_trusted_cert(&TRUSTED_ROOT_CA).expect("Failed to create trust anchor")
-}
 
 #[cfg(test)]
 #[tokio::test]
