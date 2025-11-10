@@ -15,18 +15,9 @@ path = "src/main.rs"
 name = "test_case"
 path = "src/bin/test_case.rs"
 
-
-[[bin]]
-name = "generate_collaterals"
-path = "src/bin/generate_collaterals.rs"
-
 [[bin]]
 name = "generate_all_samples"
 path = "src/bin/generate_all_samples.rs"
-
-[[bin]]
-name = "verify_sample_skip_sig"
-path = "src/bin/verify_sample_skip_sig.rs"
 
 [dependencies]
 anyhow = "1.0.95"

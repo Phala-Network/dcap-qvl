@@ -12,13 +12,15 @@ use std::path::{Path, PathBuf};
 const CERT_DIR: &str = "test_data/certs";
 const SAMPLES_DIR: &str = "test_data/samples";
 
+type CollateralModifier = Box<dyn Fn(&mut serde_json::Value) -> Result<()>>;
+
 struct TestSample {
     name: String,
     description: String,
     should_succeed: bool,
     expected_error: Option<String>,
     quote_generator: Box<dyn Fn() -> Result<Vec<u8>>>,
-    collateral_modifier: Option<Box<dyn Fn(&mut serde_json::Value) -> Result<()>>>,
+    collateral_modifier: Option<CollateralModifier>,
 }
 
 fn load_private_key(path: &str) -> Result<EcdsaKeyPair> {
@@ -110,9 +112,9 @@ fn generate_base_quote(version: u16, key_type: u16, debug: bool) -> Result<Vec<u
     // Load PCK certificate chain (PCK + Root CA)
     // Note: Our test certs don't have Intel extension, which is expected
     // The "missing Intel extension" error is a valid test case
-    let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))
+    let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))
         .unwrap_or_else(|_| String::from("DUMMY_CERT"));
-    let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))
+    let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))
         .unwrap_or_else(|_| String::from("DUMMY_CERT"));
     let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
@@ -223,8 +225,8 @@ fn generate_sgx_v5_quote() -> Result<Vec<u8>> {
         size: 384,    // Size of EnclaveReport
     };
 
-    let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-    let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+    let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+    let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
     let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
     let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
@@ -298,9 +300,9 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     let report = create_tdx_report();
 
     // Load PCK certificate chain
-    let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))
+    let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))
         .unwrap_or_else(|_| String::from("DUMMY_CERT"));
-    let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))
+    let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))
         .unwrap_or_else(|_| String::from("DUMMY_CERT"));
     let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
@@ -388,15 +390,15 @@ fn generate_truncated_quote() -> Result<Vec<u8>> {
 fn generate_base_collateral() -> Result<serde_json::Value> {
     // Load certificate chains
     let tcb_chain =
-        fs::read_to_string(&format!("{}/tcb_chain.pem", CERT_DIR)).unwrap_or_else(|_| {
+        fs::read_to_string(format!("{}/tcb_chain.pem", CERT_DIR)).unwrap_or_else(|_| {
             String::from("-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----\n")
         });
 
     // Load CRLs
-    let root_crl = fs::read(&format!("{}/root_ca.crl.der", CERT_DIR))
+    let root_crl = fs::read(format!("{}/root_ca.crl.der", CERT_DIR))
         .unwrap_or_else(|_| vec![0x30, 0x81, 0x00]); // Minimal ASN.1
     let pck_crl =
-        fs::read(&format!("{}/pck.crl.der", CERT_DIR)).unwrap_or_else(|_| vec![0x30, 0x81, 0x00]);
+        fs::read(format!("{}/pck.crl.der", CERT_DIR)).unwrap_or_else(|_| vec![0x30, 0x81, 0x00]);
 
     // Create TCB info
     let tcb_info = json!({
@@ -440,10 +442,10 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
         "pck_crl": hex::encode(&pck_crl),
         "tcb_info_issuer_chain": tcb_chain.clone(),
         "tcb_info": tcb_info_json,
-        "tcb_info_signature": hex::encode(&tcb_signature),
+        "tcb_info_signature": hex::encode(tcb_signature),
         "qe_identity_issuer_chain": tcb_chain,
         "qe_identity": qe_identity,
-        "qe_identity_signature": hex::encode(&qe_identity_signature)
+        "qe_identity_signature": hex::encode(qe_identity_signature)
     }))
 }
 
@@ -560,7 +562,7 @@ fn main() -> Result<()> {
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
 
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -609,7 +611,7 @@ fn main() -> Result<()> {
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
 
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -629,8 +631,8 @@ fn main() -> Result<()> {
             report.td_attributes[0] |= 0x01; // Debug enabled
 
             // Rest is same as generate_tdx_quote_v4...
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
@@ -723,7 +725,7 @@ fn main() -> Result<()> {
                     let key_pair = load_private_key(key_path)?;
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -742,8 +744,8 @@ fn main() -> Result<()> {
             report.td_attributes[3] = 0x00;
 
             // Generate rest of quote (same as tdx_debug_enabled)
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
@@ -824,7 +826,7 @@ fn main() -> Result<()> {
                     let key_pair = load_private_key(key_path)?;
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -842,8 +844,8 @@ fn main() -> Result<()> {
             // Set reserved bit 29 (byte 3, bit 5)
             report.td_attributes[3] |= 0x20; // Reserved bit 29
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
@@ -924,7 +926,7 @@ fn main() -> Result<()> {
                     let key_pair = load_private_key(key_path)?;
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -942,8 +944,8 @@ fn main() -> Result<()> {
             // Set PKS bit (bit 30, byte 3, bit 6)
             report.td_attributes[3] |= 0x40; // PKS enabled
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
@@ -1024,7 +1026,7 @@ fn main() -> Result<()> {
                     let key_pair = load_private_key(key_path)?;
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -1042,8 +1044,8 @@ fn main() -> Result<()> {
             // Set KL bit (bit 31, byte 3, bit 7)
             report.td_attributes[3] |= 0x80; // KL enabled
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
@@ -1124,7 +1126,7 @@ fn main() -> Result<()> {
                     let key_pair = load_private_key(key_path)?;
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -1248,7 +1250,7 @@ fn main() -> Result<()> {
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use only the TCB signing cert (without root CA) - valid cert but chain too short
-            let tcb_cert = fs::read_to_string(&format!("{}/tcb_signing.pem", CERT_DIR))
+            let tcb_cert = fs::read_to_string(format!("{}/tcb_signing.pem", CERT_DIR))
                 .unwrap_or_else(|_| {
                     String::from("-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----\n")
                 });
@@ -1305,7 +1307,7 @@ fn main() -> Result<()> {
                     let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
 
                     collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(&tcb_signature));
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
             Ok(())
@@ -1324,8 +1326,8 @@ fn main() -> Result<()> {
             let header = create_sgx_header(3, 2, 0);
             let report = create_sgx_report(false);
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
@@ -1396,8 +1398,8 @@ fn main() -> Result<()> {
             let header = create_sgx_header(3, 2, 0);
             let report = create_sgx_report(false);
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
             let rng = SystemRandom::new();
@@ -1470,8 +1472,8 @@ fn main() -> Result<()> {
             let header = create_sgx_header(3, 2, 0);
             let report = create_sgx_report(false);
 
-            let pck_cert = fs::read_to_string(&format!("{}/pck.pem", CERT_DIR))?;
-            let root_cert = fs::read_to_string(&format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);

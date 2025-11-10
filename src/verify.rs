@@ -130,11 +130,13 @@ pub fn js_verify_with_root_ca(
         .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
 
     let verifier = QuoteVerifier::new_with_root_ca(root_ca_der);
-    let verified_report = verifier.verify(&raw_quote, &quote_collateral, now).map_err(|e| {
-        let error_msg = format_error_chain(&e);
-        serde_wasm_bindgen::to_value(&error_msg)
-            .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
-    })?;
+    let verified_report = verifier
+        .verify(&raw_quote, &quote_collateral, now)
+        .map_err(|e| {
+            let error_msg = format_error_chain(&e);
+            serde_wasm_bindgen::to_value(&error_msg)
+                .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
+        })?;
 
     serde_wasm_bindgen::to_value(&verified_report)
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))

@@ -25,7 +25,10 @@ enum Commands {
     /// Fetch collateral from PCCS
     GetCollateral {
         /// PCCS URL
-        #[arg(long, default_value = "https://pccs.phala.network/tdx/certification/v4")]
+        #[arg(
+            long,
+            default_value = "https://pccs.phala.network/tdx/certification/v4"
+        )]
         pccs_url: String,
         /// Path to quote file
         quote_file: PathBuf,
@@ -50,11 +53,7 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn run_verify(
-    quote_file: PathBuf,
-    collateral_file: PathBuf,
-    root_ca_file: Option<PathBuf>,
-) -> i32 {
+fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Option<PathBuf>) -> i32 {
     // Read quote
     let quote_bytes = match fs::read(&quote_file) {
         Ok(bytes) => bytes,
