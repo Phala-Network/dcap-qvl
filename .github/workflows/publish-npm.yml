@@ -82,7 +82,7 @@ jobs:
           wasm-opt --version
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -134,7 +134,7 @@ jobs:
           ls -lh pkg/node/
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dcap-qvl-packages-${{ steps.version.outputs.version }}
           path: |
