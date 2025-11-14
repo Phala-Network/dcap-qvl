@@ -106,7 +106,6 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
     let report = verify(&quote, &collateral, now)
-        .ok()
         .context("Failed to verify quote")?;
     println!("{}", serde_json::to_string(&report).unwrap());
     eprintln!("Quote verified");
