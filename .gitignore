@@ -2,3 +2,4 @@ Cargo.lock
 target/
 .claude/
 /test_data
+dcap-qvl-js/node_modules
