@@ -8,7 +8,7 @@ all: install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg
 
 install_wasm_tool:
 	@echo "Installing wasm-pack if not already installed..."
-	@if ! command -v $(WASM_PACK) &> /dev/null; then \
+	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
 		echo "wasm-pack not found, installing..."; \
 		$(INSTALL_TOOL); \
 	else \
