@@ -37,10 +37,11 @@ jobs:
         id: npm-meta
         run: |
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            # Tag push: npm-v0.0.1 -> npm_tag=latest
+            # Tag push: npm-v0.1.0 -> version=0.1.0, npm_tag=latest
             NPM_TAG="latest"
             VERSION=${GITHUB_REF#refs/tags/npm-v}
-            UPDATE_VERSION="false"
+            UPDATE_VERSION="true"  # Update package.json to match tag
+            COMMIT_VERSION="true"  # Commit back to keep repository in sync
             echo "Triggered by tag push: npm-v$VERSION"
           else
             # Manual dispatch
@@ -49,17 +50,20 @@ jobs:
               # User specified version
               VERSION="${{ github.event.inputs.version }}"
               UPDATE_VERSION="true"
+              COMMIT_VERSION="true"  # Commit version changes
               echo "Triggered by workflow_dispatch with version=$VERSION, npm_tag=$NPM_TAG"
             else
               # Use version from package.json
               VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
               UPDATE_VERSION="false"
+              COMMIT_VERSION="false"
               echo "Triggered by workflow_dispatch using package.json version=$VERSION, npm_tag=$NPM_TAG"
             fi
           fi
           echo "npm_tag=$NPM_TAG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "update_version=$UPDATE_VERSION" >> $GITHUB_OUTPUT
+          echo "commit_version=$COMMIT_VERSION" >> $GITHUB_OUTPUT
           echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
@@ -162,7 +166,7 @@ jobs:
           echo "================================"
 
       - name: Commit version changes
-        if: success() && steps.npm-meta.outputs.update_version == 'true' && steps.npm-meta.outputs.dry_run != 'true'
+        if: success() && steps.npm-meta.outputs.commit_version == 'true' && steps.npm-meta.outputs.dry_run != 'true'
         run: |
           VERSION="${{ steps.npm-meta.outputs.version }}"
           git config user.name "github-actions[bot]"
