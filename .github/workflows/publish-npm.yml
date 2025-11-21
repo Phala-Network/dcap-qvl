@@ -1,189 +1,137 @@
-name: Publish to NPM
+name: Publish npm Package
 
 on:
   push:
     tags:
-      - "v*"
+      - "npm-v*"  # Trigger on tags like npm-v0.0.1
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to publish (e.g., 0.3.4 or 0.3.4-beta.1)"
-        required: false
-        type: string
       npm_tag:
-        description: "NPM dist-tag (latest, beta, next, etc.)"
+        description: "npm dist-tag (latest, beta, alpha, etc.)"
         required: false
         type: string
-        default: "latest"
+        default: "beta"
       dry_run:
-        description: "Dry run (build only, don't publish)"
+        description: "Dry run (test without actually publishing)"
         required: false
         type: boolean
         default: false
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
 
 jobs:
-  build-and-publish:
-    name: Build and Publish NPM Packages
+  publish-npm:
+    name: Publish to npm
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write  # Required for OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-      - name: Get version and npm tag
-        id: version
+      - name: Determine npm tag and version
+        id: npm-meta
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ -n "${{ github.event.inputs.version }}" ]]; then
-              VERSION="${{ github.event.inputs.version }}"
-            else
-              # Get version from package.json
-              VERSION=$(grep '"version"' pkg/node/package.json | head -1 | sed 's/.*: "\(.*\)".*/\1/' || echo "0.3.3")
-            fi
-            NPM_TAG="${{ github.event.inputs.npm_tag }}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            # Tag push: npm-v0.0.1 -> npm_tag=latest
+            NPM_TAG="latest"
+            VERSION=${GITHUB_REF#refs/tags/npm-v}
+            echo "Triggered by tag push: npm-v$VERSION"
           else
-            # Extract version from git tag (v0.3.4-beta.1 -> 0.3.4-beta.1)
-            VERSION=${GITHUB_REF#refs/tags/v}
-            # Determine npm tag based on version format
-            if [[ "$VERSION" =~ -beta ]]; then
-              NPM_TAG="beta"
-            elif [[ "$VERSION" =~ -alpha ]]; then
-              NPM_TAG="alpha"
-            elif [[ "$VERSION" =~ -rc ]]; then
-              NPM_TAG="rc"
-            else
-              NPM_TAG="latest"
-            fi
+            # Manual dispatch
+            NPM_TAG="${{ github.event.inputs.npm_tag || 'beta' }}"
+            VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+            echo "Triggered by workflow_dispatch with npm_tag=$NPM_TAG"
           fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "npm_tag=${NPM_TAG}" >> $GITHUB_OUTPUT
-          echo "Publishing version ${VERSION} to npm tag: ${NPM_TAG}"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
-
-      # Install wasm-opt version 123+ to avoid WebAssembly.Table.grow() errors
-      # See: https://github.com/wasm-bindgen/wasm-bindgen/issues/4528
-      - name: Install wasm-opt (Binaryen)
-        run: |
-          BINARYEN_VERSION=123
-          wget -q https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz
-          tar xzf binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz
-          sudo cp binaryen-version_${BINARYEN_VERSION}/bin/wasm-opt /usr/local/bin/
-          wasm-opt --version
+          echo "npm_tag=$NPM_TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Build Web Package
+      - name: Upgrade npm for OIDC support
         run: |
-          wasm-pack build --release --target web --out-dir pkg/web --out-name dcap-qvl-web -- --features=js
+          npm install -g npm@latest
+          echo "npm version: $(npm --version)"
 
-      - name: Build Node Package
+      - name: Verify OIDC token availability
         run: |
-          wasm-pack build --release --target nodejs --out-dir pkg/node --out-name dcap-qvl-node -- --features=js
-
-      - name: Update package names and versions
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Update web package
-          cd pkg/web
-          # Change package name to @phala/dcap-qvl-web
-          if command -v jq &> /dev/null; then
-            jq '.name = "@phala/dcap-qvl-web"' package.json > package.json.tmp && mv package.json.tmp package.json
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" ]; then
+            echo "✓ OIDC token available"
+            echo "Endpoint: ${ACTIONS_ID_TOKEN_REQUEST_URL}"
           else
-            sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-web"/' package.json && rm -f package.json.bak
+            echo "✗ OIDC token NOT available"
+            echo "Check workflow permissions include 'id-token: write'"
+            exit 1
           fi
-          # Update version
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          cd ../..
 
-          # Update node package
-          cd pkg/node
-          # Change package name to @phala/dcap-qvl-node
-          if command -v jq &> /dev/null; then
-            jq '.name = "@phala/dcap-qvl-node"' package.json > package.json.tmp && mv package.json.tmp package.json
-          else
-            sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-node"/' package.json && rm -f package.json.bak
-          fi
-          # Update version
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          cd ../..
-
-      - name: List built packages
+      - name: Verify repository configuration
         run: |
-          echo "Web package:"
-          cat pkg/web/package.json | grep -E '"name"|"version"'
-          ls -lh pkg/web/
+          echo "Checking repository consistency..."
+          GIT_REPO=$(git remote get-url origin | sed 's/.*github.com[/:]//; s/.git$//')
+          PKG_REPO=$(node -e "console.log(require('./dcap-qvl-js/package.json').repository?.url || '')" | sed 's|https://github.com/||; s|git+||; s|.git$||')
+
+          echo "Git remote:   $GIT_REPO"
+          echo "package.json: $PKG_REPO"
+
+          if [ "$GIT_REPO" != "$PKG_REPO" ]; then
+            echo "✗ Repository mismatch!"
+            echo "This will cause 422 error during publish"
+            exit 1
+          fi
+          echo "✓ Repositories match"
+
+      - name: Display package information
+        run: |
+          cd dcap-qvl-js
+          PKG_NAME=$(node -e "console.log(require('./package.json').name)")
+          PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "Package: $PKG_NAME"
+          echo "Version: $PKG_VERSION"
+          echo "npm tag: ${{ steps.npm-meta.outputs.npm_tag }}"
+          echo "Dry run: ${{ steps.npm-meta.outputs.dry_run }}"
+          echo "Trigger: ${{ github.event_name }}"
+
+      - name: Install dependencies
+        working-directory: dcap-qvl-js
+        run: npm ci
+
+      - name: Publish to npm (Dry Run)
+        if: steps.npm-meta.outputs.dry_run == 'true'
+        working-directory: dcap-qvl-js
+        run: |
+          NPM_TAG="${{ steps.npm-meta.outputs.npm_tag }}"
+          echo "🔍 Dry run mode - simulating publish with tag: $NPM_TAG"
+          npm publish --access public --tag "$NPM_TAG" --provenance --dry-run --verbose
+
+      - name: Publish to npm
+        if: steps.npm-meta.outputs.dry_run != 'true'
+        working-directory: dcap-qvl-js
+        run: |
+          NPM_TAG="${{ steps.npm-meta.outputs.npm_tag }}"
+          echo "Publishing @phala/dcap-qvl with tag: $NPM_TAG"
+          npm publish --access public --tag "$NPM_TAG" --provenance --verbose
+
+      - name: Publish summary
+        if: success() && steps.npm-meta.outputs.dry_run != 'true'
+        run: |
+          PKG_NAME=$(node -e "console.log(require('./dcap-qvl-js/package.json').name)")
+          PKG_VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+          NPM_TAG="${{ steps.npm-meta.outputs.npm_tag }}"
           echo ""
-          echo "Node package:"
-          cat pkg/node/package.json | grep -E '"name"|"version"'
-          ls -lh pkg/node/
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: dcap-qvl-packages-${{ steps.version.outputs.version }}
-          path: |
-            pkg/web/
-            pkg/node/
-
-      - name: Publish Web Package (Dry Run)
-        if: inputs.dry_run
-        working-directory: pkg/web
-        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --dry-run
-
-      - name: Publish Node Package (Dry Run)
-        if: inputs.dry_run
-        working-directory: pkg/node
-        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }} --dry-run
-
-      - name: Publish Web Package
-        if: ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.event_name == 'workflow_dispatch') && !inputs.dry_run
-        working-directory: pkg/web
-        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
-
-      - name: Publish Node Package
-        if: ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.event_name == 'workflow_dispatch') && !inputs.dry_run
-        working-directory: pkg/node
-        run: npm publish --access public --tag ${{ steps.version.outputs.npm_tag }}
-
-      - name: Publish Summary
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
-        run: |
-          echo "✅ Published version ${{ steps.version.outputs.version }} to npm tag: ${{ steps.version.outputs.npm_tag }}"
+          echo "================================"
+          echo "✓ Published Successfully!"
+          echo "================================"
+          echo "Package: $PKG_NAME@$PKG_VERSION"
+          echo "npm tag: $NPM_TAG"
           echo ""
           echo "Install with:"
-          if [[ "${{ steps.version.outputs.npm_tag }}" == "latest" ]]; then
-            echo "  npm install @phala/dcap-qvl-web"
-            echo "  npm install @phala/dcap-qvl-node"
-          else
-            echo "  npm install @phala/dcap-qvl-web@${{ steps.version.outputs.npm_tag }}"
-            echo "  npm install @phala/dcap-qvl-node@${{ steps.version.outputs.npm_tag }}"
-          fi
-
-      - name: Dry run summary
-        if: inputs.dry_run
-        run: |
-          echo "✅ Dry run completed successfully"
-          echo "Version: ${{ steps.version.outputs.version }}"
-          echo "NPM tag: ${{ steps.version.outputs.npm_tag }}"
+          echo "  npm install $PKG_NAME@$NPM_TAG"
           echo ""
-          echo "The packages were validated and would be published if dry_run was false."
-          echo "Build artifacts have been uploaded to GitHub Actions artifacts."
-          echo ""
-          echo "Web package version: $(cat pkg/web/package.json | grep version)"
-          echo "Node package version: $(cat pkg/node/package.json | grep version)"
+          echo "View on npm:"
+          echo "  https://www.npmjs.com/package/$PKG_NAME"
+          echo "================================"
