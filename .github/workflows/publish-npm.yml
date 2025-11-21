@@ -23,7 +23,7 @@ on:
 
 permissions:
   id-token: write  # Required for OIDC
-  contents: read
+  contents: write  # Required to commit version changes
 
 jobs:
   publish-npm:
@@ -160,3 +160,17 @@ jobs:
           echo "View on npm:"
           echo "  https://www.npmjs.com/package/$PKG_NAME"
           echo "================================"
+
+      - name: Commit version changes
+        if: success() && steps.npm-meta.outputs.update_version == 'true' && steps.npm-meta.outputs.dry_run != 'true'
+        run: |
+          VERSION="${{ steps.npm-meta.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dcap-qvl-js/package.json dcap-qvl-js/package-lock.json
+          git commit -m "chore(npm): bump version to $VERSION
+
+Published @phala/dcap-qvl@$VERSION to npm
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          git push
