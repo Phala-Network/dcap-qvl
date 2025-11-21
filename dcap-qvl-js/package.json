@@ -1,6 +1,6 @@
 {
-  "name": "dcap-qvl-js",
-  "version": "0.1.0",
+  "name": "@phala/dcap-qvl",
+  "version": "0.0.1",
   "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
   "type": "commonjs",
   "main": "src/index.js",
@@ -9,6 +9,11 @@
   },
   "scripts": {
     "test": "echo \"Error: no test command specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Phala-Network/dcap-qvl",
+    "directory": "dcap-qvl-js"
   },
   "keywords": [
     "dcap",
