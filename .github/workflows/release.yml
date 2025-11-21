@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      npm_tag:
+        description: "npm dist-tag (latest, beta, alpha, etc.)"
+        required: false
+        type: string
+        default: "latest"
 
 env:
   CARGO_TERM_COLOR: always
@@ -161,3 +166,73 @@ jobs:
           cd cli
           cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
         continue-on-error: true # Don't fail if already published
+
+  publish-npm:
+    name: Publish to npm
+    needs: create-release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@latest
+          echo "npm version: $(npm --version)"
+
+      - name: Verify OIDC token availability
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" ]; then
+            echo "✓ OIDC token available"
+            echo "Endpoint: ${ACTIONS_ID_TOKEN_REQUEST_URL}"
+          else
+            echo "✗ OIDC token NOT available"
+            echo "Check workflow permissions include 'id-token: write'"
+            exit 1
+          fi
+
+      - name: Verify repository configuration
+        run: |
+          echo "Checking repository consistency..."
+          GIT_REPO=$(git remote get-url origin | sed 's/.*github.com[/:]//; s/.git$//')
+          PKG_REPO=$(node -e "console.log(require('./dcap-qvl-js/package.json').repository?.url || '')" | sed 's|https://github.com/||; s|git+||; s|.git$||')
+
+          echo "Git remote:   $GIT_REPO"
+          echo "package.json: $PKG_REPO"
+
+          if [ "$GIT_REPO" != "$PKG_REPO" ]; then
+            echo "✗ Repository mismatch!"
+            echo "This will cause 422 error during publish"
+            exit 1
+          fi
+          echo "✓ Repositories match"
+
+      - name: Install dependencies
+        working-directory: dcap-qvl-js
+        run: npm ci
+
+      - name: Publish to npm
+        working-directory: dcap-qvl-js
+        run: |
+          NPM_TAG="${{ github.event.inputs.npm_tag || 'latest' }}"
+          echo "Publishing @phala/dcap-qvl with tag: $NPM_TAG"
+          npm publish --access public --tag "$NPM_TAG" --provenance --verbose
+
+      - name: Publish summary
+        if: success()
+        run: |
+          PKG_NAME=$(node -e "console.log(require('./dcap-qvl-js/package.json').name)")
+          PKG_VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+          NPM_TAG="${{ github.event.inputs.npm_tag || 'latest' }}"
+          echo "✓ Published: $PKG_NAME@$PKG_VERSION"
+          echo "✓ npm tag: $NPM_TAG"
+          echo "Install with: npm install $PKG_NAME@$NPM_TAG"
+          echo "View on npm: https://www.npmjs.com/package/$PKG_NAME"
