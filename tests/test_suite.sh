@@ -1,6 +1,6 @@
 #!/bin/bash
 # DCAP Quote Verification Test Suite
-# Usage: ./tests/test_suite.sh [rust|python|wasm|all]
+# Usage: ./tests/test_suite.sh [rust|python|wasm|js|all]
 # Note: Can be run from any directory
 
 set -e
@@ -22,6 +22,7 @@ readonly CERTS_DIR="$PROJECT_ROOT/test_data/certs"
 readonly RUST_TEST_CASE_CLI="$PROJECT_ROOT/cli/target/release/test_case"
 readonly PYTHON_TEST_CASE_CLI="python3 $PROJECT_ROOT/python-bindings/test_case.py"
 readonly WASM_TEST_CASE_CLI="node $PROJECT_ROOT/tests/test_case.js"
+readonly JS_TEST_CASE_CLI="node --no-warnings $PROJECT_ROOT/dcap-qvl-js/test_case.js"
 
 print_box() {
 	local color=$1
@@ -114,6 +115,15 @@ build_wasm_binding() {
 	else
 		echo -e "  ${GREEN}✓${NC} WASM binding already built"
 	fi
+	[ -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ] || build_rust_tools
+}
+
+build_js_binding() {
+	echo "  Building Pure JS binding..."
+	if [ ! -d "$PROJECT_ROOT/dcap-qvl-js/node_modules" ]; then
+		(cd "$PROJECT_ROOT/dcap-qvl-js" && npm install --quiet 2>&1 | grep -vE "npm WARN") || true
+	fi
+	echo -e "  ${GREEN}✓${NC} Pure JS binding ready"
 	[ -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ] || build_rust_tools
 }
 
@@ -417,6 +427,8 @@ run_test_suite() {
 		build_python_binding
 	elif [ "$test_name" = "WASM Binding" ]; then
 		build_wasm_binding
+	elif [ "$test_name" = "Pure JS Binding" ]; then
+		build_js_binding
 	else
 		build_rust_tools
 	fi
@@ -557,6 +569,14 @@ run_all_tests() {
 	echo ""
 	echo ""
 
+	print_separator "Testing Pure JS Binding"
+	echo ""
+	"$0" js
+	local js_exit=$?
+
+	echo ""
+	echo ""
+
 	# Overall summary
 	print_box "$MAGENTA" "Overall Summary"
 	echo ""
@@ -564,10 +584,11 @@ run_all_tests() {
 	[ $rust_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} Rust CLI:       All tests passed" || echo -e "  ${RED}✗${NC} Rust CLI:       Some tests failed"
 	[ $python_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} Python Binding: All tests passed" || echo -e "  ${RED}✗${NC} Python Binding: Some tests failed"
 	[ $wasm_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} WASM Binding:   All tests passed" || echo -e "  ${RED}✗${NC} WASM Binding:   Some tests failed"
+	[ $js_exit -eq 0 ] && echo -e "  ${GREEN}✓${NC} Pure JS Binding: All tests passed" || echo -e "  ${RED}✗${NC} Pure JS Binding: Some tests failed"
 
 	echo ""
 
-	if [ $rust_exit -eq 0 ] && [ $python_exit -eq 0 ] && [ $wasm_exit -eq 0 ]; then
+	if [ $rust_exit -eq 0 ] && [ $python_exit -eq 0 ] && [ $wasm_exit -eq 0 ] && [ $js_exit -eq 0 ]; then
 		print_box "$GREEN" "All tests passed in all versions! 🎉"
 		exit 0
 	else
@@ -579,9 +600,9 @@ run_all_tests() {
 main() {
 	local test_mode="${1:-all}"
 
-	if [[ ! "$test_mode" =~ ^(rust|python|wasm|all)$ ]]; then
+	if [[ ! "$test_mode" =~ ^(rust|python|wasm|js|all)$ ]]; then
 		echo -e "${RED}Error: Invalid test mode '$test_mode'${NC}" >&2
-		echo "Usage: $0 [rust|python|wasm|all]" >&2
+		echo "Usage: $0 [rust|python|wasm|js|all]" >&2
 		exit 1
 	fi
 
@@ -594,6 +615,9 @@ main() {
 		;;
 	wasm)
 		run_test_suite "$WASM_TEST_CASE_CLI" "WASM Binding"
+		;;
+	js)
+		run_test_suite "$JS_TEST_CASE_CLI" "Pure JS Binding"
 		;;
 	rust)
 		run_test_suite "$RUST_TEST_CASE_CLI" "Rust CLI"

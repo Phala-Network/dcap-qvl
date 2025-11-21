@@ -1,0 +1,33 @@
+{
+  "name": "dcap-qvl-js",
+  "version": "0.1.0",
+  "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "bin": {
+    "test_case": "./test_case.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test command specified\" && exit 1"
+  },
+  "keywords": [
+    "dcap",
+    "sgx",
+    "tdx",
+    "attestation",
+    "quote",
+    "verification"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@peculiar/asn1-schema": "^2.3.13",
+    "@peculiar/asn1-x509": "^2.3.13",
+    "asn1.js": "^5.4.1",
+    "bn.js": "^5.2.2",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
