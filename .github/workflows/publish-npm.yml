@@ -6,6 +6,10 @@ on:
       - "npm-v*"  # Trigger on tags like npm-v0.0.1
   workflow_dispatch:
     inputs:
+      version:
+        description: "Version to publish (e.g., 0.0.1, leave empty to use package.json)"
+        required: false
+        type: string
       npm_tag:
         description: "npm dist-tag (latest, beta, alpha, etc.)"
         required: false
@@ -36,15 +40,26 @@ jobs:
             # Tag push: npm-v0.0.1 -> npm_tag=latest
             NPM_TAG="latest"
             VERSION=${GITHUB_REF#refs/tags/npm-v}
+            UPDATE_VERSION="false"
             echo "Triggered by tag push: npm-v$VERSION"
           else
             # Manual dispatch
             NPM_TAG="${{ github.event.inputs.npm_tag || 'beta' }}"
-            VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
-            echo "Triggered by workflow_dispatch with npm_tag=$NPM_TAG"
+            if [[ -n "${{ github.event.inputs.version }}" ]]; then
+              # User specified version
+              VERSION="${{ github.event.inputs.version }}"
+              UPDATE_VERSION="true"
+              echo "Triggered by workflow_dispatch with version=$VERSION, npm_tag=$NPM_TAG"
+            else
+              # Use version from package.json
+              VERSION=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+              UPDATE_VERSION="false"
+              echo "Triggered by workflow_dispatch using package.json version=$VERSION, npm_tag=$NPM_TAG"
+            fi
           fi
           echo "npm_tag=$NPM_TAG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "update_version=$UPDATE_VERSION" >> $GITHUB_OUTPUT
           echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
@@ -99,6 +114,16 @@ jobs:
       - name: Install dependencies
         working-directory: dcap-qvl-js
         run: npm ci
+
+      - name: Update package version
+        if: steps.npm-meta.outputs.update_version == 'true'
+        working-directory: dcap-qvl-js
+        run: |
+          VERSION="${{ steps.npm-meta.outputs.version }}"
+          echo "Updating package.json version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version
+          echo "Updated version:"
+          node -e "console.log(require('./package.json').version)"
 
       - name: Publish to npm (Dry Run)
         if: steps.npm-meta.outputs.dry_run == 'true'
