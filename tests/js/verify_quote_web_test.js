@@ -41,6 +41,14 @@ function log(message, isPass = null) {
     }
 }
 
+function hexToUint8Array(hexString) {
+    if (!hexString) return new Uint8Array();
+    if (typeof hexString !== 'string') return hexString;
+    const matches = hexString.match(/.{1,2}/g);
+    if (!matches) return new Uint8Array();
+    return new Uint8Array(matches.map(byte => parseInt(byte, 16)));
+}
+
 async function fetchFile(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch ${url}`);
@@ -50,7 +58,17 @@ async function fetchFile(url) {
 async function fetchJSON(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch ${url}`);
-    return await response.json();
+    const json = await response.json();
+    
+    // Convert hex strings to Uint8Array for byte fields
+    const byteFields = ['root_ca_crl', 'pck_crl', 'tcb_info_signature', 'qe_identity_signature'];
+    for (const field of byteFields) {
+        if (json[field] && typeof json[field] === 'string') {
+            json[field] = hexToUint8Array(json[field]);
+        }
+    }
+    
+    return json;
 }
 
 async function runTest(name, testFn) {
@@ -466,6 +484,15 @@ async function runTests() {
 
         if (!collateral.pck_crl_issuer_chain.startsWith('-----BEGIN CERTIFICATE-----')) {
             throw new Error('Invalid pck_crl_issuer_chain format');
+        }
+        
+        // Verify root_ca_crl is a Uint8Array
+        if (!(collateral.root_ca_crl instanceof Uint8Array)) {
+            throw new Error('root_ca_crl should be a Uint8Array');
+        }
+        
+        if (collateral.root_ca_crl.length === 0) {
+            throw new Error('root_ca_crl is empty');
         }
 
         log('Successfully fetched collateral using Web WASM get_collateral');
