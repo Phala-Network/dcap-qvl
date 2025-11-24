@@ -9,7 +9,7 @@ Pure JavaScript implementation of DCAP Quote Verification Library.
 ## Installation
 
 ```bash
-npm install dcap-qvl-js
+npm install @phala/dcap-qvl
 ```
 
 ## Usage
@@ -19,7 +19,7 @@ npm install dcap-qvl-js
 To verify a quote, you need the raw quote bytes and the associated collateral.
 
 ```javascript
-const { verify, getCollateral } = require('dcap-qvl-js');
+import { verify, getCollateral } from '@phala/dcap-qvl';
 
 async function verifyQuote(quoteBuffer) {
     // 1. Get Collateral (requires PCCS URL)
@@ -32,8 +32,7 @@ async function verifyQuote(quoteBuffer) {
     const result = verify(quoteBuffer, collateral, currentTimestamp);
 
     console.log('Verification Result:', result);
-    console.log('TCB Status:', result.tcbStatus);
-    console.log('Quote Output:', result.quoteOutput);
+    console.log('TCB Status:', result.status);
 }
 ```
 
@@ -42,7 +41,7 @@ async function verifyQuote(quoteBuffer) {
 You can also just parse the quote structure without full verification.
 
 ```javascript
-const { Quote } = require('dcap-qvl-js');
+import { Quote } from '@phala/dcap-qvl';
 
 const quote = Quote.parse(quoteBuffer);
 console.log('Quote Header:', quote.header);
