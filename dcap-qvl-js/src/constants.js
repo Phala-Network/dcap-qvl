@@ -88,10 +88,24 @@ const PLATFORM_ISSUER = "Platform";
 const PROCESSOR_ISSUER_ID = "processor";
 const PLATFORM_ISSUER_ID = "platform";
 
-// The root cert - embedded as file
-const fs = require('fs');
-const path = require('path');
-const TRUSTED_ROOT_CA_DER = fs.readFileSync(path.join(__dirname, 'TrustedRootCA.der'));
+// The root cert - embedded as base64 string for browser compatibility
+// Original file: TrustedRootCA.der (Intel SGX Root CA)
+const TRUSTED_ROOT_CA_DER_BASE64 =
+  'MIICjzCCAjSgAwIBAgIUImUM1lqdNInzg7SVUr9QGzknBqwwCgYIKoZIzj0EAwIwaDEaMBgGA1UE' +
+  'AwwRSW50ZWwgU0dYIFJvb3QgQ0ExGjAYBgNVBAoMEUludGVsIENvcnBvcmF0aW9uMRQwEgYDVQQH' +
+  'DAtTYW50YSBDbGFyYTELMAkGA1UECAwCQ0ExCzAJBgNVBAYTAlVTMB4XDTE4MDUyMTEwNDUxMFoX' +
+  'DTQ5MTIzMTIzNTk1OVowaDEaMBgGA1UEAwwRSW50ZWwgU0dYIFJvb3QgQ0ExGjAYBgNVBAoMEUlu' +
+  'dGVsIENvcnBvcmF0aW9uMRQwEgYDVQQHDAtTYW50YSBDbGFyYTELMAkGA1UECAwCQ0ExCzAJBgNV' +
+  'BAYTAlVTMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEC6nEwMDIYZOj/iPWsCzaEKi71OiOSLRF' +
+  'hWGjbnBVJfVnkY4u3IjkDYYL0MxO4mqsyYjlBalTVYxFP2sJBK5zlKOBuzCBuDAfBgNVHSMEGDAW' +
+  'gBQiZQzWWp00ifODtJVSv1AbOScGrDBSBgNVHR8ESzBJMEegRaBDhkFodHRwczovL2NlcnRpZmlj' +
+  'YXRlcy50cnVzdGVkc2VydmljZXMuaW50ZWwuY29tL0ludGVsU0dYUm9vdENBLmRlcjAdBgNVHQ4E' +
+  'FgQUImUM1lqdNInzg7SVUr9QGzknBqwwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8C' +
+  'AQEwCgYIKoZIzj0EAwIDSQAwRgIhAOW/5QkR+S9CiSDcNoowLuPRLsWGf/Yi7GSX94BgwTwgAiEA' +
+  '4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=';
+
+// Convert base64 to Buffer (works in both Node.js and browsers with Buffer polyfill)
+const TRUSTED_ROOT_CA_DER = Buffer.from(TRUSTED_ROOT_CA_DER_BASE64, 'base64');
 
 module.exports = {
     ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE,

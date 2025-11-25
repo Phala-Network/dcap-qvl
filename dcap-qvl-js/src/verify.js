@@ -1,7 +1,7 @@
 // Quote verification logic
 // Converted from verify.rs
 
-const crypto = require('crypto');
+const crypto = require('./crypto-compat');
 const { Quote, EnclaveReport } = require('./quote');
 const { TcbInfo } = require('./tcb_info');
 const utils = require('./utils');
@@ -46,7 +46,6 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     const now = new Date(nowSecs * 1000);
 
     // Parse quote
-    // Parse quote
     let quote;
     try {
         quote = Quote.parse(rawQuote);
@@ -55,7 +54,6 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     }
     const signedQuoteLen = quote.signedLength();
 
-    // Parse TCB info
     // Parse TCB info
     let tcbInfo;
     try {
@@ -193,8 +191,8 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         key: {
             kty: 'EC',
             crv: 'P-256',
-            x: Buffer.from(authData.ecdsaAttestationKey.slice(0, 32)).toString('base64url'),
-            y: Buffer.from(authData.ecdsaAttestationKey.slice(32, 64)).toString('base64url'),
+            x: toBase64Url(Buffer.from(authData.ecdsaAttestationKey.slice(0, 32))),
+            y: toBase64Url(Buffer.from(authData.ecdsaAttestationKey.slice(32, 64))),
         },
         format: 'jwk'
     });
@@ -422,6 +420,13 @@ function verifyEcdsaSignature(certDer, data, signatureDer) {
 // Main verify function using Intel's root CA
 function verify(rawQuote, collateral, nowSecs) {
     return QuoteVerifier.newProd().verify(rawQuote, collateral, nowSecs);
+}
+
+function toBase64Url(buffer) {
+    return buffer.toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
 }
 
 module.exports = {

@@ -4,9 +4,16 @@
   "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
   "type": "commonjs",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "bin": {
     "test_case": "./test_case.js"
   },
+  "files": [
+    "src/**/*.js",
+    "src/**/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "echo \"Error: no test command specified\" && exit 1"
   },
@@ -21,7 +28,10 @@
     "tdx",
     "attestation",
     "quote",
-    "verification"
+    "verification",
+    "browser",
+    "isomorphic",
+    "universal"
   ],
   "author": "",
   "license": "Apache-2.0",
@@ -30,7 +40,9 @@
     "@peculiar/asn1-x509": "^2.3.13",
     "asn1.js": "^5.4.1",
     "bn.js": "^5.2.2",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "browserify-sign": "^4.2.5",
+    "vite-plugin-node-polyfills": "^0.24.0"
   },
   "engines": {
     "node": ">=14.0.0"
