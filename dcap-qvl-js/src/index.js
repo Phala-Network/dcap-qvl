@@ -9,6 +9,7 @@ const constants = require('./constants');
 const oids = require('./oids');
 const utils = require('./utils');
 const intel = require('./intel');
+const { isBrowser } = require('./crypto-compat');
 
 module.exports = {
     // Quote parsing
@@ -18,6 +19,9 @@ module.exports = {
     verify,
     QuoteVerifier,
     VerifiedReport,
+
+    // Browser mode control
+    isBrowser,
 
     // Collateral fetching
     getCollateral,
