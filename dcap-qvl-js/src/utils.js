@@ -2,6 +2,7 @@
 // Converted from utils.rs
 
 const crypto = require('./crypto-compat');
+const { Buffer } = require('buffer');
 const asn1 = require('asn1.js');
 const BN = require('bn.js');
 const oids = require('./oids');

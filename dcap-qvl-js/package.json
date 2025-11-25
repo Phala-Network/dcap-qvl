@@ -1,6 +1,6 @@
 {
   "name": "@phala/dcap-qvl",
-  "version": "0.1.2",
+  "version": "0.2.1",
   "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
   "type": "commonjs",
   "main": "src/index.js",
@@ -35,14 +35,19 @@
   ],
   "author": "",
   "license": "Apache-2.0",
+  "browser": {
+    "node-fetch": false,
+    "crypto": false
+  },
   "dependencies": {
     "@peculiar/asn1-schema": "^2.3.13",
     "@peculiar/asn1-x509": "^2.3.13",
     "asn1.js": "^5.4.1",
     "bn.js": "^5.2.2",
-    "node-fetch": "^2.7.0",
-    "browserify-sign": "^4.2.5",
-    "vite-plugin-node-polyfills": "^0.24.0"
+    "buffer": "^6.0.3",
+    "elliptic": "^6.6.1",
+    "hash.js": "^1.1.7",
+    "node-fetch": "^2.7.0"
   },
   "engines": {
     "node": ">=14.0.0"

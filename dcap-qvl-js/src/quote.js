@@ -16,6 +16,7 @@ const {
     QE_REPORT_SIG_BYTE_LEN,
     BODY_BYTE_SIZE,
 } = require('./constants');
+const { Buffer } = require('buffer');
 
 // Binary reader helper
 class BinaryReader {

@@ -1,6 +1,8 @@
 const crypto = require('crypto');
+const { Buffer } = require('buffer');
 const asn1 = require('asn1.js');
-const browserSign = require('browserify-sign');
+const hashJs = require('hash.js');
+const EC = require('elliptic').ec;
 
 const isBrowser = typeof window !== 'undefined' || !crypto.X509Certificate;
 
@@ -78,19 +80,24 @@ if (isBrowser) {
         }
 
         get publicKey() {
-            const pem = this._pem;
-            const der = this._der;
+            let publicKeyPem;
+            try {
+                const cert = Certificate.decode(this._der, 'der');
+                publicKeyPem = extractPublicKeyPemFromCert(cert);
+            } catch (e) {
+                console.error("Failed to extract public key", e);
+            }
 
             return {
                 export: (options) => {
                     if (options?.format === 'pem') {
-                        return pem;
+                        return publicKeyPem;
                     }
-                    return der;
+                    return publicKeyPem;
                 },
                 asymmetricKeyType: 'ec',
                 type: 'public',
-                _pem: pem,
+                _pem: publicKeyPem,
                 _isCustomKey: true
             };
         }
@@ -128,13 +135,13 @@ if (isBrowser) {
                 // Determine signature algorithm from certificate
                 const sigAlgOid = cert.signatureAlgorithm.algorithm.join('.');
 
-                let algorithm = 'rsa-sha256';
+                let algorithm = 'sha256'; // Default to sha256
 
                 const oidMap = {
-                    '1.2.840.113549.1.1.11': 'rsa-sha256',
-                    '1.2.840.113549.1.1.12': 'rsa-sha384',
-                    '1.2.840.113549.1.1.13': 'rsa-sha512',
-                    '1.2.840.113549.1.1.14': 'rsa-sha224',
+                    '1.2.840.113549.1.1.11': 'sha256',
+                    '1.2.840.113549.1.1.12': 'sha384',
+                    '1.2.840.113549.1.1.13': 'sha512',
+                    '1.2.840.113549.1.1.14': 'sha224',
 
                     '1.2.840.10045.4.3.2': 'sha256',
                     '1.2.840.10045.4.3.3': 'sha384',
@@ -145,9 +152,7 @@ if (isBrowser) {
                     algorithm = oidMap[sigAlgOid];
                 }
 
-                algorithm = algorithm.toLowerCase();
-
-                const verifier = browserSign.createVerify(algorithm);
+                const verifier = createVerify(algorithm);
                 verifier.update(tbsBytes);
                 return verifier.verify(keyToUse, signature);
             } catch (e) {
@@ -163,12 +168,94 @@ if (isBrowser) {
     X509Certificate = crypto.X509Certificate;
 }
 
+const createHash = function (algorithm) {
+    if (isBrowser) {
+        // hash.js uses sha256() instead of createHash('sha256')
+        const algo = algorithm.toLowerCase();
+        if (hashJs[algo]) {
+            const hash = hashJs[algo]();
+            return {
+                update: function (data) {
+                    hash.update(data);
+                    return this;
+                },
+                digest: function (encoding) {
+                    const result = hash.digest(encoding);
+                    if (!encoding) {
+                        return Buffer.from(result);
+                    }
+                    return result;
+                }
+            };
+        }
+        throw new Error(`Unsupported hash algorithm: ${algorithm}`);
+    } else {
+        return crypto.createHash(algorithm);
+    }
+};
+
 const createVerify = function (algorithm) {
     let verifier;
 
     if (isBrowser) {
+        // Pure JS implementation using elliptic and hash.js
         const algoName = typeof algorithm === 'string' ? algorithm.toLowerCase() : algorithm;
-        verifier = browserSign.createVerify(algoName);
+        const hashAlgo = algoName.replace('rsa-', ''); // Handle rsa-sha256 -> sha256
+
+        // hash.js instance
+        let hash;
+        if (hashJs[hashAlgo]) {
+            hash = hashJs[hashAlgo]();
+        } else {
+            throw new Error(`Unsupported hash algorithm: ${hashAlgo}`);
+        }
+
+        verifier = {
+            update: function (data) {
+                hash.update(data);
+                return this;
+            },
+            verify: function (publicKey, signature, signatureFormat) {
+                try {
+                    const digest = hash.digest();
+
+                    // We only support EC P-256 for now as that's what DCAP uses
+                    const ec = new EC('p256');
+
+                    let key;
+                    if (typeof publicKey === 'string') {
+                        // PEM string
+                        if (publicKey.includes('PUBLIC KEY')) {
+                            // Extract key from PEM
+                            const pemStr = publicKey.replace(/-----BEGIN PUBLIC KEY-----/, '')
+                                .replace(/-----END PUBLIC KEY-----/, '')
+                                .replace(/\s+/g, '');
+                            const der = Buffer.from(pemStr, 'base64');
+
+                            // Parse SubjectPublicKeyInfo to get the key data
+                            const spki = SubjectPublicKeyInfo.decode(der, 'der');
+                            const keyData = spki.subjectPublicKey.data;
+                            key = ec.keyFromPublic(keyData);
+                        } else {
+                            // Assume raw hex or other format if not PEM (unlikely for this use case)
+                            throw new Error("Unsupported key format");
+                        }
+                    } else if (publicKey && publicKey._isCustomKey && publicKey._pem) {
+                        // Recursive call with PEM
+                        return this.verify(publicKey._pem, signature, signatureFormat);
+                    } else {
+                        throw new Error("Unsupported public key object");
+                    }
+
+                    // Signature can be DER or raw. elliptic supports DER.
+                    // DCAP utils.js converts to DER before calling verify.
+                    return key.verify(digest, signature);
+                } catch (e) {
+                    // console.error("Verification error:", e);
+                    return false;
+                }
+            }
+        };
     } else {
         verifier = crypto.createVerify(algorithm);
     }
@@ -334,6 +421,7 @@ const createPublicKey = function (key) {
 module.exports = {
     ...crypto,
     X509Certificate,
+    createHash: createHash,
     createVerify: createVerify,
     createPublicKey: createPublicKey,
     isBrowser,
