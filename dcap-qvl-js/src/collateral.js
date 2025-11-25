@@ -3,8 +3,9 @@
 
 // Use native fetch in browsers, node-fetch in Node.js
 const fetch = typeof globalThis.fetch !== 'undefined'
-  ? globalThis.fetch
-  : require('node-fetch');
+    ? globalThis.fetch
+    : require('node-fetch');
+const { Buffer } = require('buffer');
 const { Quote } = require('./quote');
 const intel = require('./intel');
 const utils = require('./utils');

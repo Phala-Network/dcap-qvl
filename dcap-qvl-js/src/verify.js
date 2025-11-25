@@ -2,6 +2,7 @@
 // Converted from verify.rs
 
 const crypto = require('./crypto-compat');
+const { Buffer } = require('buffer');
 const { Quote, EnclaveReport } = require('./quote');
 const { TcbInfo } = require('./tcb_info');
 const utils = require('./utils');
