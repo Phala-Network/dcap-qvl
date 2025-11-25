@@ -32,6 +32,29 @@ function readFileAsUint8Array(filePath) {
     }
 }
 
+function hexToUint8Array(hexString) {
+    if (!hexString) return new Uint8Array();
+    if (typeof hexString !== 'string') return hexString;
+    const matches = hexString.match(/.{1,2}/g);
+    if (!matches) return new Uint8Array();
+    return new Uint8Array(matches.map(byte => parseInt(byte, 16)));
+}
+
+function uint8ArrayToHex(uint8Array) {
+    if (!uint8Array) return "";
+    // Check if it's already a hex string
+    if (typeof uint8Array === 'string') return uint8Array;
+    // Check if it's an object with numeric keys (like {"0": 1, "1": 2...}) which often happens in JS WASM interop
+    if (typeof uint8Array === 'object' && !Array.isArray(uint8Array) && !(uint8Array instanceof Uint8Array)) {
+        // Convert array-like object to real array
+        uint8Array = Object.values(uint8Array);
+    }
+    
+    return Array.from(uint8Array)
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
 function showHelp() {
     console.log("Node.js implementation of test_case CLI tool for DCAP quote verification");
     console.log("");
@@ -67,6 +90,15 @@ async function cmdVerify(args) {
     try {
         const collateralJson = fs.readFileSync(collateralFile, "utf8");
         collateral = JSON.parse(collateralJson);
+        
+        // Convert hex strings to Uint8Array for fields that require bytes in WASM
+        // Fields marked with #[serde(with = "serde_bytes")] in Rust struct
+        const byteFields = ['root_ca_crl', 'pck_crl', 'tcb_info_signature', 'qe_identity_signature'];
+        for (const field of byteFields) {
+            if (collateral[field] && typeof collateral[field] === 'string') {
+                collateral[field] = hexToUint8Array(collateral[field]);
+            }
+        }
     } catch (e) {
         console.error(`Failed to read collateral file: ${e.message}`);
         process.exit(2);
@@ -141,6 +173,14 @@ async function cmdGetCollateral(args) {
         if (!result || !result.tcb_info_issuer_chain) {
             console.error("Error: Collateral missing required fields");
             process.exit(1);
+        }
+
+        // Convert Uint8Array fields back to hex strings for JSON output compatibility with other tools
+        const byteFields = ['root_ca_crl', 'pck_crl', 'tcb_info_signature', 'qe_identity_signature'];
+        for (const field of byteFields) {
+            if (result[field]) {
+                result[field] = uint8ArrayToHex(result[field]);
+            }
         }
 
         // Output collateral JSON directly (like Rust and Python versions)
