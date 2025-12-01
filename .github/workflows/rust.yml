@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -25,7 +25,7 @@ jobs:
     name: Check WebAssembly target
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
       - name: Check wasm32 build
@@ -35,7 +35,7 @@ jobs:
     name: Format code
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Format code
         run: cargo fmt --all -- --check
 
@@ -43,7 +43,7 @@ jobs:
     name: Check code with clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Check code with clippy
         run: cargo clippy --all
 
@@ -51,6 +51,6 @@ jobs:
     name: Check cli code with clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Check cli code with clippy
         run: cd cli && cargo clippy --all
