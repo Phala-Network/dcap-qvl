@@ -36,7 +36,7 @@ Issues = "https://github.com/Phala-Network/dcap-qvl/issues"
 [tool.maturin]
 features = ["pyo3/extension-module", "python"]
 python-source = "python"
-module-name = "dcap_qvl"
+module-name = "dcap_qvl._dcap_qvl"
 manifest-path = "../Cargo.toml"
 
 [tool.uv]
