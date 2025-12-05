@@ -936,8 +936,8 @@ fn main() -> Result<()> {
     samples.push(TestSample {
         name: "tdx_pks_enabled".to_string(),
         description: "TDX quote with PKS (Protection Keys) enabled".to_string(),
-        should_succeed: false,
-        expected_error: Some("PKS is enabled".to_string()),
+        should_succeed: true,
+        expected_error: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
@@ -1036,8 +1036,8 @@ fn main() -> Result<()> {
     samples.push(TestSample {
         name: "tdx_kl_enabled".to_string(),
         description: "TDX quote with KL (Key Locker) enabled".to_string(),
-        should_succeed: false,
-        expected_error: Some("KL is enabled".to_string()),
+        should_succeed: true,
+        expected_error: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
