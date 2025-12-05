@@ -393,12 +393,6 @@ fn validate_attrs(report: &Report) -> Result<()> {
         if !td_attrs.sec.sept_ve_disable {
             bail!("SEPT_VE_DISABLE is not enabled");
         }
-        if td_attrs.sec.pks {
-            bail!("PKS is enabled");
-        }
-        if td_attrs.sec.kl {
-            bail!("KL is enabled");
-        }
         Ok(())
     }
     fn validate_td15(report: &TDReport15) -> Result<()> {

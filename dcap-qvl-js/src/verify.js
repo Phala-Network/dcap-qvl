@@ -324,14 +324,6 @@ function validateTd10(report) {
     if (!tdAttrs.sec.septVeDisable) {
         throw new Error('SEPT_VE_DISABLE is not enabled');
     }
-
-    if (tdAttrs.sec.pks) {
-        throw new Error('PKS is enabled');
-    }
-
-    if (tdAttrs.sec.kl) {
-        throw new Error('KL is enabled');
-    }
 }
 
 function validateTd15(report) {

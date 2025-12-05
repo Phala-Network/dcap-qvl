@@ -396,21 +396,22 @@ async function runTests() {
         }
     });
 
-    // Test TDX PKS enabled
-    await runTest('TDX PKS enabled', async () => {
-        const quote = await fetchFile('/test_data/samples/tdx_pks_enabled/quote.bin');
-        const collateral = await fetchJSON('/test_data/samples/tdx_pks_enabled/collateral.json');
-        const rootCA = await fetchFile('/test_data/certs/root_ca.der');
+    // Test TDX PKS enabled (should succeed)
+    await runTest("TDX PKS enabled", async () => {
+        const quote = await fetchFile(
+            "/test_data/samples/tdx_pks_enabled/quote.bin"
+        );
+        const collateral = await fetchJSON(
+            "/test_data/samples/tdx_pks_enabled/collateral.json"
+        );
+        const rootCA = await fetchFile("/test_data/certs/root_ca.der");
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-            throw new Error('Should have failed but succeeded');
-        } catch (error) {
-            const errorStr = typeof error === 'string' ? error : (error.message || String(error));
-            if (!errorStr.includes('PKS is enabled')) {
-                throw new Error(`Expected PKS error but got: ${errorStr}`);
-            }
+        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+        if (!result || !result.status) {
+            throw new Error(
+                "Verification should succeed for PKS enabled quote"
+            );
         }
     });
 
