@@ -12,7 +12,6 @@ python-bindings/
 ├── python/                     # Python package source
 │   └── dcap_qvl/
 │       ├── __init__.py         # Main package with async API
-│       └── __init__.pyi        # Type stubs
 ├── examples/                   # Example scripts
 │   ├── basic_test.py          # Basic functionality test
 │   └── python_example.py      # Real-world usage example
@@ -122,7 +121,6 @@ The Python bindings are built using:
 1. Add Rust implementation in `../src/python.rs`
 2. Update Python package in `python/dcap_qvl/__init__.py`
 3. Add tests in `tests/` directory (use appropriate test file)
-4. Update type stubs in `python/dcap_qvl/__init__.pyi` for async functions
 5. Update documentation in `docs/`
 
 ### Testing

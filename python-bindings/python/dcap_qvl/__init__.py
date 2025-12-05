@@ -19,7 +19,7 @@ import time
 import json
 from typing import Optional, Union
 
-from .dcap_qvl import (
+from ._dcap_qvl import (
     PyQuoteCollateralV3 as QuoteCollateralV3,
     PyVerifiedReport as VerifiedReport,
     PyQuote as Quote,
