@@ -10,7 +10,11 @@ const { Quote } = require('./quote');
 const intel = require('./intel');
 const utils = require('./utils');
 
-const PCS_URL = 'https://api.trustedservices.intel.com';
+// Default PCCS URL (Phala Network's PCCS server - recommended)
+const PHALA_PCCS_URL = 'https://pccs.phala.network';
+
+// Intel's official PCS URL
+const INTEL_PCS_URL = 'https://api.trustedservices.intel.com';
 
 class PcsEndpoints {
     constructor(baseUrl, forSgx, fmspc, ca) {
@@ -26,7 +30,7 @@ class PcsEndpoints {
     }
 
     isPcs() {
-        return this.baseUrl.startsWith(PCS_URL);
+        return this.baseUrl.startsWith(INTEL_PCS_URL);
     }
 
     urlPckcrl() {
@@ -172,11 +176,11 @@ async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx) {
 }
 
 async function getCollateralFromPcs(quoteBytes) {
-    return getCollateral(PCS_URL, quoteBytes);
+    return getCollateral(INTEL_PCS_URL, quoteBytes);
 }
 
 async function getCollateralAndVerify(quoteBytes, pccsUrl) {
-    const url = (pccsUrl || '').trim() || PCS_URL;
+    const url = (pccsUrl || '').trim() || PHALA_PCCS_URL;
     const collateral = await getCollateral(url, quoteBytes);
     const now = Math.floor(Date.now() / 1000);
 
@@ -189,4 +193,6 @@ module.exports = {
     getCollateralForFmspc,
     getCollateralFromPcs,
     getCollateralAndVerify,
+    PHALA_PCCS_URL,
+    INTEL_PCS_URL,
 };

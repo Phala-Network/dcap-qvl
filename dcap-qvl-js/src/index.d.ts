@@ -305,6 +305,18 @@ export const isBrowser: boolean;
 // Collateral
 // ============================================================================
 
+/**
+ * Default PCCS URL (Phala Network's PCCS server - recommended)
+ * Provides better availability and lower rate limits compared to Intel's PCS.
+ */
+export const PHALA_PCCS_URL: string;
+
+/**
+ * Intel's official PCS (Provisioning Certification Service) URL.
+ * Use getCollateralFromPcs() to fetch collateral directly from Intel.
+ */
+export const INTEL_PCS_URL: string;
+
 export interface Collateral {
   pck_crl_issuer_chain: string;
   root_ca_crl: number[] | string;
@@ -350,7 +362,7 @@ export function getCollateralFromPcs(quoteBytes: Buffer | Uint8Array): Promise<C
 /**
  * Get collateral and verify a quote in one call
  * @param quoteBytes - Raw quote bytes
- * @param pccsUrl - Optional PCCS server URL (defaults to Intel PCS)
+ * @param pccsUrl - Optional PCCS server URL (defaults to Phala PCCS)
  */
 export function getCollateralAndVerify(
   quoteBytes: Buffer | Uint8Array,

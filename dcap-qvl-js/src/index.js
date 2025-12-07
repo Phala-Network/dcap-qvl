@@ -3,7 +3,7 @@
 
 const { Quote } = require('./quote');
 const { verify, QuoteVerifier, VerifiedReport } = require('./verify');
-const { getCollateral, getCollateralFromPcs, getCollateralAndVerify } = require('./collateral');
+const { getCollateral, getCollateralFromPcs, getCollateralAndVerify, PHALA_PCCS_URL, INTEL_PCS_URL } = require('./collateral');
 const { TcbInfo } = require('./tcb_info');
 const constants = require('./constants');
 const oids = require('./oids');
@@ -27,6 +27,8 @@ module.exports = {
     getCollateral,
     getCollateralFromPcs,
     getCollateralAndVerify,
+    PHALA_PCCS_URL,
+    INTEL_PCS_URL,
 
     // TCB Info
     TcbInfo,
