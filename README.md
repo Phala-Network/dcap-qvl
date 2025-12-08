@@ -7,8 +7,9 @@ This crate implements the quote verification logic for DCAP (Data Center Attesta
 
 # Features
 - Verify SGX and TDX quotes
-- Get collateral from PCCS
+- Get collateral from PCCS or Intel PCS
 - Extract information from quotes
+- Default PCCS: Phala Network (`https://pccs.phala.network`) - recommended for better availability and lower rate limits
 
 # Usage
 Add the following dependency to your `Cargo.toml` file to use this crate:
@@ -17,40 +18,24 @@ Add the following dependency to your `Cargo.toml` file to use this crate:
 dcap-qvl = "0.1.0"
 ```
 
-# Examples
+# Example
 
-## Get Collateral from PCCS_URL and Verify Quote
-
-To get collateral from a PCCS_URL and verify a quote, you can use the following example code:
 ```rust
 use dcap_qvl::collateral::get_collateral;
 use dcap_qvl::verify::verify;
+use dcap_qvl::PHALA_PCCS_URL;
 
 #[tokio::main]
 async fn main() {
-    // Get PCCS_URL from environment variable. The URL is like "https://localhost:8081/sgx/certification/v4/".
-    let pccs_url = std::env::var("PCCS_URL").expect("PCCS_URL is not set");
-    let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
-    let collateral = get_collateral(&pccs_url, &quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
+    let quote = std::fs::read("quote").expect("quote file not found");
+
+    // Use default Phala PCCS, or override with custom URL
+    let pccs_url = std::env::var("PCCS_URL").unwrap_or_else(|_| PHALA_PCCS_URL.to_string());
+    let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
+
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
-    println!("{:?}", tcb);
-}
-```
-
-## Get Collateral from Intel PCS and Verify Quote
-
-```rust
-use dcap_qvl::collateral::get_collateral_from_pcs;
-use dcap_qvl::verify::verify;
-
-#[tokio::main]
-async fn main() {
-    let quote = std::fs::read("tdx_quote").expect("tdx_quote is not found");
-    let collateral = get_collateral_from_pcs(&quote, std::time::Duration::from_secs(10)).await.expect("failed to get collateral");
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let tcb = verify(&quote, &collateral, now).expect("failed to verify quote");
-    println!("{:?}", tcb);
+    let report = verify(&quote, &collateral, now).expect("failed to verify quote");
+    println!("{:?}", report);
 }
 ```
 
@@ -78,19 +63,12 @@ import asyncio
 import dcap_qvl
 
 async def main():
-    # Get collateral from Intel PCS (async)
     quote_data = open("quote.bin", "rb").read()
-    collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
-    
-    # Verify quote
-    result = dcap_qvl.verify(quote_data, collateral, timestamp)
-    print(f"Status: {result.status}")
-    
-    # Or get collateral and verify in one step (async)
+
+    # Get collateral and verify in one step (defaults to Phala PCCS)
     result = await dcap_qvl.get_collateral_and_verify(quote_data)
     print(f"Status: {result.status}")
 
-# Run async code
 asyncio.run(main())
 ```
 

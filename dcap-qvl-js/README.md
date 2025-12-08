@@ -26,18 +26,28 @@ npm install @phala/dcap-qvl
 ### Basic Usage (Node.js)
 
 ```javascript
-import { verify, getCollateral } from '@phala/dcap-qvl';
+import { getCollateralAndVerify } from '@phala/dcap-qvl';
 
 async function verifyQuote(quoteBuffer) {
-    // 1. Fetch collateral from PCCS server
-    const pccsUrl = 'https://your-pccs-server.com/sgx/certification/v4/';
+    // Fetch collateral and verify in one step (defaults to Phala PCCS)
+    const result = await getCollateralAndVerify(quoteBuffer);
+    console.log('TCB Status:', result.status);
+}
+```
+
+### Custom PCCS Server
+
+```javascript
+import { verify, getCollateral, PHALA_PCCS_URL } from '@phala/dcap-qvl';
+
+async function verifyQuote(quoteBuffer) {
+    // Use default Phala PCCS, or specify your own
+    const pccsUrl = process.env.PCCS_URL || PHALA_PCCS_URL;
     const collateral = await getCollateral(pccsUrl, quoteBuffer);
 
-    // 2. Verify the quote
-    const currentTimestamp = Date.now() / 1000; // Current time in seconds
+    const currentTimestamp = Date.now() / 1000;
     const result = verify(quoteBuffer, collateral, currentTimestamp);
 
-    console.log('Verification Result:', result);
     console.log('TCB Status:', result.status);
     console.log('Advisory IDs:', result.advisory_ids);
 }
@@ -211,6 +221,22 @@ Fetches collateral from a PCCS server for the given quote.
 const collateral = await getCollateral('https://pccs.example.com/sgx/certification/v4/', quoteBuffer);
 ```
 
+#### `getCollateralAndVerify(rawQuote, pccsUrl?)`
+
+Convenience function that fetches collateral and verifies the quote in one step.
+
+**Parameters:**
+- `rawQuote` (Buffer | Uint8Array): Raw quote bytes
+- `pccsUrl` (string, optional): PCCS server URL (defaults to `PHALA_PCCS_URL`)
+
+**Returns:** Promise resolving to `VerifiedReport` object
+
+**Example:**
+```javascript
+const result = await getCollateralAndVerify(quoteBuffer);
+console.log('TCB Status:', result.status);
+```
+
 #### `Quote.parse(rawQuote)`
 
 Parses a raw quote buffer into a structured Quote object.
@@ -253,6 +279,27 @@ const result = verifier.verify(quoteBuffer, collateral, Date.now() / 1000);
 const customRootCa = Buffer.from(/* custom root CA DER bytes */);
 const customVerifier = QuoteVerifier.newWithRootCa(customRootCa);
 const result2 = customVerifier.verify(quoteBuffer, collateral, Date.now() / 1000);
+```
+
+### Constants
+
+#### `PHALA_PCCS_URL`
+
+Default PCCS URL pointing to Phala Network's PCCS server (`https://pccs.phala.network`).
+
+#### `INTEL_PCS_URL`
+
+Intel's official Provisioning Certification Service URL (`https://api.trustedservices.intel.com`).
+
+**Example:**
+```javascript
+import { getCollateral, PHALA_PCCS_URL, INTEL_PCS_URL } from '@phala/dcap-qvl';
+
+// Use Phala PCCS (recommended)
+const collateral = await getCollateral(PHALA_PCCS_URL, quoteBuffer);
+
+// Or use Intel PCS directly
+const collateral2 = await getCollateral(INTEL_PCS_URL, quoteBuffer);
 ```
 
 ## Browser Compatibility Notes

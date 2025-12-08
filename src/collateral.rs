@@ -18,7 +18,14 @@ use crate::QuoteCollateralV3;
 use core::time::Duration;
 use std::time::SystemTime;
 
-const PCS_URL: &str = "https://api.trustedservices.intel.com";
+/// Default PCCS URL (Phala Network's PCCS server).
+/// This is the recommended default for most users as it provides better availability
+/// and lower rate limits compared to Intel's PCS.
+pub const PHALA_PCCS_URL: &str = "https://pccs.phala.network";
+
+/// Intel's official PCS (Provisioning Certification Service) URL.
+/// Use `get_collateral_from_pcs()` to fetch collateral directly from Intel.
+const INTEL_PCS_URL: &str = "https://api.trustedservices.intel.com";
 
 struct PcsEndpoints {
     base_url: String,
@@ -44,7 +51,7 @@ impl PcsEndpoints {
     }
 
     fn is_pcs(&self) -> bool {
-        self.base_url.starts_with(PCS_URL)
+        self.base_url.starts_with(INTEL_PCS_URL)
     }
 
     fn url_pckcrl(&self) -> String {
@@ -268,20 +275,23 @@ pub async fn get_collateral_for_fmspc(
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
 pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> {
-    get_collateral(PCS_URL, quote).await
+    get_collateral(INTEL_PCS_URL, quote).await
 }
 
 /// Get collateral and verify the quote.
+///
+/// # Arguments
+///
+/// * `quote` - The raw quote to verify.
+/// * `pccs_url` - Optional PCCS URL. Defaults to Phala PCCS if not provided.
 pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<VerifiedReport> {
-    let pccs_url = pccs_url.unwrap_or_default().trim();
-    let pccs_url = if pccs_url.is_empty() {
-        PCS_URL
-    } else {
-        pccs_url
-    };
+    let pccs_url = pccs_url
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(PHALA_PCCS_URL);
     let collateral = get_collateral(pccs_url, quote).await?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -449,13 +459,16 @@ mod tests {
 
     #[test]
     fn test_intel_pcs_url() {
-        // Test the default Intel PCS URL constant
-        assert_eq!(PCS_URL, "https://api.trustedservices.intel.com");
+        // Test the Intel PCS URL constant
+        assert_eq!(INTEL_PCS_URL, "https://api.trustedservices.intel.com");
+
+        // Test the Phala PCCS URL constant
+        assert_eq!(PHALA_PCCS_URL, "https://pccs.phala.network");
 
         // Test with the known FMSPC from memory
         let fmspc = "B0C06F000000";
         let intel_endpoints =
-            PcsEndpoints::new(PCS_URL, true, fmspc.to_string(), PROCESSOR_ISSUER_ID);
+            PcsEndpoints::new(INTEL_PCS_URL, true, fmspc.to_string(), PROCESSOR_ISSUER_ID);
 
         assert_eq!(
             intel_endpoints.url_pckcrl(),

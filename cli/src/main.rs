@@ -6,7 +6,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Args, Parser, Subcommand};
-use dcap_qvl::collateral::{get_collateral, get_collateral_from_pcs};
+use dcap_qvl::collateral::{get_collateral, PHALA_PCCS_URL};
 use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
 use dcap_qvl::verify::verify;
@@ -94,14 +94,12 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
 async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
     let quote = hex_decode(&quote, args.hex)?;
-    let pccs_url = std::env::var("PCCS_URL").unwrap_or_default();
-    let collateral = if pccs_url.is_empty() {
-        eprintln!("Getting collateral from PCS...");
-        get_collateral_from_pcs(&quote).await?
-    } else {
-        eprintln!("Getting collateral from {pccs_url}");
-        get_collateral(&pccs_url, &quote).await?
+    let pccs_url = match std::env::var("PCCS_URL") {
+        Ok(url) if !url.trim().is_empty() => url,
+        _ => PHALA_PCCS_URL.to_string(),
     };
+    eprintln!("Getting collateral from {pccs_url}...");
+    let collateral = get_collateral(&pccs_url, &quote).await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
