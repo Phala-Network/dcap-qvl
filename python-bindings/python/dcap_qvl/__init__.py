@@ -16,6 +16,7 @@ Main functions:
 """
 
 import time
+from importlib.metadata import version
 from typing import Optional
 
 from ._dcap_qvl import (
@@ -125,3 +126,5 @@ __all__ = [
     "INTEL_PCS_URL",
     "PCS_URL",
 ]
+
+__version__ = version("dcap-qvl")
