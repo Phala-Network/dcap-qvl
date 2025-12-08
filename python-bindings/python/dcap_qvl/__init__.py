@@ -125,5 +125,3 @@ __all__ = [
     "INTEL_PCS_URL",
     "PCS_URL",
 ]
-
-__version__ = "0.3.2"
