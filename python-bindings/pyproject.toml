@@ -39,8 +39,8 @@ python-source = "python"
 module-name = "dcap_qvl._dcap_qvl"
 manifest-path = "../Cargo.toml"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21.0",
     "maturin>=1.0,<2.0",
