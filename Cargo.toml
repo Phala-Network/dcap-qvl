@@ -101,3 +101,7 @@ report = ["std", "tracing", "futures", "reqwest"]
 js = ["ring/wasm32_unknown_unknown_js", "getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]
 contract = ["getrandom"]
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

@@ -82,7 +82,7 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
     if args.fmspc {
         println!(
             "fmspc={}",
-            hex::encode(decoded_quote.fmspc().unwrap()).to_uppercase()
+            hex::encode(decoded_quote.fmspc().context("no fmspc found")?).to_uppercase()
         );
     } else {
         let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;
@@ -105,7 +105,7 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
         .as_secs();
     let report = verify(&quote, &collateral, now)
         .context("Failed to verify quote")?;
-    println!("{}", serde_json::to_string(&report).unwrap());
+    println!("{}", serde_json::to_string(&report).context("Failed to serialize report")?);
     eprintln!("Quote verified");
     Ok(())
 }

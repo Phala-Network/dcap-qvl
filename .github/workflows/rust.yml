@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Check code with clippy
-        run: cargo clippy --all
+        run: cargo clippy -- -D warnings
 
   clippy-cli:
     name: Check cli code with clippy
@@ -53,4 +53,4 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Check cli code with clippy
-        run: cd cli && cargo clippy --all
+        run: cd cli && cargo clippy -- -D warnings
