@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use dcap_qvl::{collateral::get_collateral, verify::QuoteVerifier, QuoteCollateralV3};
 use std::fs;
 use std::path::PathBuf;
+use anyhow::Context;
 
 #[derive(Parser)]
 #[command(name = "test-case")]
@@ -94,9 +95,10 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
     };
 
     // Verify
+    #[allow(clippy::expect_used)]
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .expect("Invalid system time")
         .as_secs();
 
     let verifier = match root_ca_der {
@@ -142,10 +144,13 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
         };
 
         // Fetch collateral
-        match get_collateral(&pccs_url, &quote_bytes).await {
+        let result = get_collateral(&pccs_url, &quote_bytes).await.and_then(|collateral| {
+            serde_json::to_string(&collateral).context("Failed to serialize collateral")
+        });
+        match result {
             Ok(collateral) => {
                 // Output collateral JSON directly
-                println!("{}", serde_json::to_string(&collateral).unwrap());
+                println!("{collateral}");
                 0
             }
             Err(e) => {

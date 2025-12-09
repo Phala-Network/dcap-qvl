@@ -212,10 +212,9 @@ pub async fn get_collateral_for_fmspc(
         None => {
             let certs = crate::utils::extract_certs(qe_identity_issuer_chain.as_bytes())
                 .context("Failed to extract certificates from PCK CRL issuer chain")?;
-            if certs.is_empty() {
-                bail!("No certificates found in PCK CRL issuer chain");
-            }
-            let root_cert_der = certs.last().unwrap();
+            let Some(root_cert_der) = certs.last() else {
+                bail!("No certificate found in PCK CRL issuer chain");
+            };
             let crl_url = extract_crl_url(root_cert_der)?;
             let Some(url) = crl_url else {
                 bail!("Could not find CRL distribution point in root certificate");
