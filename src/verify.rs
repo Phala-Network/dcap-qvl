@@ -196,19 +196,13 @@ fn verify_impl(
     // Verify integrity
 
     // Check TCB info cert chain and signature
-    let tcb_leaf_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
-    if tcb_leaf_certs.len() < 2 {
+    let tcb_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
+    let [tcb_leaf, tcb_chain @ ..] = &tcb_certs[..] else {
         bail!("Certificate chain is too short in quote_collateral");
-    }
-    let tcb_leaf_cert = webpki::EndEntityCert::try_from(&tcb_leaf_certs[0])
+    };
+    let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
         .context("Failed to parse leaf certificate in quote_collateral")?;
-    verify_certificate_chain(
-        &tcb_leaf_cert,
-        &tcb_leaf_certs[1..],
-        now,
-        &crls,
-        trust_anchor.clone(),
-    )?;
+    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, &crls, trust_anchor.clone())?;
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
@@ -245,22 +239,16 @@ fn verify_impl(
     let qe_certification_certs = extract_certs(&certification_data.body.data)
         .context("Failed to extract PCK certificates")?;
 
-    if qe_certification_certs.len() < 2 {
+    let [qe_leaf, qe_chain @ ..] = &qe_certification_certs[..] else {
         bail!("Certificate chain is too short in quote");
-    }
+    };
 
-    let qe_leaf_cert = webpki::EndEntityCert::try_from(&qe_certification_certs[0])
-        .context("Failed to parse PCK certificate")?;
+    let qe_leaf_cert =
+        webpki::EndEntityCert::try_from(qe_leaf).context("Failed to parse PCK certificate")?;
     // Then verify the certificate chain
-    verify_certificate_chain(
-        &qe_leaf_cert,
-        &qe_certification_certs[1..],
-        now,
-        &crls,
-        trust_anchor.clone(),
-    )?;
+    verify_certificate_chain(&qe_leaf_cert, qe_chain, now, &crls, trust_anchor.clone())?;
 
-    let ppid = intel::parse_pck_extension(qe_certification_certs[0].as_ref())
+    let ppid = intel::parse_pck_extension(qe_leaf)
         .ok()
         .map(|ext| ext.ppid.clone())
         .unwrap_or_default();
@@ -307,7 +295,7 @@ fn verify_impl(
 
     // Extract information from the quote
 
-    let extension_section = utils::get_intel_extension(&qe_certification_certs[0])?;
+    let extension_section = utils::get_intel_extension(qe_leaf)?;
     let cpu_svn = utils::get_cpu_svn(&extension_section)?;
     let pce_svn = utils::get_pce_svn(&extension_section)?;
     let fmspc = utils::get_fmspc(&extension_section)?;

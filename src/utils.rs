@@ -92,12 +92,9 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     )
     .context("Failed to find PceSvn")?;
 
-    match data.len() {
-        1 => Ok(u16::from(data[0])),
-        2 => Ok(u16::from_be_bytes(
-            data.try_into()
-                .map_err(|_| anyhow!("Failed to decode PceSvn"))?,
-        )),
+    match data[..] {
+        [byte0] => Ok(u16::from(byte0)),
+        [byte0, byte1] => Ok(u16::from_be_bytes([byte0, byte1])),
         _ => bail!("PceSvn length mismatch"),
     }
 }
@@ -126,15 +123,15 @@ pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>
 /// This is meant for 256 bit ECC signatures or public keys
 /// TODO: We may could use `asn1_der` crate reimplement this, so we can remove `der` which overlap with `asn1_der`
 pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
-    if data.len() != 64 {
-        bail!("Key length is invalid");
-    }
+    let (first, second) = data.split_at_checked(32).context("Invalid key length")?;
     let mut sequence = der::asn1::SequenceOf::<der::asn1::UintRef, 2>::new();
+    let element0 = der::asn1::UintRef::new(first).context("Failed to add first element")?;
     sequence
-        .add(der::asn1::UintRef::new(&data[0..32]).context("Failed to add first element")?)
+        .add(element0)
         .context("Failed to add second element")?;
+    let element1 = der::asn1::UintRef::new(second).context("Failed to add second element")?;
     sequence
-        .add(der::asn1::UintRef::new(&data[32..]).context("Failed to add third element")?)
+        .add(element1)
         .context("Failed to add third element")?;
     // 72 should be enough in all cases. 2 + 2 x (32 + 3)
     let mut asn1 = alloc::vec![0u8; 72];

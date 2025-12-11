@@ -115,9 +115,9 @@ fn sub_object_opt<'a>(
 }
 
 fn decode_enumerated(bytes: &[u8]) -> Result<u64> {
-    match bytes.len() {
-        1 => Ok(bytes[0] as u64),
-        2 => Ok(u16::from_be_bytes([bytes[0], bytes[1]]) as u64),
-        len => bail!("Unexpected ENUMERATED length: {len}"),
+    match bytes[..] {
+        [byte0] => Ok(u64::from(byte0)),
+        [byte0, byte1] => Ok(u16::from_be_bytes([byte0, byte1]) as u64),
+        _ => bail!("Unexpected ENUMERATED length"),
     }
 }

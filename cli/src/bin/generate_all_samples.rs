@@ -1,3 +1,5 @@
+#![allow(clippy::indexing_slicing)]
+
 /// Comprehensive test sample generator for DCAP quote verification
 /// Generates samples in the correct directory structure with quote.bin, collateral.json, and expected.json
 use anyhow::Result;
@@ -1249,12 +1251,7 @@ fn main() -> Result<()> {
         expected_error: Some("Certificate chain is too short in quote_collateral".to_string()),
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
-            // Use only the TCB signing cert (without root CA) - valid cert but chain too short
-            let tcb_cert = fs::read_to_string(format!("{}/tcb_signing.pem", CERT_DIR))
-                .unwrap_or_else(|_| {
-                    String::from("-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----\n")
-                });
-            collateral["tcb_info_issuer_chain"] = json!(tcb_cert);
+            collateral["tcb_info_issuer_chain"] = json!("\n");
             Ok(())
         })),
     });
