@@ -651,6 +651,7 @@ impl Quote {
             Report::TD10(_) => HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN,
             Report::TD15(_) => HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN,
         };
+        #[allow(clippy::arithmetic_side_effects)]
         if self.header.version == 5 {
             len += BODY_BYTE_SIZE;
         }
