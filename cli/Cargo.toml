@@ -37,3 +37,4 @@ der = { version = "0.7.8", default-features = false, features = ["alloc"] }
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+indexing_slicing = "deny"
