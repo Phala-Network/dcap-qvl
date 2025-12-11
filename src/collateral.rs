@@ -2,6 +2,7 @@ use alloc::string::{String, ToString};
 use anyhow::{anyhow, bail, Context, Result};
 use der::Decode as DerDecode;
 use scale::Decode;
+use serde::Deserialize;
 use x509_cert::{
     ext::pkix::{
         name::{DistributionPointName, GeneralName},
@@ -13,6 +14,20 @@ use x509_cert::{
 use crate::quote::Quote;
 use crate::verify::VerifiedReport;
 use crate::QuoteCollateralV3;
+
+#[derive(Deserialize)]
+struct TcbInfoResponse {
+    #[serde(rename = "tcbInfo")]
+    tcb_info: serde_json::Value,
+    signature: String,
+}
+
+#[derive(Deserialize)]
+struct QeIdentityResponse {
+    #[serde(rename = "enclaveIdentity")]
+    enclave_identity: serde_json::Value,
+    signature: String,
+}
 
 #[cfg(not(feature = "js"))]
 use core::time::Duration;
@@ -223,30 +238,17 @@ pub async fn get_collateral_for_fmspc(
         }
     };
 
-    let tcb_info_json: serde_json::Value =
+    let tcb_info_resp: TcbInfoResponse =
         serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
-    let tcb_info = tcb_info_json["tcbInfo"].to_string();
-    let tcb_info_signature = tcb_info_json
-        .get("signature")
-        .context("TCB Info missing 'signature' field")?
-        .as_str()
-        .context("TCB Info signature must be a string")?;
-    let tcb_info_signature = hex::decode(tcb_info_signature)
+    let tcb_info = tcb_info_resp.tcb_info.to_string();
+    let tcb_info_signature = hex::decode(&tcb_info_resp.signature)
         .ok()
         .context("TCB Info signature must be valid hex")?;
 
-    let qe_identity_json: serde_json::Value =
+    let qe_identity_resp: QeIdentityResponse =
         serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
-    let qe_identity = qe_identity_json
-        .get("enclaveIdentity")
-        .context("QE Identity missing 'enclaveIdentity' field")?
-        .to_string();
-    let qe_identity_signature = qe_identity_json
-        .get("signature")
-        .context("QE Identity missing 'signature' field")?
-        .as_str()
-        .context("QE Identity signature must be a string")?;
-    let qe_identity_signature = hex::decode(qe_identity_signature)
+    let qe_identity = qe_identity_resp.enclave_identity.to_string();
+    let qe_identity_signature = hex::decode(&qe_identity_resp.signature)
         .ok()
         .context("QE Identity signature must be valid hex")?;
 
