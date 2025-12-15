@@ -62,7 +62,7 @@ jobs:
             --install-targets \
             --output-dir dist
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-cross
           path: python-bindings/dist
@@ -98,7 +98,7 @@ jobs:
           uv sync
           uv run python scripts/build_wheels.py --platforms windows-x64 --install-targets --output-dir dist
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-windows
           path: python-bindings/dist
@@ -133,7 +133,7 @@ jobs:
             --install-targets \
             --output-dir dist
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-macos-x86_64
           path: python-bindings/dist
@@ -161,7 +161,7 @@ jobs:
           args: --out dist
           working-directory: python-bindings
       - name: Upload source distribution
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-sdist
           path: python-bindings/dist
@@ -178,7 +178,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: wheels-*
           merge-multiple: true
@@ -203,7 +203,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: wheels-*
           merge-multiple: true
@@ -239,7 +239,7 @@ jobs:
       - name: Setup Python ${{ matrix.python-version }}
         run: uv venv --python ${{ matrix.python-version }}
       - name: Download wheels
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: wheels-*
           merge-multiple: true
