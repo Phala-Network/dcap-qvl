@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use anyhow::{anyhow, bail, Context, Result};
 use asn1_der::{
     typed::{DerDecodable, Sequence},

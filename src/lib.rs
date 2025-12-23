@@ -38,6 +38,8 @@
 #[macro_use]
 extern crate alloc;
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use scale::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 

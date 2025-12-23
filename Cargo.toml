@@ -14,10 +14,8 @@ borsh = { version = "1.5.7", default-features = false, features = [
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.226", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-# Needs std for error types to work with anyhow::Context
-scale = { package = "parity-scale-codec", version = "3.6.12", features = [
+scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = [
     "derive",
-    "std",
 ] }
 scale-info = { version = "2.11.6", default-features = false, features = [
     "derive",
@@ -30,22 +28,19 @@ const-oid = { version = "0.9.5", default-features = false }
 x509-cert = { version = "0.2.4", default-features = false, features = ["pem"] }
 spki = { version = "0.7", default-features = false }
 byteorder = { version = "1.5.0", default-features = false }
-# These crates need std for error types to work with anyhow::Context
-pem = { version = "3" }
-asn1_der = { version = "0.7", features = ["std", "native_types"] }
-der = { version = "0.7.8", features = ["std", "alloc"] }
+pem = { version = "3", default-features = false }
+asn1_der = { version = "0.7", default-features = false, features = [
+    "native_types",
+] }
+der = { version = "0.7.8", default-features = false, features = ["alloc"] }
 
-# Pure Rust crypto (RISC-V compatible, replaces ring)
+# Pure Rust crypto (RISC-V compatible, replaces ring)gi
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 sha2 = { version = "0.10", default-features = false }
 
 log = { version = "0.4.28", default-features = false }
 
-# Required for error handling - needs std for Context trait
-anyhow = { version = "1.0.100" }
-
-# Required for JSON parsing in verification
-serde_json = { version = "1.0.145" }
+anyhow = { version = "1.0.100", optional = true }
 
 reqwest = { version = "0.12.23", optional = true, default-features = false, features = [
     "rustls-tls",
@@ -53,6 +48,9 @@ reqwest = { version = "0.12.23", optional = true, default-features = false, feat
     "hickory-dns",
 ] }
 urlencoding = { version = "2", optional = true }
+serde_json = { version = "1.0.145", optional = true, features = [
+    "preserve_order",
+] }
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true }
@@ -72,7 +70,6 @@ pyo3-async-runtimes = { version = "0.25", optional = true, features = [
 ] }
 tokio = { version = "1.47.1", optional = true, features = ["full"] }
 
-
 [dev-dependencies]
 insta = "1.43.2"
 reqwest = "0.12.23"
@@ -87,8 +84,14 @@ crate-type = ["cdylib", "rlib"]
 default = ["std", "report"]
 std = [
     "serde/std",
+    "scale/std",
     "scale-info/std",
     "const-oid/std",
+    "pem/std",
+    "asn1_der/std",
+    "der/std",
+    "serde_json/std",
+    "anyhow/std",
     "urlencoding",
     "borsh?/std",
 ]
