@@ -30,10 +30,7 @@ pub struct PckExtension {
 pub fn extract_cert_chain(quote: &Quote) -> Result<Vec<Vec<u8>>> {
     if let Ok(chain_bytes) = quote.raw_cert_chain() {
         let certs = utils::extract_certs(chain_bytes)?;
-        return Ok(certs
-            .into_iter()
-            .map(|cert| cert.as_ref().to_vec())
-            .collect());
+        return Ok(certs);
     }
 
     let cert_data = match &quote.auth_data {

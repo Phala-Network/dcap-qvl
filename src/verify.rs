@@ -1,8 +1,7 @@
-use core::time::Duration;
-
 use anyhow::{anyhow, bail, Context, Result};
+use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use scale::Decode;
-use webpki::types::UnixTime;
+use sha2::{Digest, Sha256};
 
 use {
     crate::constants::*, crate::intel, crate::tcb_info::TcbInfo, alloc::borrow::ToOwned,
@@ -12,7 +11,10 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
-    utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
+    utils::{
+        self, check_single_cert_crl, encode_as_der, extract_certs, verify_certificate_chain,
+        verify_signature_with_cert,
+    },
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -106,10 +108,9 @@ pub fn verify(
         bail!("TCBInfo expired");
     }
 
-    let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
-    // Because the original rustls-webpki doesn't check the ROOT CA against the CRL, we use our forked webpki to check it
-    let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
-    dcap_qvl_webpki::check_single_cert_crl(TRUSTED_ROOT_CA_DER, &crls, now)?;
+    let crls: [&[u8]; 2] = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+    // Check the ROOT CA against the CRL
+    check_single_cert_crl(TRUSTED_ROOT_CA_DER, &crls, now_secs)?;
 
     // Verify enclave
 
@@ -124,22 +125,14 @@ pub fn verify(
     if tcb_leaf_certs.len() < 2 {
         bail!("Certificate chain is too short in quote_collateral");
     }
-    let tcb_leaf_cert = webpki::EndEntityCert::try_from(&tcb_leaf_certs[0])
-        .context("Failed to parse leaf certificate in quote_collateral")?;
-    verify_certificate_chain(&tcb_leaf_cert, &tcb_leaf_certs[1..], now, &crls)?;
+    verify_certificate_chain(&tcb_leaf_certs[0], &tcb_leaf_certs[1..], now_secs, &crls)?;
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
-    if tcb_leaf_cert
-        .verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
-            collateral.tcb_info.as_bytes(),
-            &asn1_signature,
-        )
-        .is_err()
-    {
-        return Err(anyhow!(
-            "Rsa signature is invalid for tcb_info in quote_collateral"
-        ));
-    }
+    verify_signature_with_cert(
+        &tcb_leaf_certs[0],
+        collateral.tcb_info.as_bytes(),
+        &asn1_signature,
+    )
+    .context("Signature is invalid for tcb_info in quote_collateral")?;
 
     // Check quote fields
     if ![3, 4, 5].contains(&quote.header.version) {
@@ -167,28 +160,27 @@ pub fn verify(
         bail!("Certificate chain is too short in quote");
     }
 
-    let qe_leaf_cert = webpki::EndEntityCert::try_from(&qe_certification_certs[0])
-        .context("Failed to parse PCK certificate")?;
-    // Then verify the certificate chain
-    verify_certificate_chain(&qe_leaf_cert, &qe_certification_certs[1..], now, &crls)?;
+    // Verify the certificate chain
+    verify_certificate_chain(
+        &qe_certification_certs[0],
+        &qe_certification_certs[1..],
+        now_secs,
+        &crls,
+    )?;
 
-    let ppid = intel::parse_pck_extension(qe_certification_certs[0].as_ref())
+    let ppid = intel::parse_pck_extension(&qe_certification_certs[0])
         .ok()
         .map(|ext| ext.ppid.clone())
         .unwrap_or_default();
 
     // Check QE signature
     let asn1_signature = encode_as_der(&auth_data.qe_report_signature)?;
-    if qe_leaf_cert
-        .verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
-            &auth_data.qe_report,
-            &asn1_signature,
-        )
-        .is_err()
-    {
-        return Err(anyhow!("Rsa signature is invalid for qe_report in quote"));
-    }
+    verify_signature_with_cert(
+        &qe_certification_certs[0],
+        &auth_data.qe_report,
+        &asn1_signature,
+    )
+    .context("Signature is invalid for qe_report in quote")?;
 
     // Extract QE report from quote
     let mut qe_report = auth_data.qe_report.as_slice();
@@ -198,22 +190,24 @@ pub fn verify(
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
-    if qe_hash.as_ref() != &qe_report.report_data[0..32] {
+    let qe_hash = Sha256::digest(&qe_hash_data);
+    if qe_hash[..] != qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
     }
 
     // Check signature from auth data
-    let mut pub_key = [0x04u8; 65]; //Prepend 0x04 to specify uncompressed format
+    let mut pub_key = [0x04u8; 65]; // Prepend 0x04 to specify uncompressed format
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
-    let peer_public_key =
-        ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
-    peer_public_key
+    let verifying_key = VerifyingKey::from_sec1_bytes(&pub_key)
+        .map_err(|_| anyhow!("Failed to parse public key"))?;
+    let signature = Signature::from_slice(&auth_data.ecdsa_signature)
+        .map_err(|_| anyhow!("Invalid signature format"))?;
+    verifying_key
         .verify(
             raw_quote
                 .get(..signed_quote_len)
                 .ok_or(anyhow!("Failed to get signed quote"))?,
-            &auth_data.ecdsa_signature,
+            &signature,
         )
         .map_err(|_| anyhow!("Isv enclave report signature is invalid"))?;
 
