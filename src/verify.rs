@@ -230,14 +230,19 @@ fn verify_impl(
     let auth_data = quote.auth_data.into_v3();
     let certification_data = auth_data.certification_data;
 
-    // We only support 5 -Concatenated PCK Cert Chain (PEM formatted).
-    if certification_data.cert_type != PCK_CERT_CHAIN {
-        bail!("Unsupported DCAP PCK cert format");
-    }
-
-    // Extract PCK certificate chain from certification data in the quote
-    let qe_certification_certs = extract_certs(&certification_data.body.data)
-        .context("Failed to extract PCK certificates")?;
+    // Extract PCK certificate chain - prefer collateral, fall back to quote
+    let qe_certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
+        // Use certificate chain from collateral (supports cert_type 3/5)
+        extract_certs(pem_chain.as_bytes())
+            .context("Failed to extract PCK certificates from collateral")?
+    } else {
+        // Backward compatibility: extract from quote (only works for cert_type 5)
+        if certification_data.cert_type != PCK_CERT_CHAIN {
+            bail!("Unsupported DCAP PCK cert format: {}. Use get_collateral() to fetch PCK certificate.", certification_data.cert_type);
+        }
+        extract_certs(&certification_data.body.data)
+            .context("Failed to extract PCK certificates from quote")?
+    };
 
     let [qe_leaf, qe_chain @ ..] = &qe_certification_certs[..] else {
         bail!("Certificate chain is too short in quote");

@@ -78,7 +78,7 @@ fn find_extension_required(
     extension: &[u8],
 ) -> Result<Vec<u8>> {
     find_extension_optional(path, extension)?
-        .ok_or_else(|| anyhow!("Intel extension path {:?} is missing", path))
+        .ok_or_else(|| anyhow!("Intel extension path {path:?} is missing"))
 }
 
 fn find_extension_optional(

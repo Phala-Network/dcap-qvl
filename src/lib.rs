@@ -65,6 +65,12 @@ pub struct QuoteCollateralV3 {
     pub qe_identity: String,
     #[serde(with = "serde_bytes")]
     pub qe_identity_signature: Vec<u8>,
+    /// PCK certificate chain (PEM format).
+    /// For cert_type 5: extracted from quote during collateral fetch.
+    /// For cert_type 3: fetched from PCCS using encrypted PPID.
+    /// Used by verify() for offline verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pck_certificate_chain: Option<String>,
 }
 
 #[cfg(feature = "report")]
