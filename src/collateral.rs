@@ -11,7 +11,9 @@ use x509_cert::{
     Certificate,
 };
 
-use crate::constants::{PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN};
+use crate::constants::{
+    PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN,
+};
 use crate::quote::{EncryptedPpidParams, Quote};
 use crate::verify::VerifiedReport;
 use crate::QuoteCollateralV3;
@@ -148,11 +150,12 @@ fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
 async fn fetch_pck_certificate(
     client: &reqwest::Client,
     pccs_url: &str,
+    qeid: &[u8],
     params: &EncryptedPpidParams,
 ) -> Result<String> {
     // PCCS normalizes parameters to uppercase, Intel PCS accepts both
     // Use uppercase for compatibility with both
-    let qeid = hex::encode_upper(params.qeid);
+    let qeid = hex::encode_upper(qeid);
     let encrypted_ppid = hex::encode_upper(&params.encrypted_ppid);
     let cpusvn = hex::encode_upper(params.cpusvn);
     let pcesvn = hex::encode_upper(params.pcesvn.to_le_bytes());
@@ -181,16 +184,10 @@ async fn fetch_pck_certificate(
         let tcbm_str = tcbm
             .to_str()
             .context("SGX-TCBm header contains invalid characters")?;
-        let tcbm_bytes = hex::decode(tcbm_str)
-            .map_err(|e| anyhow!("SGX-TCBm header is not valid hex: {e}"))?;
-        if tcbm_bytes.len() < 18 {
-            bail!(
-                "SGX-TCBm header too short: expected 18 bytes, got {}",
-                tcbm_bytes.len()
-            );
-        }
-        let matched_cpusvn = &tcbm_bytes[0..16];
-        let matched_pcesvn = u16::from_le_bytes([tcbm_bytes[16], tcbm_bytes[17]]);
+        let tcbm_bytes =
+            hex::decode(tcbm_str).map_err(|e| anyhow!("SGX-TCBm header is not valid hex: {e}"))?;
+        let (matched_cpusvn, matched_pcesvn) = <([u8; 16], u16)>::decode(&mut &tcbm_bytes[..])
+            .context("SGX-TCBm header too short: expected 18 bytes")?;
 
         if matched_cpusvn != params.cpusvn || matched_pcesvn != params.pcesvn {
             bail!(
@@ -260,19 +257,12 @@ fn build_http_client() -> Result<reqwest::Client> {
 /// Get PCK certificate chain for a quote.
 /// - cert_type 5: extracts from quote
 /// - cert_type 2/3: fetches from PCCS using encrypted PPID
-async fn get_pck_chain(
-    client: &reqwest::Client,
-    pccs_url: &str,
-    quote: &Quote,
-) -> Result<String> {
+async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) -> Result<String> {
     match quote.inner_cert_type() {
-        PCK_ID_PCK_CERT_CHAIN => {
-            let raw_chain = quote.raw_cert_chain()?;
-            Ok(String::from_utf8_lossy(raw_chain).to_string())
-        }
+        PCK_ID_PCK_CERT_CHAIN => Ok(String::from_utf8_lossy(quote.inner_cert_data()).to_string()),
         PCK_ID_ENCRYPTED_PPID_2048 | PCK_ID_ENCRYPTED_PPID_3072 => {
             let params = quote.encrypted_ppid_params()?;
-            fetch_pck_certificate(client, pccs_url, &params).await
+            fetch_pck_certificate(client, pccs_url, quote.qeid(), &params).await
         }
         other => bail!("Unsupported certification data type: {other}"),
     }

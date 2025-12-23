@@ -684,59 +684,49 @@ impl Quote {
         }
     }
 
+    /// Get the QE ID from the quote header.
+    pub fn qeid(&self) -> &[u8] {
+        &self.header.user_data[..16]
+    }
+
     /// For cert_type 3 (encrypted PPID), extract the parameters needed to fetch PCK certificate.
     /// Returns (encrypted_ppid, cpusvn, pcesvn, pceid).
     pub fn encrypted_ppid_params(&self) -> Result<EncryptedPpidParams> {
-        let inner_cert_type = self.inner_cert_type();
-        if inner_cert_type != PCK_ID_ENCRYPTED_PPID_3072 && inner_cert_type != PCK_ID_ENCRYPTED_PPID_2048 {
-            bail!(
-                "encrypted_ppid_params() requires cert_type 2 or 3, got {inner_cert_type}"
-            );
-        }
-
-        let cert_body = self.inner_cert_data();
-
         // The cert body for encrypted PPID contains:
         // - encrypted_ppid (variable length: 256 bytes for RSA-2048, 384 bytes for RSA-3072)
         // - cpusvn (16 bytes)
         // - pcesvn (2 bytes, little endian)
         // - pceid (2 bytes, little endian)
         // Total trailer: 20 bytes
-        if cert_body.len() < 20 {
-            bail!("Certification data body too short for encrypted PPID");
+        #[derive(Decode)]
+        struct EncPpidDecoder<const N: usize> {
+            encrypted_ppid: [u8; N],
+            cpusvn: CpuSvn,
+            pcesvn: Svn,
+            pceid: [u8; 2],
+        }
+        impl<const N: usize> EncPpidDecoder<N> {
+            fn into_params(self) -> EncryptedPpidParams {
+                EncryptedPpidParams {
+                    encrypted_ppid: self.encrypted_ppid.to_vec(),
+                    cpusvn: self.cpusvn,
+                    pcesvn: self.pcesvn,
+                    pceid: self.pceid,
+                }
+            }
         }
 
-        let trailer_start = cert_body.len() - 20;
-        let encrypted_ppid = cert_body[..trailer_start].to_vec();
-
-        // Extract cpusvn from trailer (16 bytes)
-        let cpusvn: [u8; 16] = cert_body[trailer_start..trailer_start + 16]
-            .try_into()
-            .context("Failed to extract cpusvn from trailer")?;
-
-        // Extract pcesvn from trailer (2 bytes, little endian)
-        let pcesvn_bytes: [u8; 2] = cert_body[trailer_start + 16..trailer_start + 18]
-            .try_into()
-            .context("Failed to extract pcesvn from trailer")?;
-        let pcesvn = u16::from_le_bytes(pcesvn_bytes);
-
-        // Extract pceid from trailer (2 bytes)
-        let pceid: [u8; 2] = cert_body[trailer_start + 18..trailer_start + 20]
-            .try_into()
-            .context("Failed to extract pceid from trailer")?;
-
-        // Extract qeid from header's user_data (first 16 bytes)
-        let qeid: [u8; 16] = self.header.user_data[..16]
-            .try_into()
-            .context("Failed to extract qeid from user_data")?;
-
-        Ok(EncryptedPpidParams {
-            qeid,
-            encrypted_ppid,
-            cpusvn,
-            pcesvn,
-            pceid,
-        })
+        let mut cert_body = self.inner_cert_data();
+        let params = match self.inner_cert_type() {
+            PCK_ID_ENCRYPTED_PPID_2048 => EncPpidDecoder::<256>::decode(&mut cert_body)
+                .context("Failed to decode ENCRYPTED_PPID_2048")?
+                .into_params(),
+            PCK_ID_ENCRYPTED_PPID_3072 => EncPpidDecoder::<384>::decode(&mut cert_body)
+                .context("Failed to decode ENCRYPTED_PPID_3072")?
+                .into_params(),
+            other => bail!("encrypted_ppid_params() requires cert_type 2 or 3, got {other}"),
+        };
+        Ok(params)
     }
 }
 
@@ -744,9 +734,6 @@ impl Quote {
 /// Used to fetch PCK certificate from PCCS.
 #[derive(Debug, Clone)]
 pub struct EncryptedPpidParams {
-    /// QE ID from quote header user_data (first 16 bytes).
-    /// Used by PCCS for cache lookup.
-    pub qeid: [u8; 16],
     /// The encrypted PPID (256 bytes for RSA-2048, 384 bytes for RSA-3072).
     pub encrypted_ppid: Vec<u8>,
     /// CPU SVN from certification data trailer (16 bytes).
