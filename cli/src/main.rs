@@ -76,7 +76,7 @@ fn hex_decode(input: &[u8], is_hex: bool) -> Result<Vec<u8>> {
 }
 
 fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
-    let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
+    let quote = std::fs::read(&args.quote_file).context("Failed to read quote file")?;
     let quote = hex_decode(&quote, args.hex)?;
     let decoded_quote = Quote::parse(&quote).context("Failed to parse quote")?;
     if args.fmspc {
@@ -92,7 +92,7 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
 }
 
 async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
-    let quote = std::fs::read(args.quote_file).context("Failed to read quote file")?;
+    let quote = std::fs::read(&args.quote_file).context("Failed to read quote file")?;
     let quote = hex_decode(&quote, args.hex)?;
     let pccs_url = match std::env::var("PCCS_URL") {
         Ok(url) if !url.trim().is_empty() => url,

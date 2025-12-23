@@ -657,4 +657,102 @@ impl Quote {
         }
         len
     }
+
+    /// Get the inner certification data type.
+    /// For V3 quotes: returns the cert_type directly.
+    /// For V4 quotes with cert_type 6: returns the inner cert_type from qe_report_data.
+    pub fn inner_cert_type(&self) -> u16 {
+        match &self.auth_data {
+            AuthData::V3(data) => data.certification_data.cert_type,
+            AuthData::V4(data) => data.qe_report_data.certification_data.cert_type,
+        }
+    }
+
+    /// Get the inner certification data body.
+    pub fn inner_cert_data(&self) -> &[u8] {
+        match &self.auth_data {
+            AuthData::V3(data) => &data.certification_data.body.data,
+            AuthData::V4(data) => &data.qe_report_data.certification_data.body.data,
+        }
+    }
+
+    /// Get the QE report bytes.
+    pub fn qe_report(&self) -> &[u8; ENCLAVE_REPORT_BYTE_LEN] {
+        match &self.auth_data {
+            AuthData::V3(data) => &data.qe_report,
+            AuthData::V4(data) => &data.qe_report_data.qe_report,
+        }
+    }
+
+    /// For cert_type 3 (encrypted PPID), extract the parameters needed to fetch PCK certificate.
+    /// Returns (encrypted_ppid, cpusvn, pcesvn, pceid).
+    pub fn encrypted_ppid_params(&self) -> Result<EncryptedPpidParams> {
+        let inner_cert_type = self.inner_cert_type();
+        if inner_cert_type != PCK_ID_ENCRYPTED_PPID_3072 && inner_cert_type != PCK_ID_ENCRYPTED_PPID_2048 {
+            bail!(
+                "encrypted_ppid_params() requires cert_type 2 or 3, got {inner_cert_type}"
+            );
+        }
+
+        let cert_body = self.inner_cert_data();
+
+        // The cert body for encrypted PPID contains:
+        // - encrypted_ppid (variable length: 256 bytes for RSA-2048, 384 bytes for RSA-3072)
+        // - cpusvn (16 bytes)
+        // - pcesvn (2 bytes, little endian)
+        // - pceid (2 bytes, little endian)
+        // Total trailer: 20 bytes
+        if cert_body.len() < 20 {
+            bail!("Certification data body too short for encrypted PPID");
+        }
+
+        let trailer_start = cert_body.len() - 20;
+        let encrypted_ppid = cert_body[..trailer_start].to_vec();
+
+        // Extract cpusvn from trailer (16 bytes)
+        let cpusvn: [u8; 16] = cert_body[trailer_start..trailer_start + 16]
+            .try_into()
+            .context("Failed to extract cpusvn from trailer")?;
+
+        // Extract pcesvn from trailer (2 bytes, little endian)
+        let pcesvn_bytes: [u8; 2] = cert_body[trailer_start + 16..trailer_start + 18]
+            .try_into()
+            .context("Failed to extract pcesvn from trailer")?;
+        let pcesvn = u16::from_le_bytes(pcesvn_bytes);
+
+        // Extract pceid from trailer (2 bytes)
+        let pceid: [u8; 2] = cert_body[trailer_start + 18..trailer_start + 20]
+            .try_into()
+            .context("Failed to extract pceid from trailer")?;
+
+        // Extract qeid from header's user_data (first 16 bytes)
+        let qeid: [u8; 16] = self.header.user_data[..16]
+            .try_into()
+            .context("Failed to extract qeid from user_data")?;
+
+        Ok(EncryptedPpidParams {
+            qeid,
+            encrypted_ppid,
+            cpusvn,
+            pcesvn,
+            pceid,
+        })
+    }
+}
+
+/// Parameters extracted from a quote with cert_type 2/3 (encrypted PPID).
+/// Used to fetch PCK certificate from PCCS.
+#[derive(Debug, Clone)]
+pub struct EncryptedPpidParams {
+    /// QE ID from quote header user_data (first 16 bytes).
+    /// Used by PCCS for cache lookup.
+    pub qeid: [u8; 16],
+    /// The encrypted PPID (256 bytes for RSA-2048, 384 bytes for RSA-3072).
+    pub encrypted_ppid: Vec<u8>,
+    /// CPU SVN from certification data trailer (16 bytes).
+    pub cpusvn: [u8; 16],
+    /// PCE SVN from certification data trailer.
+    pub pcesvn: u16,
+    /// PCE ID from certification data trailer (2 bytes).
+    pub pceid: [u8; 2],
 }
