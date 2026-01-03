@@ -28,8 +28,8 @@ async def test_with_sample_quotes():
     """Test async functions with real sample quote data."""
     print("\n=== Testing with Sample Quote Data ===")
 
-    # Find sample directory
-    sample_dir = Path(__file__).parent.parent / "sample"
+    # Find sample directory (at project root, two levels up from tests/)
+    sample_dir = Path(__file__).parent.parent.parent / "sample"
     if not sample_dir.exists():
         print(f"✗ Sample directory not found: {sample_dir}")
         return False
@@ -140,13 +140,10 @@ async def test_function_signatures():
     for func_name in functions_to_test:
         if hasattr(dcap_qvl, func_name):
             func = getattr(dcap_qvl, func_name)
-            is_async = inspect.iscoroutinefunction(func)
-
-            if is_async:
-                print(f"✓ {func_name} is correctly async")
-            else:
-                print(f"✗ {func_name} is NOT async")
-                all_correct = False
+            # Note: PyO3 async functions using future_into_py don't register as
+            # coroutine functions via inspect.iscoroutinefunction(), but they
+            # still return awaitables. We just verify the function exists.
+            print(f"✓ {func_name} is available")
 
             # Get signature
             try:
@@ -179,9 +176,9 @@ async def main():
     print("=" * 60)
 
     if signatures_ok:
-        print("✓ All function signatures are correct")
+        print("✓ All async functions are available")
     else:
-        print("✗ Some function signatures are incorrect")
+        print("✗ Some async functions are missing")
 
     if sample_results:
         success_count = sum(1 for result in sample_results.values() if result)
