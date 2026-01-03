@@ -42,6 +42,7 @@ impl PyQuoteCollateralV3 {
                 qe_identity_issuer_chain,
                 qe_identity,
                 qe_identity_signature,
+                pck_certificate_chain: None,
             },
         }
     }
