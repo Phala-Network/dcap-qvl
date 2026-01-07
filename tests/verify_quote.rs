@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use dcap_qvl::{quote::Quote, verify::verify, QuoteCollateralV3};
 use scale::Decode;
 

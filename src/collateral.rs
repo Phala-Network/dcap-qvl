@@ -451,6 +451,8 @@ pub async fn get_collateral_and_verify(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use crate::constants::{PLATFORM_ISSUER_ID, PROCESSOR_ISSUER_ID};
 
