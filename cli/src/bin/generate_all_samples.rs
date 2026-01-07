@@ -434,9 +434,30 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
     let key_pair = load_private_key(key_path)?;
     let tcb_signature = sign_data(&key_pair, tcb_info_json.as_bytes())?;
 
+    // Create QE Identity matching the QE report we generate
+    let qe_identity = json!({
+        "id": "QE",
+        "version": 2,
+        "issueDate": "2024-01-01T00:00:00Z",
+        "nextUpdate": "2099-12-31T23:59:59Z",
+        "tcbEvaluationDataNumber": 17,
+        "miscselect": "00000000",
+        "miscselectMask": "FFFFFFFF",
+        "attributes": "00000000000000000000000000000000",
+        "attributesMask": "00000000000000000000000000000000",
+        "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+        "isvprodid": 0,
+        "tcbLevels": [{
+            "tcb": { "isvsvn": 0 },
+            "tcbDate": "2024-01-01T00:00:00Z",
+            "tcbStatus": "UpToDate",
+            "advisoryIDs": []
+        }]
+    });
+    let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
     // Sign QE identity with real signature
-    let qe_identity = "{}";
-    let qe_identity_signature = sign_data(&key_pair, qe_identity.as_bytes())?;
+    let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
 
     Ok(json!({
         "pck_crl_issuer_chain": tcb_chain,
@@ -446,7 +467,7 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
         "tcb_info": tcb_info_json,
         "tcb_info_signature": hex::encode(tcb_signature),
         "qe_identity_issuer_chain": tcb_chain,
-        "qe_identity": qe_identity,
+        "qe_identity": qe_identity_json,
         "qe_identity_signature": hex::encode(qe_identity_signature)
     }))
 }
@@ -1248,7 +1269,7 @@ fn main() -> Result<()> {
         name: "short_tcb_chain".to_string(),
         description: "TCB certificate chain too short".to_string(),
         should_succeed: false,
-        expected_error: Some("Certificate chain is too short in quote_collateral".to_string()),
+        expected_error: Some("Certificate chain is too short for TCB Info".to_string()),
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["tcb_info_issuer_chain"] = json!("\n");
@@ -1260,7 +1281,7 @@ fn main() -> Result<()> {
         name: "invalid_cert_format".to_string(),
         description: "Invalid certificate format in TCB chain".to_string(),
         should_succeed: false,
-        expected_error: Some("Certificate chain is too short in quote_collateral".to_string()),
+        expected_error: Some("Certificate chain is too short for TCB Info".to_string()),
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use malformed certificate data (missing proper PEM headers/footers)
@@ -1463,7 +1484,7 @@ fn main() -> Result<()> {
         name: "invalid_quote_signature".to_string(),
         description: "Invalid ISV enclave report signature".to_string(),
         should_succeed: false,
-        expected_error: Some("Isv enclave report signature is invalid".to_string()),
+        expected_error: Some("ISV enclave report signature is invalid".to_string()),
         quote_generator: Box::new(|| {
             // Generate quote with invalid quote signature (all zeros)
             let header = create_sgx_header(3, 2, 0);
@@ -1532,6 +1553,241 @@ fn main() -> Result<()> {
             Ok(quote.encode())
         }),
         collateral_modifier: None,
+    });
+
+    // Category 11: QE Identity errors
+    println!("\nCategory 11: QE Identity errors");
+
+    samples.push(TestSample {
+        name: "qe_identity_expired".to_string(),
+        description: "Expired QE Identity".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE Identity expired".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity with expired nextUpdate
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2020-01-01T00:00:00Z",
+                "nextUpdate": "2020-01-02T00:00:00Z",  // Far in the past
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "00000000000000000000000000000000",
+                "attributesMask": "00000000000000000000000000000000",
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2020-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            // Sign with valid key
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "invalid_qe_identity_json".to_string(),
+        description: "Invalid QE Identity JSON format".to_string(),
+        should_succeed: false,
+        expected_error: Some("Failed to decode QeIdentity".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            collateral["qe_identity"] = json!("not valid json {{{");
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "short_qe_identity_chain".to_string(),
+        description: "QE Identity certificate chain too short".to_string(),
+        should_succeed: false,
+        expected_error: Some("Certificate chain is too short for QE Identity".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            collateral["qe_identity_issuer_chain"] = json!("\n");
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "invalid_qe_identity_signature".to_string(),
+        description: "Invalid QE Identity signature".to_string(),
+        should_succeed: false,
+        expected_error: Some("Signature is invalid for qe_identity".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            collateral["qe_identity_signature"] = json!("00".repeat(64));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "qe_mrsigner_mismatch".to_string(),
+        description: "QE MRSIGNER mismatch".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE MRSIGNER mismatch".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity with different MRSIGNER
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2024-01-01T00:00:00Z",
+                "nextUpdate": "2099-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "00000000000000000000000000000000",
+                "attributesMask": "00000000000000000000000000000000",
+                "mrsigner": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  // Wrong MRSIGNER
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "qe_isvprodid_mismatch".to_string(),
+        description: "QE ISVPRODID mismatch".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE ISVPRODID mismatch".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity with different ISVPRODID
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2024-01-01T00:00:00Z",
+                "nextUpdate": "2099-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "00000000000000000000000000000000",
+                "attributesMask": "00000000000000000000000000000000",
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 999,  // Wrong ISVPRODID
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "qe_miscselect_mismatch".to_string(),
+        description: "QE MISCSELECT mismatch".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE MISCSELECT mismatch".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity with different MISCSELECT (with full mask, so it must match exactly)
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2024-01-01T00:00:00Z",
+                "nextUpdate": "2099-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "FFFFFFFF",  // Wrong MISCSELECT
+                "miscselectMask": "FFFFFFFF",  // Full mask
+                "attributes": "00000000000000000000000000000000",
+                "attributesMask": "00000000000000000000000000000000",
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "qe_attributes_mismatch".to_string(),
+        description: "QE ATTRIBUTES mismatch".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE ATTRIBUTES mismatch".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity with different ATTRIBUTES (with full mask, so it must match exactly)
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2024-01-01T00:00:00Z",
+                "nextUpdate": "2099-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  // Wrong ATTRIBUTES
+                "attributesMask": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",  // Full mask
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
     });
 
     // Write all samples
