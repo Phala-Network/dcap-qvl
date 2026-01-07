@@ -645,13 +645,10 @@ fn verify_qe_identity_policy(
     qe_identity: &QeIdentity,
 ) -> Result<TcbStatus> {
     // Verify MRSIGNER
-    let expected_mrsigner = hex::decode(&qe_identity.mrsigner)
-        .ok()
-        .context("Failed to decode QE Identity MRSIGNER")?;
-    if qe_report.mr_signer[..] != expected_mrsigner[..] {
+    if qe_report.mr_signer != qe_identity.mrsigner {
         bail!(
             "QE MRSIGNER mismatch: expected {}, got {}",
-            qe_identity.mrsigner,
+            hex::encode_upper(qe_identity.mrsigner),
             hex::encode_upper(qe_report.mr_signer)
         );
     }
@@ -666,17 +663,8 @@ fn verify_qe_identity_policy(
     }
 
     // Verify MISCSELECT with mask
-    let expected_miscselect = hex::decode(&qe_identity.miscselect)
-        .ok()
-        .context("Failed to decode QE Identity MISCSELECT")?;
-    let miscselect_mask = hex::decode(&qe_identity.miscselect_mask)
-        .ok()
-        .context("Failed to decode QE Identity MISCSELECT mask")?;
-
-    let expected_miscselect_u32 =
-        u32::decode(&mut &expected_miscselect[..]).context("Failed to decode MISCSELECT")?;
-    let miscselect_mask_u32 =
-        u32::decode(&mut &miscselect_mask[..]).context("Failed to decode MISCSELECT mask")?;
+    let expected_miscselect_u32 = u32::from_le_bytes(qe_identity.miscselect);
+    let miscselect_mask_u32 = u32::from_le_bytes(qe_identity.miscselect_mask);
     let qe_miscselect_masked = qe_report.misc_select & miscselect_mask_u32;
     let expected_miscselect_masked = expected_miscselect_u32 & miscselect_mask_u32;
 
@@ -689,24 +677,11 @@ fn verify_qe_identity_policy(
     }
 
     // Verify ATTRIBUTES with mask
-    let expected_attributes = hex::decode(&qe_identity.attributes)
-        .ok()
-        .context("Failed to decode QE Identity ATTRIBUTES")?;
-    let attributes_mask = hex::decode(&qe_identity.attributes_mask)
-        .ok()
-        .context("Failed to decode QE Identity ATTRIBUTES mask")?;
-
-    let expected_attributes_bytes: [u8; 16] = expected_attributes[..]
-        .try_into()
-        .context("Invalid ATTRIBUTES length")?;
-    let attributes_mask_bytes: [u8; 16] = attributes_mask[..]
-        .try_into()
-        .context("Invalid ATTRIBUTES mask length")?;
-
     // Apply mask and compare byte-by-byte using iterators
-    for (i, ((expected, mask), qe_attr)) in expected_attributes_bytes
+    for (i, ((expected, mask), qe_attr)) in qe_identity
+        .attributes
         .iter()
-        .zip(attributes_mask_bytes.iter())
+        .zip(qe_identity.attributes_mask.iter())
         .zip(qe_report.attributes.iter())
         .enumerate()
     {
@@ -761,6 +736,7 @@ fn match_qe_tcb_level(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use hex_literal::hex;
 
     fn make_test_qe_report() -> EnclaveReport {
         EnclaveReport {
@@ -796,12 +772,11 @@ mod tests {
             issue_date: "2025-06-19T10:01:18Z".to_string(),
             next_update: "2025-07-19T10:01:18Z".to_string(),
             tcb_evaluation_data_number: 17,
-            miscselect: "00000000".to_string(),
-            miscselect_mask: "FFFFFFFF".to_string(),
-            attributes: "11000000000000000000000000000000".to_string(),
-            attributes_mask: "FBFFFFFFFFFFFFFF0000000000000000".to_string(),
-            mrsigner: "8C4F5775D796503E96137F77C68A829A0056AC8DED70140B081B094490C57BFF"
-                .to_string(),
+            miscselect: hex!("00000000"),
+            miscselect_mask: hex!("FFFFFFFF"),
+            attributes: hex!("11000000000000000000000000000000"),
+            attributes_mask: hex!("FBFFFFFFFFFFFFFF0000000000000000"),
+            mrsigner: hex!("8C4F5775D796503E96137F77C68A829A0056AC8DED70140B081B094490C57BFF"),
             isvprodid: 1,
             tcb_levels: vec![
                 QeTcbLevel {
@@ -841,7 +816,7 @@ mod tests {
         let mut qe_identity = make_test_qe_identity();
         // Change expected MRSIGNER to something different
         qe_identity.mrsigner =
-            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+            hex!("0000000000000000000000000000000000000000000000000000000000000000");
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_err());
@@ -874,8 +849,8 @@ mod tests {
         let mut qe_report = make_test_qe_report();
         qe_report.misc_select = 0x00000001; // Set a bit
         let mut qe_identity = make_test_qe_identity();
-        qe_identity.miscselect = "00000000".to_string();
-        qe_identity.miscselect_mask = "FFFFFFFF".to_string(); // All bits checked
+        qe_identity.miscselect = hex!("00000000");
+        qe_identity.miscselect_mask = hex!("FFFFFFFF"); // All bits checked
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_err());
@@ -892,8 +867,8 @@ mod tests {
         let mut qe_report = make_test_qe_report();
         qe_report.misc_select = 0x000000FF; // Set some bits
         let mut qe_identity = make_test_qe_identity();
-        qe_identity.miscselect = "00000000".to_string();
-        qe_identity.miscselect_mask = "00000000".to_string(); // No bits checked (mask all zeros)
+        qe_identity.miscselect = hex!("00000000");
+        qe_identity.miscselect_mask = hex!("00000000"); // No bits checked (mask all zeros)
 
         // Should pass because mask is all zeros - no bits are checked
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);

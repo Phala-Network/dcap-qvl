@@ -18,18 +18,18 @@ pub struct QeIdentity {
     pub issue_date: String,
     pub next_update: String,
     pub tcb_evaluation_data_number: u32,
-    /// Hex-encoded MISCSELECT value (4 bytes, 8 hex chars)
-    pub miscselect: String,
-    /// Hex-encoded MISCSELECT mask (4 bytes, 8 hex chars)
+    #[serde(with = "serde_bytes")]
+    pub miscselect: [u8; 4],
     #[serde(rename = "miscselectMask")]
-    pub miscselect_mask: String,
-    /// Hex-encoded ATTRIBUTES value (16 bytes, 32 hex chars)
-    pub attributes: String,
-    /// Hex-encoded ATTRIBUTES mask (16 bytes, 32 hex chars)
+    #[serde(with = "serde_bytes")]
+    pub miscselect_mask: [u8; 4],
+    #[serde(with = "serde_bytes")]
+    pub attributes: [u8; 16],
     #[serde(rename = "attributesMask")]
-    pub attributes_mask: String,
-    /// Hex-encoded MRSIGNER (32 bytes, 64 hex chars)
-    pub mrsigner: String,
+    #[serde(with = "serde_bytes")]
+    pub attributes_mask: [u8; 16],
+    #[serde(with = "serde_bytes")]
+    pub mrsigner: [u8; 32],
     /// ISV Product ID
     pub isvprodid: u16,
     /// TCB levels for the QE
