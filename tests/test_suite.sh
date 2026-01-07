@@ -46,11 +46,12 @@ get_category() {
 	debug_*) echo "Debug Mode" ;;
 	*version*) echo "Version Errors" ;;
 	*key_type*) echo "Key Type Errors" ;;
-	*cert*) echo "Certificate Errors" ;;
+	short_tcb_chain | invalid_cert_format) echo "Certificate Errors" ;;
 	*tcb*) echo "TCB Errors" ;;
+	*qe_identity* | qe_mrsigner* | qe_isvprodid* | qe_miscselect* | qe_attributes*) echo "QE Identity Errors" ;;
 	*signature* | *sig*) echo "Signature Errors" ;;
 	*fmspc*) echo "FMSPC Errors" ;;
-	*decode* | *truncated* | *invalid*) echo "Decode Errors" ;;
+	*decode* | *truncated* | invalid_quote_format | invalid_quote_v5) echo "Decode Errors" ;;
 	*) echo "Other" ;;
 	esac
 }

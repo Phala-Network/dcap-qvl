@@ -103,9 +103,11 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let report = verify(&quote, &collateral, now)
-        .context("Failed to verify quote")?;
-    println!("{}", serde_json::to_string(&report).context("Failed to serialize report")?);
+    let report = verify(&quote, &collateral, now).context("Failed to verify quote")?;
+    println!(
+        "{}",
+        serde_json::to_string(&report).context("Failed to serialize report")?
+    );
     eprintln!("Quote verified");
     Ok(())
 }
