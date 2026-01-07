@@ -1,8 +1,8 @@
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use dcap_qvl::{collateral::get_collateral, verify::QuoteVerifier, QuoteCollateralV3};
 use std::fs;
 use std::path::PathBuf;
-use anyhow::Context;
 
 #[derive(Parser)]
 #[command(name = "test-case")]
@@ -144,9 +144,11 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
         };
 
         // Fetch collateral
-        let result = get_collateral(&pccs_url, &quote_bytes).await.and_then(|collateral| {
-            serde_json::to_string(&collateral).context("Failed to serialize collateral")
-        });
+        let result = get_collateral(&pccs_url, &quote_bytes)
+            .await
+            .and_then(|collateral| {
+                serde_json::to_string(&collateral).context("Failed to serialize collateral")
+            });
         match result {
             Ok(collateral) => {
                 // Output collateral JSON directly
