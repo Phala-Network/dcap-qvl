@@ -105,7 +105,7 @@ jobs:
 
   # macOS Intel build using native runner (Zig cross-compilation has issues)
   macos-intel:
-    runs-on: macos-13 # Intel runner
+    runs-on: macos-15-intel # Intel runner
     steps:
       - uses: actions/checkout@v6
       - name: Override version if specified
