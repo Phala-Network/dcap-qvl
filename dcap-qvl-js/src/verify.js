@@ -293,6 +293,11 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     // Step 9 & 10: QE TCB matching is done in verifyQeIdentityPolicy, merge statuses
     const finalStatus = platformTcbStatus.merge(qeTcbStatus);
 
+    // Reject Unknown TCB status
+    if (finalStatus.status === 'Unknown') {
+        throw new Error('TCB status is Unknown - no matching TCB level found');
+    }
+
     // Validate attributes
     validateAttrs(quote.report);
 

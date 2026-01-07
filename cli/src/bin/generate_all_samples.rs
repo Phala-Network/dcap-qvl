@@ -1871,8 +1871,36 @@ fn main() -> Result<()> {
         })),
     });
 
-    // Category 12: PCK certificate chain in collateral (cert_type 3 support)
-    println!("\nCategory 12: PCK certificate chain in collateral");
+    // Category 12: Unknown TCB status
+    println!("\nCategory 12: Unknown TCB status");
+
+    samples.push(TestSample {
+        name: "unknown_tcb_status".to_string(),
+        description: "Quote with no matching TCB level (empty tcbLevels array)".to_string(),
+        should_succeed: false,
+        expected_error: Some("TCB status is Unknown".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Use empty tcbLevels array - no matching level will be found
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    tcb["tcbLevels"] = json!([]);  // Empty array
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
+    // Category 13: PCK certificate chain in collateral (cert_type 3 support)
+    println!("\nCategory 13: PCK certificate chain in collateral");
 
     samples.push(TestSample {
         name: "cert_type_5_with_pck_chain".to_string(),
@@ -1942,6 +1970,7 @@ fn main() -> Result<()> {
             "FMSPC errors",
             "QE report errors",
             "QE Identity errors",
+            "Unknown TCB status",
             "PCK certificate chain in collateral (cert_type 3 support)"
         ]
     });

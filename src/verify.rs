@@ -557,6 +557,11 @@ fn verify_impl(
     // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
     let final_status = platform_tcb_status.merge(&qe_tcb_status);
 
+    // Reject Unknown TCB status
+    if final_status.is_unknown() {
+        bail!("TCB status is Unknown - no matching TCB level found");
+    }
+
     // Validate report attributes (debug mode check, etc.)
     validate_attrs(&quote.report)?;
 
