@@ -66,9 +66,52 @@ class TcbInfo {
     }
 }
 
+// TCB status severity ordering (higher number = worse status)
+function tcbStatusSeverity(status) {
+    switch (status) {
+        case 'UpToDate': return 0;
+        case 'SWHardeningNeeded': return 1;
+        case 'ConfigurationNeeded': return 2;
+        case 'ConfigurationAndSWHardeningNeeded': return 3;
+        case 'OutOfDate': return 4;
+        case 'OutOfDateConfigurationNeeded': return 5;
+        case 'Revoked': return 6;
+        default: return 7; // Unknown status treated as worst
+    }
+}
+
+class TcbStatus {
+    constructor(status, advisoryIds) {
+        this.status = status || 'Unknown';
+        this.advisoryIds = advisoryIds || [];
+    }
+
+    static unknown() {
+        return new TcbStatus('Unknown', []);
+    }
+
+    // Merge two TCB statuses, taking the worse status and combining advisory IDs
+    merge(other) {
+        const finalStatus = tcbStatusSeverity(other.status) > tcbStatusSeverity(this.status)
+            ? other.status
+            : this.status;
+
+        const advisoryIds = [...this.advisoryIds];
+        for (const id of other.advisoryIds) {
+            if (!advisoryIds.includes(id)) {
+                advisoryIds.push(id);
+            }
+        }
+
+        return new TcbStatus(finalStatus, advisoryIds);
+    }
+}
+
 module.exports = {
     TcbComponents,
     Tcb,
     TcbLevel,
     TcbInfo,
+    TcbStatus,
+    tcbStatusSeverity,
 };

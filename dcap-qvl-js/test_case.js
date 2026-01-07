@@ -41,7 +41,7 @@ function showHelp() {
     console.log("  test_case.js <command> [args...]");
     console.log("");
     console.log("Commands:");
-    console.log("  verify <quote_file> <collateral_file> [root_ca_file]");
+    console.log("  verify [--time <unix_timestamp>] <quote_file> <collateral_file> [root_ca_file]");
     console.log("    Verify a quote with collateral");
     console.log("  get-collateral [--pccs-url URL] <quote_file>");
     console.log("    Fetch collateral from PCCS");
@@ -53,13 +53,28 @@ function showHelp() {
 }
 
 async function cmdVerify(args) {
-    const quoteFile = args[0];
-    const collateralFile = args[1];
-    const rootCaFile = args[2];
+    let quoteFile;
+    let collateralFile;
+    let rootCaFile;
+    let now = Math.floor(Date.now() / 1000);
+
+    // Parse arguments
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--time' && i + 1 < args.length) {
+            now = parseInt(args[i + 1], 10);
+            i++; // Skip next argument
+        } else if (!quoteFile) {
+            quoteFile = args[i];
+        } else if (!collateralFile) {
+            collateralFile = args[i];
+        } else if (!rootCaFile) {
+            rootCaFile = args[i];
+        }
+    }
 
     if (!quoteFile || !collateralFile) {
         console.error("Error: Missing required arguments for verify command");
-        console.error("Usage: test_case.js verify <quote_file> <collateral_file> [root_ca_file]");
+        console.error("Usage: test_case.js verify [--time <unix_timestamp>] <quote_file> <collateral_file> [root_ca_file]");
         process.exit(2);
     }
 
@@ -75,8 +90,6 @@ async function cmdVerify(args) {
     }
 
     const rootCaDer = rootCaFile ? readFileAsUint8Array(rootCaFile) : null;
-
-    const now = Math.floor(Date.now() / 1000);
 
     try {
         let result;

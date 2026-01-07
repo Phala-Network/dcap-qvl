@@ -9,6 +9,15 @@ const { Buffer } = require('buffer');
 const { Quote } = require('./quote');
 const intel = require('./intel');
 const utils = require('./utils');
+const {
+    PCK_ID_ENCRYPTED_PPID_2048,
+    PCK_ID_ENCRYPTED_PPID_3072,
+    PCK_ID_PCK_CERT_CHAIN,
+    PROCESSOR_ISSUER,
+    PLATFORM_ISSUER,
+    PROCESSOR_ISSUER_ID,
+    PLATFORM_ISSUER_ID,
+} = require('./constants');
 
 // Default PCCS URL (Phala Network's PCCS server - recommended)
 const PHALA_PCCS_URL = 'https://pccs.phala.network';
@@ -70,14 +79,147 @@ async function httpGet(url) {
     return Buffer.from(await response.arrayBuffer());
 }
 
-async function getCollateral(pccsUrl, quoteBytes) {
-    const quote = Quote.parse(quoteBytes);
-    const ca = intel.getCa(quote);
-    const fmspc = Buffer.from(intel.getFmspc(quote)).toString('hex').toUpperCase();
-    return getCollateralForFmspc(pccsUrl, fmspc, ca, quote.header.isSgx());
+/**
+ * Fetch PCK certificate from PCCS using encrypted PPID parameters.
+ */
+async function fetchPckCertificate(pccsUrl, params) {
+    // PCCS normalizes parameters to uppercase, Intel PCS accepts both
+    // Use uppercase for compatibility with both
+    const qeid = Buffer.from(params.qeid).toString('hex').toUpperCase();
+    const encryptedPpid = Buffer.from(params.encryptedPpid).toString('hex').toUpperCase();
+    const cpusvn = Buffer.from(params.cpusvn).toString('hex').toUpperCase();
+    const pcesvnBytes = Buffer.alloc(2);
+    pcesvnBytes.writeUInt16LE(params.pcesvn, 0);
+    const pcesvn = pcesvnBytes.toString('hex').toUpperCase();
+    const pceid = Buffer.from(params.pceid).toString('hex').toUpperCase();
+
+    const baseUrl = pccsUrl
+        .replace(/\/$/, '')
+        .replace(/\/sgx\/certification\/v4$/, '')
+        .replace(/\/tdx\/certification\/v4$/, '');
+
+    const url = `${baseUrl}/sgx/certification/v4/pckcert?qeid=${qeid}&encrypted_ppid=${encryptedPpid}&cpusvn=${cpusvn}&pcesvn=${pcesvn}&pceid=${pceid}`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch PCK certificate from ${url}: ${response.status}`);
+    }
+
+    // Check if Intel returned a certificate for a different TCB level
+    // SGX-TCBm header format: cpusvn (16 bytes) + pcesvn (2 bytes, little-endian)
+    const tcbmHeader = response.headers.get('SGX-TCBm');
+    if (tcbmHeader) {
+        const tcbmBytes = Buffer.from(tcbmHeader, 'hex');
+        if (tcbmBytes.length < 18) {
+            throw new Error(`SGX-TCBm header too short: expected 18 bytes, got ${tcbmBytes.length}`);
+        }
+        const matchedCpusvn = tcbmBytes.slice(0, 16);
+        const matchedPcesvn = tcbmBytes.readUInt16LE(16);
+
+        const paramCpusvnBuf = Buffer.from(params.cpusvn);
+        if (!matchedCpusvn.equals(paramCpusvnBuf) || matchedPcesvn !== params.pcesvn) {
+            throw new Error(
+                `TCB level mismatch: Platform's current TCB (cpusvn=${paramCpusvnBuf.toString('hex')}, pcesvn=${params.pcesvn}) ` +
+                `is not registered with Intel PCS. Intel matched to a lower TCB level ` +
+                `(cpusvn=${matchedCpusvn.toString('hex')}, pcesvn=${matchedPcesvn}). ` +
+                `This typically means the platform had a microcode/firmware update but MPA registration was not re-run afterward. ` +
+                `Solution: Run 'mpa_manage -c mpa_registration.conf' on the platform to register the new TCB level with Intel.`
+            );
+        }
+    }
+
+    // The response includes the PCK certificate chain in a header
+    const pckCertChain = getHeader(response, 'SGX-PCK-Certificate-Issuer-Chain');
+
+    // The body is the leaf PCK certificate
+    const pckCert = await response.text();
+
+    // Combine into a full PEM chain (leaf first, then issuer chain)
+    return `${pckCert}\n${pckCertChain}`;
 }
 
+/**
+ * Extract FMSPC and CA type from a PEM certificate chain.
+ */
+function extractFmspcAndCa(pemChain) {
+    const certs = utils.extractCerts(Buffer.from(pemChain));
+    if (certs.length === 0) {
+        throw new Error('Empty certificate chain');
+    }
+
+    const cert = certs[0];
+
+    // Extract FMSPC from Intel extension
+    const extension = utils.getIntelExtension(cert);
+    const fmspc = utils.getFmspc(extension);
+    const fmspcHex = Buffer.from(fmspc).toString('hex').toUpperCase();
+
+    // Extract CA type from issuer
+    const issuer = utils.getCertIssuer(cert);
+    let ca;
+    if (issuer.includes(PROCESSOR_ISSUER)) {
+        ca = PROCESSOR_ISSUER_ID;
+    } else if (issuer.includes(PLATFORM_ISSUER)) {
+        ca = PLATFORM_ISSUER_ID;
+    } else {
+        ca = PROCESSOR_ISSUER_ID;
+    }
+
+    return { fmspc: fmspcHex, ca };
+}
+
+/**
+ * Get PCK certificate chain for a quote.
+ * - cert_type 5: extracts from quote
+ * - cert_type 2/3: fetches from PCCS using encrypted PPID
+ */
+async function getPckChain(pccsUrl, quote) {
+    const innerCertType = quote.innerCertType();
+
+    switch (innerCertType) {
+        case PCK_ID_PCK_CERT_CHAIN: {
+            const rawChain = quote.rawCertChain();
+            return Buffer.from(rawChain).toString('utf-8');
+        }
+        case PCK_ID_ENCRYPTED_PPID_2048:
+        case PCK_ID_ENCRYPTED_PPID_3072: {
+            const params = quote.encryptedPpidParams();
+            return fetchPckCertificate(pccsUrl, params);
+        }
+        default:
+            throw new Error(`Unsupported certification data type: ${innerCertType}`);
+    }
+}
+
+async function getCollateral(pccsUrl, quoteBytes) {
+    const quote = Quote.parse(quoteBytes);
+
+    // Get PCK certificate chain (from quote or PCCS)
+    const pckChain = await getPckChain(pccsUrl, quote);
+
+    // Extract FMSPC and CA from the certificate
+    const { fmspc, ca } = extractFmspcAndCa(pckChain);
+
+    // Fetch the rest of the collateral
+    const collateral = await getCollateralForFmspcImpl(pccsUrl, fmspc, ca, quote.header.isSgx());
+
+    // Attach the PCK certificate chain for offline verification
+    collateral.pck_certificate_chain = pckChain;
+
+    return collateral;
+}
+
+/**
+ * Get collateral for a known FMSPC (public API).
+ */
 async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx) {
+    return getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx);
+}
+
+/**
+ * Internal implementation for fetching collateral by FMSPC.
+ */
+async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
     const endpoints = new PcsEndpoints(pccsUrl, forSgx, fmspc, ca);
 
     // Fetch PCK CRL
@@ -172,6 +314,7 @@ async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx) {
         qe_identity_issuer_chain: qeIdentityIssuerChain,
         qe_identity: qeIdentity,
         qe_identity_signature: Array.from(qeIdentitySignature),
+        pck_certificate_chain: null,
     };
 }
 

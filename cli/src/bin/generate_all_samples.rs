@@ -389,6 +389,87 @@ fn generate_truncated_quote() -> Result<Vec<u8>> {
     Ok(vec![0x03, 0x00, 0x02, 0x00]) // Only 4 bytes
 }
 
+/// Generate a quote with cert_type 3 (encrypted PPID).
+/// The quote contains encrypted PPID parameters instead of PCK certificate chain.
+/// The PCK certificate chain must be provided via collateral.pck_certificate_chain.
+fn generate_cert_type_3_quote() -> Result<Vec<u8>> {
+    let header = create_sgx_header(3, 2, 0);
+    let report = create_sgx_report(false);
+
+    // Generate attestation key pair
+    let rng = SystemRandom::new();
+    let attestation_pkcs8 =
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
+        &ECDSA_P256_SHA256_FIXED_SIGNING,
+        attestation_pkcs8.as_ref(),
+        &rng,
+    )?;
+
+    // Get public key
+    let attestation_public_key = attestation_key_pair.public_key().as_ref();
+    let mut ecdsa_attestation_key = [0u8; 64];
+    ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
+
+    // Create auth data
+    let qe_auth_data = vec![0u8; 32];
+
+    // Calculate QE hash (attestation_key + qe_auth_data)
+    let mut qe_hash_data = [0u8; 96]; // 64 + 32
+    qe_hash_data[0..64].copy_from_slice(&ecdsa_attestation_key);
+    qe_hash_data[64..].copy_from_slice(&qe_auth_data);
+    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
+
+    // Create QE report with correct hash in report_data
+    let mut qe_report_data = create_sgx_report(false);
+    qe_report_data.report_data[0..32].copy_from_slice(qe_hash.as_ref());
+    let qe_report_bytes = qe_report_data.encode();
+    let mut qe_report = [0u8; 384];
+    qe_report[..qe_report_bytes.len()].copy_from_slice(&qe_report_bytes);
+
+    // Load PCK private key for signing QE report
+    let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
+    let pck_key_pair = load_private_key(pck_key_path)?;
+
+    // Sign QE report with PCK key
+    let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
+
+    // Create encrypted PPID certification data (cert_type 3)
+    // Format: encrypted_ppid (384 bytes for RSA-3072) + cpusvn (16) + pcesvn (2) + pceid (2)
+    let encrypted_ppid = vec![0xAB; 384]; // Dummy encrypted PPID
+    let mut cert_body = encrypted_ppid;
+    cert_body.extend_from_slice(&[1u8; 16]); // cpusvn
+    cert_body.extend_from_slice(&1u16.to_le_bytes()); // pcesvn
+    cert_body.extend_from_slice(&[0u8, 1u8]); // pceid
+
+    let certification_data = CertificationData {
+        cert_type: 3, // PCK_ID_ENCRYPTED_PPID_3072
+        body: Data::<u32>::new(cert_body),
+    };
+
+    // Sign the quote with attestation key (header + report)
+    let mut signed_data = header.encode();
+    signed_data.extend_from_slice(&report.encode());
+    let ecdsa_signature = sign_data(&attestation_key_pair, &signed_data)?;
+
+    let auth_data = AuthData::V3(AuthDataV3 {
+        ecdsa_signature,
+        ecdsa_attestation_key,
+        qe_report,
+        qe_report_signature,
+        qe_auth_data: Data::<u16>::new(qe_auth_data),
+        certification_data,
+    });
+
+    let quote = Quote {
+        header,
+        report: Report::SgxEnclave(report),
+        auth_data,
+    };
+
+    Ok(quote.encode())
+}
+
 fn generate_base_collateral() -> Result<serde_json::Value> {
     // Load certificate chains
     let tcb_chain =
@@ -1790,6 +1871,50 @@ fn main() -> Result<()> {
         })),
     });
 
+    // Category 12: PCK certificate chain in collateral (cert_type 3 support)
+    println!("\nCategory 12: PCK certificate chain in collateral");
+
+    samples.push(TestSample {
+        name: "cert_type_5_with_pck_chain".to_string(),
+        description: "cert_type 5 quote with pck_certificate_chain in collateral".to_string(),
+        should_succeed: true,
+        expected_error: None,
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Add pck_certificate_chain to collateral
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_chain = format!("{}{}", pck_cert, root_cert);
+            collateral["pck_certificate_chain"] = json!(pck_chain);
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "cert_type_3_with_pck_chain".to_string(),
+        description: "cert_type 3 (encrypted PPID) quote with pck_certificate_chain in collateral - offline verification support".to_string(),
+        should_succeed: true,  // Should succeed: collateral provides PCK cert for offline verification
+        expected_error: None,
+        quote_generator: Box::new(generate_cert_type_3_quote),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Add pck_certificate_chain to collateral (required for cert_type 3 offline verification)
+            let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
+            let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
+            let pck_chain = format!("{}{}", pck_cert, root_cert);
+            collateral["pck_certificate_chain"] = json!(pck_chain);
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "cert_type_3_without_pck_chain".to_string(),
+        description: "cert_type 3 quote without pck_certificate_chain (should fail)".to_string(),
+        should_succeed: false,
+        expected_error: Some("Unsupported DCAP PCK cert format".to_string()),
+        quote_generator: Box::new(generate_cert_type_3_quote),
+        collateral_modifier: None, // No pck_certificate_chain
+    });
+
     // Write all samples
     println!("\n=== Writing samples to disk ===\n");
     let total = samples.len();
@@ -1815,7 +1940,9 @@ fn main() -> Result<()> {
             "Certificate chain errors",
             "Signature errors",
             "FMSPC errors",
-            "QE report errors"
+            "QE report errors",
+            "QE Identity errors",
+            "PCK certificate chain in collateral (cert_type 3 support)"
         ]
     });
 

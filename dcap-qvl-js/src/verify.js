@@ -4,7 +4,8 @@
 const crypto = require('./crypto-compat');
 const { Buffer } = require('buffer');
 const { Quote, EnclaveReport } = require('./quote');
-const { TcbInfo } = require('./tcb_info');
+const { TcbInfo, TcbStatus } = require('./tcb_info');
+const { QeIdentity } = require('./qe_identity');
 const utils = require('./utils');
 const intel = require('./intel');
 const {
@@ -84,7 +85,7 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     // Verify TCB info certificate chain and signature
     const tcbLeafCerts = utils.extractCerts(Buffer.from(collateral.tcb_info_issuer_chain));
     if (tcbLeafCerts.length < 2) {
-        throw new Error('Certificate chain is too short in quote_collateral');
+        throw new Error('Certificate chain is too short for TCB Info');
     }
 
     utils.verifyCertificateChain(
@@ -110,6 +111,49 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('Signature is invalid for tcb_info');
     }
 
+    // Step 2: Verify QE Identity signature
+    let qeIdentity;
+    try {
+        qeIdentity = QeIdentity.fromJSON(collateral.qe_identity);
+    } catch (e) {
+        throw new Error('Failed to decode QeIdentity', { cause: e });
+    }
+
+    // Check QE Identity expiration
+    const qeIdentityNextUpdate = new Date(qeIdentity.nextUpdate);
+    if (nowSecs > qeIdentityNextUpdate.getTime() / 1000) {
+        throw new Error('QE Identity expired');
+    }
+
+    // Verify QE Identity certificate chain
+    const qeIdCerts = utils.extractCerts(Buffer.from(collateral.qe_identity_issuer_chain));
+    if (qeIdCerts.length < 2) {
+        throw new Error('Certificate chain is too short for QE Identity');
+    }
+
+    utils.verifyCertificateChain(
+        qeIdCerts[0],
+        qeIdCerts.slice(1),
+        nowSecs,
+        crls,
+        rootCaDer
+    );
+
+    // Verify QE Identity signature
+    const qeIdSig = typeof collateral.qe_identity_signature === 'string'
+        ? Buffer.from(collateral.qe_identity_signature, 'hex')
+        : Buffer.from(collateral.qe_identity_signature);
+    const qeIdSignatureDer = utils.encodeAsDer(qeIdSig);
+    try {
+        verifyEcdsaSignature(
+            qeIdCerts[0],
+            Buffer.from(collateral.qe_identity, 'utf-8'),
+            qeIdSignatureDer
+        );
+    } catch (e) {
+        throw new Error('Signature is invalid for qe_identity');
+    }
+
     // Check quote version
     if (![3, 4, 5].includes(quote.header.version)) {
         throw new Error('Unsupported DCAP quote version');
@@ -124,13 +168,25 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     const authData = quote.authData.intoV3();
     const certificationData = authData.certificationData;
 
-    // Check certification data type
-    if (certificationData.certType !== PCK_CERT_CHAIN) {
-        throw new Error('Unsupported DCAP PCK cert format');
+    // Extract PCK certificate chain - prefer collateral, fall back to quote
+    let qeCertificationCerts;
+    if (collateral.pck_certificate_chain) {
+        // Use certificate chain from collateral (supports cert_type 3/5)
+        qeCertificationCerts = utils.extractCerts(Buffer.from(collateral.pck_certificate_chain, 'utf-8'));
+        if (qeCertificationCerts.length === 0) {
+            throw new Error('Failed to extract PCK certificates from collateral');
+        }
+    } else {
+        // Backward compatibility: extract from quote (only works for cert_type 5)
+        if (certificationData.certType !== PCK_CERT_CHAIN) {
+            throw new Error(`Unsupported DCAP PCK cert format: ${certificationData.certType}. Use get_collateral() to fetch PCK certificate.`);
+        }
+        qeCertificationCerts = utils.extractCerts(certificationData.body);
+        if (qeCertificationCerts.length === 0) {
+            throw new Error('Failed to extract PCK certificates from quote');
+        }
     }
 
-    // Extract PCK certificate chain
-    const qeCertificationCerts = utils.extractCerts(certificationData.body);
     if (qeCertificationCerts.length < 2) {
         throw new Error('Certificate chain is too short in quote');
     }
@@ -182,7 +238,10 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('QE report hash mismatch');
     }
 
-    // Verify quote signature using ECDSA attestation key
+    // Step 6: Verify QE Report policy against QE Identity
+    const qeTcbStatus = verifyQeIdentityPolicy(qeReport, qeIdentity);
+
+    // Step 7: Verify quote signature using ECDSA attestation key
     const publicKeyBytes = Buffer.concat([
         Buffer.from([0x04]), // Uncompressed format
         Buffer.from(authData.ecdsaAttestationKey)
@@ -208,7 +267,7 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     verifier.update(signedData);
 
     if (!verifier.verify(publicKey, signatureDer)) {
-        throw new Error('Isv enclave report signature is invalid');
+        throw new Error('ISV enclave report signature is invalid');
     }
 
     // Extract PCK extension information
@@ -228,10 +287,20 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('TDX quote with non-TDX TCB info in the collateral');
     }
 
-    // Find TCB status
-    let tcbStatus = 'Unknown';
-    let advisoryIds = [];
+    // Step 8: Match Platform TCB
+    const platformTcbStatus = matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn);
 
+    // Step 9 & 10: QE TCB matching is done in verifyQeIdentityPolicy, merge statuses
+    const finalStatus = platformTcbStatus.merge(qeTcbStatus);
+
+    // Validate attributes
+    validateAttrs(quote.report);
+
+    return new VerifiedReport(finalStatus.status, finalStatus.advisoryIds, quote.report, ppid);
+}
+
+// Step 8: Match Platform TCB
+function matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn) {
     for (const tcbLevel of tcbInfo.tcbLevels) {
         // Check PCE SVN
         if (pceSvn < tcbLevel.tcb.pcesvn) {
@@ -266,15 +335,70 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         }
 
         // Found matching TCB level
-        tcbStatus = tcbLevel.tcbStatus;
-        advisoryIds = [...tcbLevel.advisoryIDs];
-        break;
+        return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
     }
 
-    // Validate attributes
-    validateAttrs(quote.report);
+    return TcbStatus.unknown();
+}
 
-    return new VerifiedReport(tcbStatus, advisoryIds, quote.report, ppid);
+// Step 6 & 9: Verify QE Report policy and match QE TCB
+function verifyQeIdentityPolicy(qeReport, qeIdentity) {
+    // Verify MRSIGNER
+    const expectedMrsigner = Buffer.from(qeIdentity.mrsigner, 'hex');
+    if (!Buffer.from(qeReport.mrSigner).equals(expectedMrsigner)) {
+        throw new Error(`QE MRSIGNER mismatch: expected ${qeIdentity.mrsigner}, got ${Buffer.from(qeReport.mrSigner).toString('hex').toUpperCase()}`);
+    }
+
+    // Verify ISVPRODID
+    if (qeReport.isvProdId !== qeIdentity.isvprodid) {
+        throw new Error(`QE ISVPRODID mismatch: expected ${qeIdentity.isvprodid}, got ${qeReport.isvProdId}`);
+    }
+
+    // Verify MISCSELECT with mask
+    const expectedMiscselect = Buffer.from(qeIdentity.miscselect, 'hex');
+    const miscselectMask = Buffer.from(qeIdentity.miscselectMask, 'hex');
+
+    const expectedMiscselectU32 = expectedMiscselect.readUInt32LE(0);
+    const miscselectMaskU32 = miscselectMask.readUInt32LE(0);
+    const qeMiscselectMasked = qeReport.miscSelect & miscselectMaskU32;
+    const expectedMiscselectMasked = expectedMiscselectU32 & miscselectMaskU32;
+
+    if (qeMiscselectMasked !== expectedMiscselectMasked) {
+        throw new Error(`QE MISCSELECT mismatch: expected ${expectedMiscselectMasked.toString(16).padStart(8, '0').toUpperCase()} (masked), got ${qeMiscselectMasked.toString(16).padStart(8, '0').toUpperCase()} (masked)`);
+    }
+
+    // Verify ATTRIBUTES with mask
+    const expectedAttributes = Buffer.from(qeIdentity.attributes, 'hex');
+    const attributesMask = Buffer.from(qeIdentity.attributesMask, 'hex');
+
+    for (let i = 0; i < 16; i++) {
+        const expectedMasked = expectedAttributes[i] & attributesMask[i];
+        const qeMasked = qeReport.attributes[i] & attributesMask[i];
+        if (expectedMasked !== qeMasked) {
+            throw new Error(`QE ATTRIBUTES mismatch at byte ${i}: expected ${expectedMasked.toString(16).padStart(2, '0').toUpperCase()} (masked), got ${qeMasked.toString(16).padStart(2, '0').toUpperCase()} (masked)`);
+        }
+    }
+
+    // Match QE TCB level based on ISVSVN
+    return matchQeTcbLevel(qeReport.isvSvn, qeIdentity.tcbLevels);
+}
+
+// Match QE ISVSVN against QE Identity TCB levels
+function matchQeTcbLevel(isvSvn, tcbLevels) {
+    for (const tcbLevel of tcbLevels) {
+        if (isvSvn >= tcbLevel.tcb.isvsvn) {
+            return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
+        }
+    }
+
+    // No matching level found
+    if (tcbLevels.length === 0) {
+        return TcbStatus.unknown();
+    }
+
+    // ISVSVN is below all defined TCB levels
+    const minRequired = tcbLevels[tcbLevels.length - 1].tcb.isvsvn;
+    throw new Error(`QE ISVSVN ${isvSvn} is below minimum required ${minRequired} from QE Identity`);
 }
 
 // Compare SVN arrays (must be >= for each component)

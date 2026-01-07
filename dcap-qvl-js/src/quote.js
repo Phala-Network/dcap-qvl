@@ -15,6 +15,9 @@ const {
     ECDSA_PUBKEY_BYTE_LEN,
     QE_REPORT_SIG_BYTE_LEN,
     BODY_BYTE_SIZE,
+    PCK_ID_ENCRYPTED_PPID_2048,
+    PCK_ID_ENCRYPTED_PPID_3072,
+    PCK_ID_PCK_CERT_CHAIN,
 } = require('./constants');
 const { Buffer } = require('buffer');
 
@@ -397,6 +400,76 @@ class Quote {
         }
 
         return certData.body;
+    }
+
+    /**
+     * Get the inner certification data type.
+     * For V3 quotes: returns the cert_type directly.
+     * For V4 quotes with cert_type 6: returns the inner cert_type from qe_report_data.
+     */
+    innerCertType() {
+        if (this.authData.version === 3) {
+            return this.authData.data.certificationData.certType;
+        } else {
+            return this.authData.data.qeReportData.certificationData.certType;
+        }
+    }
+
+    /**
+     * Get the inner certification data body.
+     */
+    innerCertData() {
+        if (this.authData.version === 3) {
+            return this.authData.data.certificationData.body;
+        } else {
+            return this.authData.data.qeReportData.certificationData.body;
+        }
+    }
+
+    /**
+     * For cert_type 2/3 (encrypted PPID), extract the parameters needed to fetch PCK certificate.
+     * Returns { qeid, encryptedPpid, cpusvn, pcesvn, pceid }
+     */
+    encryptedPpidParams() {
+        const innerCertType = this.innerCertType();
+        if (innerCertType !== PCK_ID_ENCRYPTED_PPID_2048 && innerCertType !== PCK_ID_ENCRYPTED_PPID_3072) {
+            throw new Error(`encryptedPpidParams() requires cert_type 2 or 3, got ${innerCertType}`);
+        }
+
+        const certBody = this.innerCertData();
+
+        // The cert body for encrypted PPID contains:
+        // - encrypted_ppid (variable length: 256 bytes for RSA-2048, 384 bytes for RSA-3072)
+        // - cpusvn (16 bytes)
+        // - pcesvn (2 bytes, little endian)
+        // - pceid (2 bytes, little endian)
+        // Total trailer: 20 bytes
+        if (certBody.length < 20) {
+            throw new Error('Certification data body too short for encrypted PPID');
+        }
+
+        const trailerStart = certBody.length - 20;
+        const encryptedPpid = certBody.slice(0, trailerStart);
+
+        // Extract cpusvn from trailer (16 bytes)
+        const cpusvn = certBody.slice(trailerStart, trailerStart + 16);
+
+        // Extract pcesvn from trailer (2 bytes, little endian)
+        const pcesvn = Buffer.from(certBody.slice(trailerStart + 16, trailerStart + 18)).readUInt16LE(0);
+
+        // Extract pceid from trailer (2 bytes)
+        const pceid = certBody.slice(trailerStart + 18, trailerStart + 20);
+
+        // Extract qeid from header's user_data (first 16 bytes)
+        const qeid = this.header.userData.slice(0, 16);
+
+        return {
+            qeid,
+            encryptedPpid,
+            cpusvn,
+            pcesvn,
+            pceid,
+        };
     }
 
     signedLength() {

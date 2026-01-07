@@ -353,6 +353,28 @@ function extractCrlUrl(certDer) {
     return null;
 }
 
+// Extract issuer string from certificate
+function getCertIssuer(certDer) {
+    try {
+        const cert = Certificate.decode(certDer, 'der');
+        const issuer = cert.tbsCertificate.issuer;
+
+        // Convert issuer RDNs to a string
+        const parts = [];
+        for (const rdn of issuer.value) {
+            for (const attr of rdn) {
+                // attr.type is the OID, attr.value is the ASN1 value
+                const value = attr.value.toString();
+                parts.push(value);
+            }
+        }
+
+        return parts.join(', ');
+    } catch (e) {
+        return '';
+    }
+}
+
 module.exports = {
     extractRawCerts,
     extractCerts,
@@ -364,6 +386,7 @@ module.exports = {
     encodeAsDer,
     verifyCertificateChain,
     extractCrlUrl,
+    getCertIssuer,
     derToPem,
     Certificate,
     CertificateList,
