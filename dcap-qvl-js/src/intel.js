@@ -34,20 +34,6 @@ function decodeEnumerated(bytes) {
     }
 }
 
-function parsePckExtension(certDer) {
-    const extension = utils.getIntelExtension(certDer);
-
-    const ppid = findExtensionRequired([oids.PPID], extension);
-    const cpuSvn = utils.getCpuSvn(extension);
-    const pceSvn = utils.getPceSvn(extension);
-    const pceId = findExtensionRequired([oids.PCEID], extension);
-    const fmspc = utils.getFmspc(extension);
-    const sgxType = decodeEnumerated(findExtensionRequired([oids.SGX_TYPE], extension));
-    const platformInstanceId = findExtensionOptional([oids.PLATFORM_INSTANCE_ID], extension);
-
-    return new PckExtension(ppid);
-}
-
 function extractCertChain(quote) {
     try {
         const chainBytes = quote.rawCertChain();
