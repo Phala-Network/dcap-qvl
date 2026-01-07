@@ -7,16 +7,10 @@ const asn1 = require('asn1.js');
 const { PROCESSOR_ISSUER, PLATFORM_ISSUER, PROCESSOR_ISSUER_ID, PLATFORM_ISSUER_ID } = require('./constants');
 
 class PckExtension {
-    constructor(ppid, cpuSvn, pceSvn, pceId, fmspc, sgxType, platformInstanceId) {
-        this.ppid = ppid;
-        this.cpuSvn = cpuSvn;
-        this.pceSvn = pceSvn;
-        this.pceId = pceId;
-        this.fmspc = fmspc;
-        this.sgxType = sgxType;
-        this.platformInstanceId = platformInstanceId;
+    constructor(ppid) {
+      this.ppid = ppid;
     }
-}
+  }
 
 function findExtensionRequired(path, extension) {
     return utils.findExtension(path, extension);
@@ -51,7 +45,7 @@ function parsePckExtension(certDer) {
     const sgxType = decodeEnumerated(findExtensionRequired([oids.SGX_TYPE], extension));
     const platformInstanceId = findExtensionOptional([oids.PLATFORM_INSTANCE_ID], extension);
 
-    return new PckExtension(ppid, cpuSvn, pceSvn, pceId, fmspc, sgxType, platformInstanceId);
+    return new PckExtension(ppid);
 }
 
 function extractCertChain(quote) {
@@ -125,7 +119,6 @@ function getFmspc(quote) {
 }
 
 module.exports = {
-    PckExtension,
     parsePckExtension,
     extractCertChain,
     getCa,
