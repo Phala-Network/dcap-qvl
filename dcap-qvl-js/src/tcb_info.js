@@ -76,7 +76,7 @@ function tcbStatusSeverity(status) {
         case 'OutOfDate': return 4;
         case 'OutOfDateConfigurationNeeded': return 5;
         case 'Revoked': return 6;
-        default: return 7; // Unknown status treated as worst
+        default: return 100; // Unknown status treated as worst
     }
 }
 

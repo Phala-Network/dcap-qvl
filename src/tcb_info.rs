@@ -83,6 +83,11 @@ impl TcbStatus {
         }
     }
 
+    /// Check if the TCB status is unknown
+    pub fn is_unknown(&self) -> bool {
+        self.status == "Unknown"
+    }
+
     /// Merge two TCB statuses, taking the worse status and combining advisory IDs
     pub fn merge(self, other: &TcbStatus) -> Self {
         let final_status = if tcb_status_severity(&other.status) > tcb_status_severity(&self.status)
@@ -116,7 +121,7 @@ fn tcb_status_severity(status: &str) -> u8 {
         "OutOfDate" => 4,
         "OutOfDateConfigurationNeeded" => 5,
         "Revoked" => 6,
-        _ => 7, // Unknown status treated as worst
+        _ => 100, // Unknown status treated as worst
     }
 }
 
