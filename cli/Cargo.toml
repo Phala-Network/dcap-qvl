@@ -1,6 +1,6 @@
 [package]
 name = "dcap-qvl-cli"
-version = "0.3.4"
+version = "0.3.6"
 edition = "2021"
 description = "Command line interface for Intel SGX DCAP Quote Verification Library"
 license = "Apache-2.0"
@@ -24,7 +24,7 @@ anyhow = "1.0.95"
 base64 = "0.22"
 chrono = "0.4"
 clap = { version = "4.5.27", features = ["derive"] }
-dcap-qvl = { version = "0.3.4", path = "../" }
+dcap-qvl = { version = "0.3.6", path = "../" }
 hex = "0.4.3"
 ring = "0.17"
 scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive"] }
