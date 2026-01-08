@@ -1878,7 +1878,7 @@ fn main() -> Result<()> {
         name: "unknown_tcb_status".to_string(),
         description: "Quote with no matching TCB level (empty tcbLevels array)".to_string(),
         should_succeed: false,
-        expected_error: Some("TCB status is Unknown".to_string()),
+        expected_error: Some("No matching TCB level found".to_string()),
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use empty tcbLevels array - no matching level will be found
@@ -1893,6 +1893,64 @@ fn main() -> Result<()> {
 
                     collateral["tcb_info"] = json!(new_tcb_info);
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "revoked_platform_tcb".to_string(),
+        description: "Quote with Revoked platform TCB status".to_string(),
+        should_succeed: false,
+        expected_error: Some("TCB status is invalid: Revoked".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Set platform TCB status to Revoked
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    if let Some(levels) = tcb["tcbLevels"].as_array_mut() {
+                        for level in levels {
+                            level["tcbStatus"] = json!("Revoked");
+                        }
+                    }
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "revoked_qe_tcb".to_string(),
+        description: "Quote with Revoked QE TCB status".to_string(),
+        should_succeed: false,
+        expected_error: Some("TCB status is invalid: Revoked".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Set QE TCB status to Revoked
+            if let Some(qe_str) = collateral["qe_identity"].as_str() {
+                if let Ok(mut qe_identity) = serde_json::from_str::<serde_json::Value>(qe_str) {
+                    if let Some(levels) = qe_identity["tcbLevels"].as_array_mut() {
+                        for level in levels {
+                            level["tcbStatus"] = json!("Revoked");
+                        }
+                    }
+                    let new_qe_identity = serde_json::to_string(&qe_identity)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let qe_signature = sign_data(&key_pair, new_qe_identity.as_bytes())?;
+
+                    collateral["qe_identity"] = json!(new_qe_identity);
+                    collateral["qe_identity_signature"] = json!(hex::encode(qe_signature));
                 }
             }
             Ok(())

@@ -7,6 +7,8 @@ use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
+use crate::tcb_info::TcbStatus;
+
 /// QE Identity structure as returned by Intel's PCCS
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +46,7 @@ pub struct QeIdentity {
 pub struct QeTcbLevel {
     pub tcb: QeTcb,
     pub tcb_date: String,
-    pub tcb_status: String,
+    pub tcb_status: TcbStatus,
     #[serde(rename = "advisoryIDs", default)]
     pub advisory_ids: Vec<String>,
 }

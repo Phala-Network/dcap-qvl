@@ -30,7 +30,7 @@ pub struct TcbInfo {
 pub struct TcbLevel {
     pub tcb: Tcb,
     pub tcb_date: String,
-    pub tcb_status: String,
+    pub tcb_status: TcbStatus,
     #[serde(rename = "advisoryIDs", default)]
     pub advisory_ids: Vec<String>,
 }
@@ -56,43 +56,68 @@ pub struct TcbComponents {
     pub svn: u8,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub enum TcbStatus {
+    UpToDate,
+    OutOfDateConfigurationNeeded,
+    OutOfDate,
+    ConfigurationAndSWHardeningNeeded,
+    ConfigurationNeeded,
+    SWHardeningNeeded,
+    Revoked,
+}
+
+impl TcbStatus {
+    fn severity(&self) -> u8 {
+        match self {
+            Self::UpToDate => 0,
+            Self::SWHardeningNeeded => 1,
+            Self::ConfigurationNeeded => 2,
+            Self::ConfigurationAndSWHardeningNeeded => 3,
+            Self::OutOfDate => 4,
+            Self::OutOfDateConfigurationNeeded => 5,
+            Self::Revoked => 6,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::UpToDate => true,
+            Self::SWHardeningNeeded => true,
+            Self::ConfigurationNeeded => true,
+            Self::ConfigurationAndSWHardeningNeeded => true,
+            Self::OutOfDate => true,
+            Self::OutOfDateConfigurationNeeded => true,
+            Self::Revoked => false,
+        }
+    }
+}
+
 /// TCB status with advisory IDs
 ///
 /// This is the result of matching a TCB level, used by both
 /// platform TCB matching and QE Identity verification.
-#[derive(Clone, Debug, Default)]
-pub struct TcbStatus {
-    pub status: String,
+#[derive(Clone, Debug)]
+pub struct TcbStatusWithAdvisory {
+    pub status: TcbStatus,
     pub advisory_ids: Vec<String>,
 }
 
-impl TcbStatus {
+impl TcbStatusWithAdvisory {
     /// Create a new TcbStatus with the given status and advisory IDs
-    pub fn new(status: impl Into<String>, advisory_ids: Vec<String>) -> Self {
+    pub fn new(status: TcbStatus, advisory_ids: Vec<String>) -> Self {
         Self {
-            status: status.into(),
+            status,
             advisory_ids,
         }
     }
 
-    /// Create an unknown status (no matching TCB level found)
-    pub fn unknown() -> Self {
-        Self {
-            status: "Unknown".into(),
-            advisory_ids: vec![],
-        }
-    }
-
-    /// Check if the TCB status is unknown
-    pub fn is_unknown(&self) -> bool {
-        self.status == "Unknown"
-    }
-
     /// Merge two TCB statuses, taking the worse status and combining advisory IDs
-    pub fn merge(self, other: &TcbStatus) -> Self {
-        let final_status = if tcb_status_severity(&other.status) > tcb_status_severity(&self.status)
-        {
-            other.status.clone()
+    pub fn merge(self, other: &TcbStatusWithAdvisory) -> Self {
+        let final_status = if other.status.severity() > self.status.severity() {
+            other.status
         } else {
             self.status
         };
@@ -111,48 +136,35 @@ impl TcbStatus {
     }
 }
 
-/// TCB status severity ordering (higher number = worse status)
-fn tcb_status_severity(status: &str) -> u8 {
-    match status {
-        "UpToDate" => 0,
-        "SWHardeningNeeded" => 1,
-        "ConfigurationNeeded" => 2,
-        "ConfigurationAndSWHardeningNeeded" => 3,
-        "OutOfDate" => 4,
-        "OutOfDateConfigurationNeeded" => 5,
-        "Revoked" => 6,
-        _ => 100, // Unknown status treated as worst
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use TcbStatus::*;
 
     #[test]
     fn test_tcb_status_merge_both_up_to_date() {
-        let a = TcbStatus::new("UpToDate", vec![]);
-        let b = TcbStatus::new("UpToDate", vec![]);
+        let a = TcbStatusWithAdvisory::new(UpToDate, vec![]);
+        let b = TcbStatusWithAdvisory::new(UpToDate, vec![]);
         let result = a.merge(&b);
-        assert_eq!(result.status, "UpToDate");
+        assert_eq!(result.status, UpToDate);
         assert!(result.advisory_ids.is_empty());
     }
 
     #[test]
     fn test_tcb_status_merge_takes_worse() {
-        let a = TcbStatus::new("UpToDate", vec![]);
-        let b = TcbStatus::new("OutOfDate", vec!["INTEL-SA-00001".into()]);
+        let a = TcbStatusWithAdvisory::new(UpToDate, vec![]);
+        let b = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
         let result = a.merge(&b);
-        assert_eq!(result.status, "OutOfDate");
+        assert_eq!(result.status, OutOfDate);
         assert_eq!(result.advisory_ids, vec!["INTEL-SA-00001"]);
     }
 
     #[test]
     fn test_tcb_status_merge_combines_advisories() {
-        let a = TcbStatus::new("OutOfDate", vec!["INTEL-SA-00001".into()]);
-        let b = TcbStatus::new("SWHardeningNeeded", vec!["INTEL-SA-00002".into()]);
+        let a = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
+        let b = TcbStatusWithAdvisory::new(SWHardeningNeeded, vec!["INTEL-SA-00002".into()]);
         let result = a.merge(&b);
-        assert_eq!(result.status, "OutOfDate");
+        assert_eq!(result.status, OutOfDate);
         assert_eq!(
             result.advisory_ids,
             vec!["INTEL-SA-00001", "INTEL-SA-00002"]
@@ -161,31 +173,9 @@ mod tests {
 
     #[test]
     fn test_tcb_status_merge_deduplicates_advisories() {
-        let a = TcbStatus::new("OutOfDate", vec!["INTEL-SA-00001".into()]);
-        let b = TcbStatus::new("OutOfDate", vec!["INTEL-SA-00001".into()]);
+        let a = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
+        let b = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
         let result = a.merge(&b);
         assert_eq!(result.advisory_ids, vec!["INTEL-SA-00001"]);
-    }
-
-    #[test]
-    fn test_tcb_status_severity_ordering() {
-        assert!(tcb_status_severity("UpToDate") < tcb_status_severity("SWHardeningNeeded"));
-        assert!(
-            tcb_status_severity("SWHardeningNeeded") < tcb_status_severity("ConfigurationNeeded")
-        );
-        assert!(
-            tcb_status_severity("ConfigurationNeeded")
-                < tcb_status_severity("ConfigurationAndSWHardeningNeeded")
-        );
-        assert!(
-            tcb_status_severity("ConfigurationAndSWHardeningNeeded")
-                < tcb_status_severity("OutOfDate")
-        );
-        assert!(
-            tcb_status_severity("OutOfDate") < tcb_status_severity("OutOfDateConfigurationNeeded")
-        );
-        assert!(
-            tcb_status_severity("OutOfDateConfigurationNeeded") < tcb_status_severity("Revoked")
-        );
     }
 }

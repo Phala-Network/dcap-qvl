@@ -216,7 +216,7 @@ run_single_test() {
 			;;
 		warn)
 			echo -e "    ${CYAN}Expected:${NC} $expected_error" >&2
-			echo -e "    ${CYAN}Got:${NC} $(echo "$output" | head -n 1)" >&2
+			echo -e "    ${CYAN}Got:${NC} $(echo "$output")" >&2
 			;;
 		esac
 	fi
