@@ -8,7 +8,7 @@ use {
     crate::constants::*,
     crate::intel,
     crate::qe_identity::QeIdentity,
-    crate::tcb_info::{TcbInfo, TcbStatus},
+    crate::tcb_info::{TcbInfo, TcbStatusWithAdvisory},
     alloc::string::String,
     alloc::vec::Vec,
 };
@@ -16,6 +16,7 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
+    tcb_info::TcbStatus,
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{
@@ -49,7 +50,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct VerifiedReport {
-    pub status: String,
+    pub status: TcbStatus,
     pub advisory_ids: Vec<String>,
     pub report: Report,
     #[serde(with = "serde_bytes")]
@@ -418,7 +419,7 @@ fn match_platform_tcb(
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
-) -> Result<TcbStatus> {
+) -> Result<TcbStatusWithAdvisory> {
     // Verify FMSPC matches
     let tcb_fmspc = hex::decode(&tcb_info.fmspc)
         .ok()
@@ -463,14 +464,13 @@ fn match_platform_tcb(
         }
 
         // Found matching level
-        return Ok(TcbStatus::new(
-            tcb_level.tcb_status.clone(),
+        return Ok(TcbStatusWithAdvisory::new(
+            tcb_level.tcb_status,
             tcb_level.advisory_ids.clone(),
         ));
     }
 
-    // No matching TCB level found
-    Ok(TcbStatus::unknown())
+    bail!("No matching TCB level found");
 }
 
 // =============================================================================
@@ -556,10 +556,8 @@ fn verify_impl(
 
     // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
     let final_status = platform_tcb_status.merge(&qe_tcb_status);
-
-    // Reject Unknown TCB status
-    if final_status.is_unknown() {
-        bail!("TCB status is Unknown - no matching TCB level found");
+    if !final_status.status.is_valid() {
+        bail!("TCB status is invalid: {:?}", final_status.status);
     }
 
     // Validate report attributes (debug mode check, etc.)
@@ -648,7 +646,7 @@ pub fn verify(
 fn verify_qe_identity_policy(
     qe_report: &EnclaveReport,
     qe_identity: &QeIdentity,
-) -> Result<TcbStatus> {
+) -> Result<TcbStatusWithAdvisory> {
     // Verify MRSIGNER
     if qe_report.mr_signer != qe_identity.mrsigner {
         bail!(
@@ -713,28 +711,24 @@ fn verify_qe_identity_policy(
 fn match_qe_tcb_level(
     isv_svn: u16,
     tcb_levels: &[crate::qe_identity::QeTcbLevel],
-) -> Result<TcbStatus> {
+) -> Result<TcbStatusWithAdvisory> {
     for tcb_level in tcb_levels {
         if isv_svn >= tcb_level.tcb.isvsvn {
-            return Ok(TcbStatus::new(
-                tcb_level.tcb_status.clone(),
+            return Ok(TcbStatusWithAdvisory::new(
+                tcb_level.tcb_status,
                 tcb_level.advisory_ids.clone(),
             ));
         }
     }
 
-    // No matching level found
-    if tcb_levels.is_empty() {
-        return Ok(TcbStatus::unknown());
+    match tcb_levels.last().map(|l| l.tcb.isvsvn) {
+        Some(min_required) => {
+            bail!("QE ISVSVN {isv_svn} is below minimum required {min_required} from QE Identity");
+        }
+        None => {
+            bail!("No TCB levels found in QE Identity");
+        }
     }
-
-    // ISVSVN is below all defined TCB levels
-    let min_required = tcb_levels.last().map(|l| l.tcb.isvsvn).unwrap_or(0);
-    bail!(
-        "QE ISVSVN {} is below minimum required {} from QE Identity",
-        isv_svn,
-        min_required
-    );
 }
 
 #[cfg(test)]
@@ -742,6 +736,7 @@ fn match_qe_tcb_level(
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use TcbStatus::*;
 
     fn make_test_qe_report() -> EnclaveReport {
         EnclaveReport {
@@ -787,19 +782,19 @@ mod tests {
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 8 },
                     tcb_date: "2024-03-13T00:00:00Z".to_string(),
-                    tcb_status: "UpToDate".to_string(),
+                    tcb_status: UpToDate,
                     advisory_ids: vec![],
                 },
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 6 },
                     tcb_date: "2021-11-10T00:00:00Z".to_string(),
-                    tcb_status: "OutOfDate".to_string(),
+                    tcb_status: OutOfDate,
                     advisory_ids: vec!["INTEL-SA-00615".to_string()],
                 },
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 5 },
                     tcb_date: "2020-11-11T00:00:00Z".to_string(),
-                    tcb_status: "OutOfDate".to_string(),
+                    tcb_status: OutOfDate,
                     advisory_ids: vec!["INTEL-SA-00477".to_string(), "INTEL-SA-00615".to_string()],
                 },
             ],
@@ -927,7 +922,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "UpToDate");
+        assert_eq!(status.status, UpToDate);
         assert!(status.advisory_ids.is_empty());
     }
 
@@ -940,7 +935,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "OutOfDate");
+        assert_eq!(status.status, OutOfDate);
         assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 
@@ -953,7 +948,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "UpToDate"); // Matches first level (isvsvn >= 8)
+        assert_eq!(status.status, UpToDate); // Matches first level (isvsvn >= 8)
     }
 
     #[test]
@@ -982,7 +977,7 @@ mod tests {
         assert!(result.is_ok());
         let status = result.unwrap();
         // Should match level with isvsvn=6 (7 >= 6)
-        assert_eq!(status.status, "OutOfDate");
+        assert_eq!(status.status, OutOfDate);
         assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 }

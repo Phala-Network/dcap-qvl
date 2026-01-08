@@ -90,6 +90,23 @@ class TcbStatus {
         return new TcbStatus('Unknown', []);
     }
 
+    // Check if the TCB status is valid (not Revoked)
+    isValid() {
+        switch (this.status) {
+            case 'UpToDate':
+            case 'SWHardeningNeeded':
+            case 'ConfigurationNeeded':
+            case 'ConfigurationAndSWHardeningNeeded':
+            case 'OutOfDate':
+            case 'OutOfDateConfigurationNeeded':
+                return true;
+            case 'Revoked':
+                return false;
+            default:
+                return false; // Unknown or other statuses are invalid
+        }
+    }
+
     // Merge two TCB statuses, taking the worse status and combining advisory IDs
     merge(other) {
         const finalStatus = tcbStatusSeverity(other.status) > tcbStatusSeverity(this.status)

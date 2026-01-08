@@ -109,7 +109,7 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
     match verifier.verify(&quote_bytes, &collateral, now) {
         Ok(verified_report) => {
             println!("Verification successful");
-            println!("Status: {}", verified_report.status);
+            println!("Status: {:?}", verified_report.status);
             0
         }
         Err(e) => {

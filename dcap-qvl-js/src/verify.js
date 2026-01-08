@@ -293,9 +293,9 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     // Step 9 & 10: QE TCB matching is done in verifyQeIdentityPolicy, merge statuses
     const finalStatus = platformTcbStatus.merge(qeTcbStatus);
 
-    // Reject Unknown TCB status
-    if (finalStatus.status === 'Unknown') {
-        throw new Error('TCB status is Unknown - no matching TCB level found');
+    // Reject invalid TCB status (including Revoked)
+    if (!finalStatus.isValid()) {
+        throw new Error(`TCB status is invalid: ${finalStatus.status}`);
     }
 
     // Validate attributes
@@ -343,7 +343,7 @@ function matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn) {
         return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
     }
 
-    return TcbStatus.unknown();
+    throw new Error('No matching TCB level found');
 }
 
 // Step 6 & 9: Verify QE Report policy and match QE TCB
@@ -398,7 +398,7 @@ function matchQeTcbLevel(isvSvn, tcbLevels) {
 
     // No matching level found
     if (tcbLevels.length === 0) {
-        return TcbStatus.unknown();
+        throw new Error('No TCB levels found in QE Identity');
     }
 
     // ISVSVN is below all defined TCB levels
