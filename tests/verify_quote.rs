@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use dcap_qvl::tcb_info::TcbStatus;
 use dcap_qvl::{quote::Quote, verify::verify, QuoteCollateralV3};
 use scale::Decode;
 
@@ -16,7 +17,10 @@ fn could_parse_sgx_quote() {
         serde_json::from_slice(raw_quote_collateral).expect("decodable");
     let tcb_status = verify(&raw_quote, &quote_collateral, now).expect("verify");
 
-    assert_eq!(tcb_status.status, "ConfigurationAndSWHardeningNeeded");
+    assert_eq!(
+        tcb_status.status,
+        TcbStatus::ConfigurationAndSWHardeningNeeded
+    );
     assert_eq!(
         tcb_status.advisory_ids,
         ["INTEL-SA-00289", "INTEL-SA-00615"]
@@ -34,6 +38,6 @@ fn could_parse_tdx_quote() {
 
     let quote_collateral: QuoteCollateralV3 = serde_json::from_slice(raw_quote_collateral).unwrap();
     let tcb_status = verify(raw_quote, &quote_collateral, now).unwrap();
-    assert_eq!(tcb_status.status, "UpToDate");
+    assert_eq!(tcb_status.status, TcbStatus::UpToDate);
     assert!(tcb_status.advisory_ids.is_empty());
 }

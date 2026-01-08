@@ -736,6 +736,7 @@ fn match_qe_tcb_level(
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use TcbStatus::*;
 
     fn make_test_qe_report() -> EnclaveReport {
         EnclaveReport {
@@ -781,19 +782,19 @@ mod tests {
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 8 },
                     tcb_date: "2024-03-13T00:00:00Z".to_string(),
-                    tcb_status: "UpToDate".to_string(),
+                    tcb_status: UpToDate,
                     advisory_ids: vec![],
                 },
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 6 },
                     tcb_date: "2021-11-10T00:00:00Z".to_string(),
-                    tcb_status: "OutOfDate".to_string(),
+                    tcb_status: OutOfDate,
                     advisory_ids: vec!["INTEL-SA-00615".to_string()],
                 },
                 QeTcbLevel {
                     tcb: QeTcb { isvsvn: 5 },
                     tcb_date: "2020-11-11T00:00:00Z".to_string(),
-                    tcb_status: "OutOfDate".to_string(),
+                    tcb_status: OutOfDate,
                     advisory_ids: vec!["INTEL-SA-00477".to_string(), "INTEL-SA-00615".to_string()],
                 },
             ],
@@ -921,7 +922,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "UpToDate");
+        assert_eq!(status.status, UpToDate);
         assert!(status.advisory_ids.is_empty());
     }
 
@@ -934,7 +935,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "OutOfDate");
+        assert_eq!(status.status, OutOfDate);
         assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 
@@ -947,7 +948,7 @@ mod tests {
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
         let status = result.unwrap();
-        assert_eq!(status.status, "UpToDate"); // Matches first level (isvsvn >= 8)
+        assert_eq!(status.status, UpToDate); // Matches first level (isvsvn >= 8)
     }
 
     #[test]
@@ -976,7 +977,7 @@ mod tests {
         assert!(result.is_ok());
         let status = result.unwrap();
         // Should match level with isvsvn=6 (7 >= 6)
-        assert_eq!(status.status, "OutOfDate");
+        assert_eq!(status.status, OutOfDate);
         assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 }

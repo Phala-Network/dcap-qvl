@@ -1884,7 +1884,7 @@ fn main() -> Result<()> {
             // Use empty tcbLevels array - no matching level will be found
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
                 if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
-                    tcb["tcbLevels"] = json!([]);  // Empty array
+                    tcb["tcbLevels"] = json!([]); // Empty array
                     let new_tcb_info = serde_json::to_string(&tcb)?;
 
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
