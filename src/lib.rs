@@ -84,7 +84,7 @@ pub mod oids;
 mod constants;
 pub mod intel;
 mod qe_identity;
-pub mod tcb_info;
+mod tcb_info;
 mod utils;
 
 pub mod quote;
