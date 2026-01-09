@@ -14,6 +14,9 @@ const {
     PCK_CERT_CHAIN,
     QE_HASH_DATA_BYTE_LEN,
     ATTESTATION_KEY_LEN,
+    ALLOWED_QUOTE_VERSIONS,
+    ALLOWED_TEE_TYPES,
+    TEE_TYPE_SGX,
     TEE_TYPE_TDX,
 } = require('./constants');
 
@@ -56,6 +59,25 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     }
     const signedQuoteLen = quote.signedLength();
 
+    // Check quote version and TEE type
+    if (!ALLOWED_QUOTE_VERSIONS.includes(quote.header.version)) {
+        throw new Error('Unsupported DCAP quote version');
+    }
+    if (!ALLOWED_TEE_TYPES.includes(quote.header.teeType)) {
+        throw new Error('Unsupported DCAP TEE type');
+    }
+    if (quote.header.teeType == TEE_TYPE_SGX && quote.header.version != 3) {
+        throw new Error('SGX TEE quote must have version 3');
+    }
+    if (quote.header.teeType == TEE_TYPE_TDX && (quote.header.version != 4 && quote.header.version != 5)) {
+        throw new Error('TDX TEE quote must have version 4 or 5');
+    }
+
+    // Check attestation key type
+    if (quote.header.attestationKeyType !== ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE) {
+        throw new Error('Unsupported DCAP attestation key type');
+    }
+
     // Parse TCB info
     let tcbInfo;
     try {
@@ -64,7 +86,11 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('Failed to decode TcbInfo', { cause: e });
     }
 
-    // Check TCB info expiration
+    // Check TCB info validity window
+    const issueDate = new Date(tcbInfo.issueDate);
+    if (nowSecs < issueDate.getTime() / 1000) {
+        throw new Error('TCBInfo issue date is in the future');
+    }
     const nextUpdate = new Date(tcbInfo.nextUpdate);
     if (nowSecs > nextUpdate.getTime() / 1000) {
         throw new Error('TCBInfo expired');
@@ -119,7 +145,11 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('Failed to decode QeIdentity', { cause: e });
     }
 
-    // Check QE Identity expiration
+    // Check QE Identity validity window
+    const qeIssueDate = new Date(qeIdentity.issueDate);
+    if (nowSecs < qeIssueDate.getTime() / 1000) {
+        throw new Error('QE Identity issue date is in the future');
+    }
     const qeIdentityNextUpdate = new Date(qeIdentity.nextUpdate);
     if (nowSecs > qeIdentityNextUpdate.getTime() / 1000) {
         throw new Error('QE Identity expired');
@@ -154,14 +184,10 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('Signature is invalid for qe_identity');
     }
 
-    // Check quote version
-    if (![3, 4, 5].includes(quote.header.version)) {
-        throw new Error('Unsupported DCAP quote version');
-    }
-
-    // Check attestation key type
-    if (quote.header.attestationKeyType !== ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE) {
-        throw new Error('Unsupported DCAP attestation key type');
+    const expectedQeId = quote.header.teeType === TEE_TYPE_TDX ? 'TD_QE' : 'QE';
+    const allowedQeVersions = quote.header.teeType === TEE_TYPE_TDX ? [2, 3] : [2];
+    if (qeIdentity.id !== expectedQeId || !allowedQeVersions.includes(qeIdentity.version)) {
+        throw new Error('Unsupported QE Identity id/version for the quote TEE type');
     }
 
     // Extract auth data
@@ -282,9 +308,15 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
         throw new Error('Fmspc mismatch');
     }
 
-    // Check TDX-specific requirements
-    if (quote.header.teeType === TEE_TYPE_TDX && (tcbInfo.version < 3 || tcbInfo.id !== 'TDX')) {
-        throw new Error('TDX quote with non-TDX TCB info in the collateral');
+    // Check TEE-specific requirements
+    if (quote.header.teeType === TEE_TYPE_TDX) {
+        if (tcbInfo.version < 3 || tcbInfo.id !== 'TDX') {
+            throw new Error('TDX quote with non-TDX TCB info in the collateral');
+        }
+    } else if (quote.header.teeType === TEE_TYPE_SGX) {
+        if (tcbInfo.version < 2 || tcbInfo.id !== 'SGX') {
+            throw new Error('SGX quote with non-SGX TCB info in the collateral');
+        }
     }
 
     // Step 8: Match Platform TCB

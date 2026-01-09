@@ -26,6 +26,26 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use webpki::types::CertificateDer;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TeeType {
+    Sgx,
+    Tdx,
+}
+
+impl TeeType {
+    fn from_u32(value: u32) -> Result<Self> {
+        match value {
+            TEE_TYPE_SGX => Ok(TeeType::Sgx),
+            TEE_TYPE_TDX => Ok(TeeType::Tdx),
+            _ => bail!("Unsupported TEE type: {value}"),
+        }
+    }
+
+    fn is_tdx(&self) -> bool {
+        matches!(self, TeeType::Tdx)
+    }
+}
+
 #[cfg(feature = "js")]
 use wasm_bindgen::prelude::*;
 
@@ -177,10 +197,16 @@ fn verify_tcb_info_signature(
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
 
-    // Check expiration
+    // Check validity window
+    let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
+        .ok()
+        .context("Failed to parse TCB Info issue date")?;
     let next_update = chrono::DateTime::parse_from_rfc3339(&tcb_info.next_update)
         .ok()
         .context("Failed to parse TCB Info next update")?;
+    if now.as_secs() < issue_date.timestamp() as u64 {
+        bail!("TCBInfo issue date is in the future");
+    }
     if now.as_secs() > next_update.timestamp() as u64 {
         bail!("TCBInfo expired");
     }
@@ -225,10 +251,16 @@ fn verify_qe_identity_signature(
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
         .context("Failed to decode QeIdentity")?;
 
-    // Check expiration
+    // Check validity window
+    let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
+        .ok()
+        .context("Failed to parse QE Identity issue date")?;
     let next_update = chrono::DateTime::parse_from_rfc3339(&qe_identity.next_update)
         .ok()
         .context("Failed to parse QE Identity next update")?;
+    if now.as_secs() < issue_date.timestamp() as u64 {
+        bail!("QE Identity issue date is in the future");
+    }
     if now.as_secs() > next_update.timestamp() as u64 {
         bail!("QE Identity expired");
     }
@@ -416,6 +448,7 @@ fn verify_isv_report_signature(
 fn match_platform_tcb(
     tcb_info: &TcbInfo,
     quote: &Quote,
+    tee_type: TeeType,
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
@@ -428,9 +461,18 @@ fn match_platform_tcb(
         bail!("Fmspc mismatch");
     }
 
-    // Verify TDX quote has TDX TCB info
-    if quote.header.tee_type == TEE_TYPE_TDX && (tcb_info.version < 3 || tcb_info.id != "TDX") {
-        bail!("TDX quote with non-TDX TCB info in the collateral");
+    // Verify TCB Info type matches quote TEE type
+    match tee_type {
+        TeeType::Tdx => {
+            if tcb_info.version < 3 || tcb_info.id != "TDX" {
+                bail!("TDX quote with non-TDX TCB info in the collateral");
+            }
+        }
+        TeeType::Sgx => {
+            if tcb_info.version < 2 || tcb_info.id != "SGX" {
+                bail!("SGX quote with non-SGX TCB info in the collateral");
+            }
+        }
     }
 
     // Find matching TCB level
@@ -448,7 +490,7 @@ fn match_platform_tcb(
         }
 
         // For TDX, also check TDX components
-        if quote.header.tee_type == TEE_TYPE_TDX {
+        if tee_type.is_tdx() {
             let td_report = quote
                 .report
                 .as_td10()
@@ -509,8 +551,21 @@ fn verify_impl(
     // Parse quote and validate header
     let mut quote_slice = raw_quote;
     let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
-    if ![3, 4, 5].contains(&quote.header.version) {
+    if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
         bail!("Unsupported DCAP quote version");
+    }
+    let tee_type = TeeType::from_u32(quote.header.tee_type)?;
+    match tee_type {
+        TeeType::Sgx => {
+            if quote.header.version != 3 {
+                bail!("SGX TEE quote must have version 3");
+            }
+        }
+        TeeType::Tdx => {
+            if ![4, 5].contains(&quote.header.version) {
+                bail!("TDX TEE quote must have version 4 or 5");
+            }
+        }
     }
     if quote.header.attestation_key_type != ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE {
         bail!("Unsupported DCAP attestation key type");
@@ -522,6 +577,19 @@ fn verify_impl(
 
     // Step 2: Verify QE Identity signature
     let qe_identity = verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone())?;
+    let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
+        TeeType::Sgx => ("QE", &[2]),
+        TeeType::Tdx => ("TD_QE", &[2, 3]),
+    };
+    if qe_identity.id != expected_qe_id || !allowed_qe_versions.contains(&qe_identity.version) {
+        bail!(
+            "Unsupported QE Identity id/version for the quote TEE type: {} version {} (expected {} version {:?})",
+            qe_identity.id,
+            qe_identity.version,
+            expected_qe_id,
+            allowed_qe_versions
+        );
+    }
 
     // Step 3: Verify PCK certificate chain
     let pck_result = verify_pck_cert_chain(
@@ -549,6 +617,7 @@ fn verify_impl(
     let platform_tcb_status = match_platform_tcb(
         &tcb_info,
         &quote,
+        tee_type,
         &pck_result.cpu_svn,
         pck_result.pce_svn,
         &pck_result.fmspc,

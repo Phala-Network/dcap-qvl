@@ -216,87 +216,6 @@ fn generate_base_quote(version: u16, key_type: u16, debug: bool) -> Result<Vec<u
     Ok(quote.encode())
 }
 
-fn generate_sgx_v5_quote() -> Result<Vec<u8>> {
-    // Quote v5 uses Body structure and v4 auth data
-    let header = create_sgx_header(5, 2, 0);
-    let report = create_sgx_report(false);
-
-    // Create Body for v5
-    let body = Body {
-        body_type: 1, // BODY_SGX_ENCLAVE_REPORT_TYPE
-        size: 384,    // Size of EnclaveReport
-    };
-
-    let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
-    let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
-    let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
-
-    let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
-    let pck_key_pair = load_private_key(pck_key_path)?;
-
-    let rng = SystemRandom::new();
-    let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
-    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        attestation_pkcs8.as_ref(),
-        &rng,
-    )?;
-
-    let attestation_public_key = attestation_key_pair.public_key().as_ref();
-    let mut ecdsa_attestation_key = [0u8; 64];
-    ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
-
-    let qe_auth_data = vec![0u8; 32];
-    let mut qe_hash_data = [0u8; 96];
-    qe_hash_data[0..64].copy_from_slice(&ecdsa_attestation_key);
-    qe_hash_data[64..].copy_from_slice(&qe_auth_data);
-    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
-
-    let mut qe_report_data = create_sgx_report(false);
-    qe_report_data.report_data[0..32].copy_from_slice(qe_hash.as_ref());
-    let qe_report_bytes = qe_report_data.encode();
-    let mut qe_report = [0u8; 384];
-    qe_report[..qe_report_bytes.len()].copy_from_slice(&qe_report_bytes);
-
-    let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
-
-    // Sign quote (header + body + report)
-    let mut signed_data = header.encode();
-    signed_data.extend_from_slice(&body.encode());
-    signed_data.extend_from_slice(&report.encode());
-    let ecdsa_signature = sign_data(&attestation_key_pair, &signed_data)?;
-
-    // Use v4 auth data for v5 quote
-    let qe_report_data = QEReportCertificationData {
-        qe_report,
-        qe_report_signature,
-        qe_auth_data: Data::<u16>::new(qe_auth_data.clone()),
-        certification_data: CertificationData {
-            cert_type: 5,
-            body: Data::<u32>::new(pck_chain_for_quote.into_bytes()),
-        },
-    };
-
-    let auth_data = AuthData::V4(AuthDataV4 {
-        ecdsa_signature,
-        ecdsa_attestation_key,
-        certification_data: CertificationData {
-            cert_type: 5,
-            body: Data::<u32>::new(vec![]),
-        },
-        qe_report_data,
-    });
-
-    let quote = Quote {
-        header,
-        report: Report::SgxEnclave(report),
-        auth_data,
-    };
-
-    Ok(quote.encode())
-}
-
 fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     let header = create_sgx_header(4, 2, 0x00000081); // TEE_TYPE_TDX = 0x81
     let report = create_tdx_report();
@@ -553,6 +472,27 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
     }))
 }
 
+fn update_qe_identity(
+    collateral: &mut serde_json::Value,
+    id: &str,
+    version: u8,
+) -> Result<()> {
+    if let Some(qe_str) = collateral["qe_identity"].as_str() {
+        let mut qe_identity = serde_json::from_str::<serde_json::Value>(qe_str)?;
+        qe_identity["id"] = json!(id);
+        qe_identity["version"] = json!(version);
+        let new_qe_identity = serde_json::to_string(&qe_identity)?;
+
+        let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+        let key_pair = load_private_key(key_path)?;
+        let qe_identity_signature = sign_data(&key_pair, new_qe_identity.as_bytes())?;
+
+        collateral["qe_identity"] = json!(new_qe_identity);
+        collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+    }
+    Ok(())
+}
+
 fn create_sample_directory(name: &str) -> Result<PathBuf> {
     let dir = Path::new(SAMPLES_DIR).join(name);
     fs::create_dir_all(&dir)?;
@@ -620,10 +560,10 @@ fn main() -> Result<()> {
     });
 
     samples.push(TestSample {
-        name: "valid_sgx_v4".to_string(),
-        description: "Valid SGX quote v4".to_string(),
-        should_succeed: true,
-        expected_error: None,
+        name: "invalid_sgx_v4".to_string(),
+        description: "Invalid SGX quote v4 (v4/v5 are TDX only)".to_string(),
+        should_succeed: false,
+        expected_error: Some("SGX TEE quote must have version 3".to_string()),
         quote_generator: Box::new(|| generate_base_quote(4, 2, false)),
         collateral_modifier: None,
     });
@@ -669,17 +609,9 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
-    });
-
-    samples.push(TestSample {
-        name: "valid_sgx_v5".to_string(),
-        description: "Valid SGX quote v5 (uses v4 auth data)".to_string(),
-        should_succeed: true,
-        expected_error: None,
-        quote_generator: Box::new(generate_sgx_v5_quote),
-        collateral_modifier: None,
     });
 
     samples.push(TestSample {
@@ -718,6 +650,49 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_qe_identity_id_mismatch".to_string(),
+        description: "TDX quote with SGX QE Identity".to_string(),
+        should_succeed: false,
+        expected_error: Some("Unsupported QE Identity id/version for the quote TEE type".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Ensure TDX TCB info has TDX components
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    tcb["version"] = json!(3);
+                    tcb["id"] = json!("TDX");
+                    if let Some(tcb_levels) = tcb["tcbLevels"].as_array_mut() {
+                        for level in tcb_levels.iter_mut() {
+                            if let Some(tcb_obj) = level["tcb"].as_object_mut() {
+                                tcb_obj.insert(
+                                    "tdxtcbcomponents".to_string(),
+                                    json!([
+                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
+                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
+                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
+                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
+                                    ]),
+                                );
+                            }
+                        }
+                    }
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+
+            // Force QE identity to SGX QE for a TDX quote
+            update_qe_identity(collateral, "QE", 2)?;
             Ok(())
         })),
     });
@@ -832,6 +807,7 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
     });
@@ -933,6 +909,7 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
     });
@@ -1033,6 +1010,7 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
     });
@@ -1133,6 +1111,7 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
     });
@@ -1233,6 +1212,7 @@ fn main() -> Result<()> {
                     collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
                 }
             }
+            update_qe_identity(collateral, "TD_QE", 2)?;
             Ok(())
         })),
     });
@@ -1245,15 +1225,6 @@ fn main() -> Result<()> {
         should_succeed: false,
         expected_error: Some("Debug mode is enabled".to_string()),
         quote_generator: Box::new(|| generate_base_quote(3, 2, true)),
-        collateral_modifier: None,
-    });
-
-    samples.push(TestSample {
-        name: "debug_sgx_v4".to_string(),
-        description: "SGX v4 in debug mode".to_string(),
-        should_succeed: false,
-        expected_error: Some("Debug mode is enabled".to_string()),
-        quote_generator: Box::new(|| generate_base_quote(4, 2, true)),
         collateral_modifier: None,
     });
 
@@ -1328,6 +1299,52 @@ fn main() -> Result<()> {
                 "tcbLevels": []
             });
             collateral["tcb_info"] = json!(serde_json::to_string(&tcb_info)?);
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "tcb_issue_date_future".to_string(),
+        description: "TCB info issue date in the future".to_string(),
+        should_succeed: false,
+        expected_error: Some("TCBInfo issue date is in the future".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    tcb["issueDate"] = json!("2999-01-01T00:00:00Z");
+                    tcb["nextUpdate"] = json!("2999-12-31T23:59:59Z");
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "sgx_tcb_id_mismatch".to_string(),
+        description: "SGX quote with non-SGX TCB info".to_string(),
+        should_succeed: false,
+        expected_error: Some("SGX quote with non-SGX TCB info in the collateral".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    tcb["id"] = json!("TDX");
+                    tcb["version"] = json!(3);
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
             Ok(())
         })),
     });
@@ -1669,6 +1686,44 @@ fn main() -> Result<()> {
             let qe_identity_json = serde_json::to_string(&qe_identity)?;
 
             // Sign with valid key
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "qe_identity_issue_date_future".to_string(),
+        description: "QE Identity issue date in the future".to_string(),
+        should_succeed: false,
+        expected_error: Some("QE Identity issue date is in the future".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2999-01-01T00:00:00Z",
+                "nextUpdate": "2999-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "00000000000000000000000000000000",
+                "attributesMask": "00000000000000000000000000000000",
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
             let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
             let key_pair = load_private_key(key_path)?;
             let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
