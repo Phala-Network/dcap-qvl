@@ -16,7 +16,6 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
-    tcb_info::TcbStatus,
     utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
 };
 use crate::{
@@ -70,7 +69,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct VerifiedReport {
-    pub status: TcbStatus,
+    pub status: String,
     pub advisory_ids: Vec<String>,
     pub report: Report,
     #[serde(with = "serde_bytes")]
@@ -633,7 +632,7 @@ fn verify_impl(
     validate_attrs(&quote.report)?;
 
     Ok(VerifiedReport {
-        status: final_status.status,
+        status: final_status.status.to_string(),
         advisory_ids: final_status.advisory_ids,
         report: quote.report,
         ppid: pck_result.ppid,
@@ -804,8 +803,8 @@ fn match_qe_tcb_level(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::tcb_info::TcbStatus::*;
     use hex_literal::hex;
-    use TcbStatus::*;
 
     fn make_test_qe_report() -> EnclaveReport {
         EnclaveReport {

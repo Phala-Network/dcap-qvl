@@ -7,7 +7,6 @@ use serde_json;
 use crate::{
     collateral::get_collateral_for_fmspc,
     quote::Quote,
-    tcb_info::TcbStatus,
     verify::{verify, VerifiedReport},
     QuoteCollateralV3,
 };
@@ -116,15 +115,7 @@ pub struct PyVerifiedReport {
 impl PyVerifiedReport {
     #[getter]
     fn status(&self) -> &str {
-        match self.inner.status {
-            TcbStatus::UpToDate => "UpToDate",
-            TcbStatus::OutOfDateConfigurationNeeded => "OutOfDateConfigurationNeeded",
-            TcbStatus::OutOfDate => "OutOfDate",
-            TcbStatus::ConfigurationAndSWHardeningNeeded => "ConfigurationAndSWHardeningNeeded",
-            TcbStatus::ConfigurationNeeded => "ConfigurationNeeded",
-            TcbStatus::SWHardeningNeeded => "SWHardeningNeeded",
-            TcbStatus::Revoked => "Revoked",
-        }
+        &self.inner.status
     }
 
     #[getter]
