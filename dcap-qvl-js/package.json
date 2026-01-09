@@ -1,6 +1,6 @@
 {
   "name": "@phala/dcap-qvl",
-  "version": "0.4.1",
+  "version": "0.3.7",
   "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
   "type": "commonjs",
   "main": "src/index.js",
