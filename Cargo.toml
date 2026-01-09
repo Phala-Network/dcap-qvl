@@ -57,6 +57,7 @@ serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 pyo3-async-runtimes = { version = "0.25", optional = true, features = ["tokio-runtime"] }
 tokio = { version = "1.49.0", optional = true, features = ["full"] }
+derive_more = { version = "2.1.1", features = ["display"] }
 
 [dependencies.dcap-qvl-webpki]
 version = "0.103.3"

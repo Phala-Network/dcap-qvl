@@ -1,5 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "borsh_schema")]
@@ -56,7 +57,10 @@ pub struct TcbComponents {
     pub svn: u8,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, Display,
+)]
+#[display("{_variant}")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub enum TcbStatus {
