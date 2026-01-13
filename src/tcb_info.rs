@@ -86,7 +86,11 @@ impl TcbStatus {
         }
     }
 
-    pub fn is_valid(&self) -> bool {
+    /// Returns true if the TCB status is acceptable to let the caller decide
+    /// whether to accept the quote or not.
+    ///
+    /// Currently, `Revoked` status is considered invalid and will cause the verification to fail.
+    pub(crate) fn is_valid(&self) -> bool {
         match self {
             Self::UpToDate => true,
             Self::SWHardeningNeeded => true,
