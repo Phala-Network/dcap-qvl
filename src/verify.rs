@@ -74,6 +74,8 @@ pub struct VerifiedReport {
     pub report: Report,
     #[serde(with = "serde_bytes")]
     pub ppid: Vec<u8>,
+    pub qe_status: TcbStatusWithAdvisory,
+    pub platform_status: TcbStatusWithAdvisory,
 }
 
 /// Quote verifier with configurable root certificate
@@ -607,13 +609,13 @@ fn verify_impl(
     verify_qe_report_data(&qe_report, &auth_data)?;
 
     // Step 6: Verify QE Report policy
-    let qe_tcb_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
+    let qe_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
 
     // Step 7: Verify ISV Report signature
     verify_isv_report_signature(raw_quote, &quote, &auth_data)?;
 
     // Step 8: Match Platform TCB
-    let platform_tcb_status = match_platform_tcb(
+    let platform_status = match_platform_tcb(
         &tcb_info,
         &quote,
         tee_type,
@@ -623,7 +625,7 @@ fn verify_impl(
     )?;
 
     // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
-    let final_status = platform_tcb_status.merge(&qe_tcb_status);
+    let final_status = platform_status.clone().merge(&qe_status);
     if !final_status.status.is_valid() {
         bail!("TCB status is invalid: {:?}", final_status.status);
     }
@@ -636,6 +638,8 @@ fn verify_impl(
         advisory_ids: final_status.advisory_ids,
         report: quote.report,
         ppid: pck_result.ppid,
+        qe_status,
+        platform_status,
     })
 }
 

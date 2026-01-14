@@ -107,7 +107,9 @@ impl TcbStatus {
 ///
 /// This is the result of matching a TCB level, used by both
 /// platform TCB matching and QE Identity verification.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct TcbStatusWithAdvisory {
     pub status: TcbStatus,
     pub advisory_ids: Vec<String>,
