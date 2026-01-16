@@ -2,7 +2,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use anyhow::{anyhow, bail, Context, Result};
-use scale::{Decode, Input};
+use scale::{Decode, Encode, Input, Output};
 use serde::{Deserialize, Serialize};
 use x509_cert::Certificate;
 
@@ -22,6 +22,15 @@ use crate::{
 pub struct Data<T> {
     pub data: Vec<u8>,
     _marker: core::marker::PhantomData<T>,
+}
+
+impl<T> Data<T> {
+    pub fn new(data: Vec<u8>) -> Self {
+        Self {
+            data,
+            _marker: core::marker::PhantomData,
+        }
+    }
 }
 
 impl<T> Serialize for Data<T> {
@@ -52,8 +61,24 @@ impl<T: Decode + Into<u64>> Decode for Data<T> {
     }
 }
 
+impl Encode for Data<u16> {
+    fn encode_to<O: Output + ?Sized>(&self, output: &mut O) {
+        let len = self.data.len() as u16;
+        len.encode_to(output);
+        output.write(&self.data);
+    }
+}
+
+impl Encode for Data<u32> {
+    fn encode_to<O: Output + ?Sized>(&self, output: &mut O) {
+        let len = self.data.len() as u32;
+        len.encode_to(output);
+        output.write(&self.data);
+    }
+}
+
 #[derive(
-    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+    Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -75,14 +100,14 @@ impl Header {
     }
 }
 
-#[derive(Decode, Debug)]
+#[derive(Decode, Encode, Debug)]
 pub struct Body {
     pub body_type: u16,
     pub size: u32,
 }
 
 #[derive(
-    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+    Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -200,7 +225,7 @@ impl TDAttributes {
 }
 
 #[derive(
-    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+    Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -238,7 +263,7 @@ pub struct TDReport10 {
 }
 
 #[derive(
-    Decode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+    Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -250,7 +275,7 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
-#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Decode, Encode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct CertificationData {
@@ -268,7 +293,9 @@ impl core::fmt::Debug for CertificationData {
     }
 }
 
-#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(
+    Decode, Encode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QEReportCertificationData {
@@ -280,7 +307,9 @@ pub struct QEReportCertificationData {
     pub certification_data: CertificationData,
 }
 
-#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(
+    Decode, Encode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct AuthDataV3 {
@@ -337,7 +366,27 @@ impl Decode for AuthDataV4 {
     }
 }
 
-#[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+impl Encode for AuthDataV4 {
+    fn encode_to<O: Output + ?Sized>(&self, output: &mut O) {
+        self.ecdsa_signature.encode_to(output);
+        self.ecdsa_attestation_key.encode_to(output);
+
+        // Encode qe_report_data into certification_data body
+        let mut qe_data_bytes = Vec::new();
+        self.qe_report_data.encode_to(&mut qe_data_bytes);
+
+        let cert_data = CertificationData {
+            cert_type: self.certification_data.cert_type,
+            body: Data {
+                data: qe_data_bytes,
+                _marker: core::marker::PhantomData,
+            },
+        };
+        cert_data.encode_to(output);
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 pub enum AuthData {
     V3(AuthDataV3),
@@ -378,6 +427,15 @@ impl AuthData {
         match self {
             AuthData::V3(data) => data,
             AuthData::V4(data) => data.into_v3(),
+        }
+    }
+}
+
+impl Encode for AuthData {
+    fn encode_to<O: Output + ?Sized>(&self, output: &mut O) {
+        match self {
+            AuthData::V3(data) => data.encode_to(output),
+            AuthData::V4(data) => data.encode_to(output),
         }
     }
 }
@@ -480,12 +538,58 @@ impl Decode for Quote {
             _ => return Err(scale::Error::from("Unsupported quote version")),
         }
         let data = Data::<u32>::decode(input)?;
-        let auth_data = decode_auth_data(header.version, &mut &data.data[..])?;
+        // Quote v5 uses v4 auth data format
+        let auth_version = if header.version == 5 {
+            4
+        } else {
+            header.version
+        };
+        let auth_data = decode_auth_data(auth_version, &mut &data.data[..])?;
         Ok(Quote {
             header,
             report,
             auth_data,
         })
+    }
+}
+
+impl Encode for Quote {
+    fn encode_to<O: Output + ?Sized>(&self, output: &mut O) {
+        // Encode header
+        self.header.encode_to(output);
+
+        // Encode body for version 5
+        if self.header.version == 5 {
+            let body = match &self.report {
+                Report::SgxEnclave(_) => Body {
+                    body_type: BODY_SGX_ENCLAVE_REPORT_TYPE,
+                    size: ENCLAVE_REPORT_BYTE_LEN as u32,
+                },
+                Report::TD10(_) => Body {
+                    body_type: BODY_TD_REPORT10_TYPE,
+                    size: TD_REPORT10_BYTE_LEN as u32,
+                },
+                Report::TD15(_) => Body {
+                    body_type: BODY_TD_REPORT15_TYPE,
+                    size: TD_REPORT15_BYTE_LEN as u32,
+                },
+            };
+            body.encode_to(output);
+        }
+
+        // Encode report
+        match &self.report {
+            Report::SgxEnclave(report) => report.encode_to(output),
+            Report::TD10(report) => report.encode_to(output),
+            Report::TD15(report) => report.encode_to(output),
+        }
+
+        // Encode auth data with length prefix
+        let mut auth_data_bytes = Vec::new();
+        self.auth_data.encode_to(&mut auth_data_bytes);
+        let auth_data_len = auth_data_bytes.len() as u32;
+        auth_data_len.encode_to(output);
+        output.write(&auth_data_bytes);
     }
 }
 
@@ -547,9 +651,95 @@ impl Quote {
             Report::TD10(_) => HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN,
             Report::TD15(_) => HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN,
         };
+        #[allow(clippy::arithmetic_side_effects)]
         if self.header.version == 5 {
             len += BODY_BYTE_SIZE;
         }
         len
     }
+
+    /// Get the inner certification data type.
+    /// For V3 quotes: returns the cert_type directly.
+    /// For V4 quotes with cert_type 6: returns the inner cert_type from qe_report_data.
+    pub fn inner_cert_type(&self) -> u16 {
+        match &self.auth_data {
+            AuthData::V3(data) => data.certification_data.cert_type,
+            AuthData::V4(data) => data.qe_report_data.certification_data.cert_type,
+        }
+    }
+
+    /// Get the inner certification data body.
+    pub fn inner_cert_data(&self) -> &[u8] {
+        match &self.auth_data {
+            AuthData::V3(data) => &data.certification_data.body.data,
+            AuthData::V4(data) => &data.qe_report_data.certification_data.body.data,
+        }
+    }
+
+    /// Get the QE report bytes.
+    pub fn qe_report(&self) -> &[u8; ENCLAVE_REPORT_BYTE_LEN] {
+        match &self.auth_data {
+            AuthData::V3(data) => &data.qe_report,
+            AuthData::V4(data) => &data.qe_report_data.qe_report,
+        }
+    }
+
+    /// Get the QE ID from the quote header.
+    pub fn qeid(&self) -> &[u8] {
+        &self.header.user_data[..16]
+    }
+
+    /// For cert_type 3 (encrypted PPID), extract the parameters needed to fetch PCK certificate.
+    /// Returns (encrypted_ppid, cpusvn, pcesvn, pceid).
+    pub fn encrypted_ppid_params(&self) -> Result<EncryptedPpidParams> {
+        // The cert body for encrypted PPID contains:
+        // - encrypted_ppid (variable length: 256 bytes for RSA-2048, 384 bytes for RSA-3072)
+        // - cpusvn (16 bytes)
+        // - pcesvn (2 bytes, little endian)
+        // - pceid (2 bytes, little endian)
+        // Total trailer: 20 bytes
+        #[derive(Decode)]
+        struct EncPpidDecoder<const N: usize> {
+            encrypted_ppid: [u8; N],
+            cpusvn: CpuSvn,
+            pcesvn: Svn,
+            pceid: [u8; 2],
+        }
+        impl<const N: usize> EncPpidDecoder<N> {
+            fn into_params(self) -> EncryptedPpidParams {
+                EncryptedPpidParams {
+                    encrypted_ppid: self.encrypted_ppid.to_vec(),
+                    cpusvn: self.cpusvn,
+                    pcesvn: self.pcesvn,
+                    pceid: self.pceid,
+                }
+            }
+        }
+
+        let mut cert_body = self.inner_cert_data();
+        let params = match self.inner_cert_type() {
+            PCK_ID_ENCRYPTED_PPID_2048 => EncPpidDecoder::<256>::decode(&mut cert_body)
+                .context("Failed to decode ENCRYPTED_PPID_2048")?
+                .into_params(),
+            PCK_ID_ENCRYPTED_PPID_3072 => EncPpidDecoder::<384>::decode(&mut cert_body)
+                .context("Failed to decode ENCRYPTED_PPID_3072")?
+                .into_params(),
+            other => bail!("encrypted_ppid_params() requires cert_type 2 or 3, got {other}"),
+        };
+        Ok(params)
+    }
+}
+
+/// Parameters extracted from a quote with cert_type 2/3 (encrypted PPID).
+/// Used to fetch PCK certificate from PCCS.
+#[derive(Debug, Clone)]
+pub struct EncryptedPpidParams {
+    /// The encrypted PPID (256 bytes for RSA-2048, 384 bytes for RSA-3072).
+    pub encrypted_ppid: Vec<u8>,
+    /// CPU SVN from certification data trailer (16 bytes).
+    pub cpusvn: [u8; 16],
+    /// PCE SVN from certification data trailer.
+    pub pcesvn: u16,
+    /// PCE ID from certification data trailer (2 bytes).
+    pub pceid: [u8; 2],
 }

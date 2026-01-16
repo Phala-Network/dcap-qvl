@@ -1,0 +1,55 @@
+{
+  "name": "@phala/dcap-qvl",
+  "version": "0.3.7",
+  "description": "Pure JavaScript implementation of DCAP Quote Verification Library",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "test_case": "./test_case.js"
+  },
+  "files": [
+    "src/**/*.js",
+    "src/**/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test command specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Phala-Network/dcap-qvl",
+    "directory": "dcap-qvl-js"
+  },
+  "keywords": [
+    "dcap",
+    "sgx",
+    "tdx",
+    "attestation",
+    "quote",
+    "verification",
+    "browser",
+    "isomorphic",
+    "universal"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "browser": {
+    "node-fetch": false,
+    "crypto": false
+  },
+  "dependencies": {
+    "@peculiar/asn1-schema": "^2.3.13",
+    "@peculiar/asn1-x509": "^2.3.13",
+    "asn1.js": "^5.4.1",
+    "bn.js": "^5.2.2",
+    "buffer": "^6.0.3",
+    "elliptic": "^6.6.1",
+    "hash.js": "^1.1.7",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

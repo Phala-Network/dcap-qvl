@@ -1,6 +1,6 @@
 [package]
 name = "dcap-qvl"
-version = "0.3.4"
+version = "0.3.8"
 edition = "2021"
 license = "MIT"
 description = "This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust."
@@ -12,7 +12,7 @@ borsh = { version = "1.5.7", default-features = false, features = [
     "derive",
 ], optional = true }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
-serde = { version = "1.0.226", default-features = false, features = ["derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = [
     "derive",
@@ -48,7 +48,7 @@ reqwest = { version = "0.12.23", optional = true, default-features = false, feat
     "hickory-dns",
 ] }
 urlencoding = { version = "2", optional = true }
-serde_json = { version = "1.0.145", optional = true, features = [
+serde_json = { version = "1.0.148", optional = true, features = [
     "preserve_order",
 ] }
 tracing = { version = "0.1", optional = true }
@@ -71,10 +71,11 @@ pyo3-async-runtimes = { version = "0.25", optional = true, features = [
 tokio = { version = "1.47.1", optional = true, features = ["full"] }
 
 [dev-dependencies]
-insta = "1.43.2"
-reqwest = "0.12.23"
-serde_json = "1.0.145"
-tokio = { version = "1.47.1", features = ["full"] }
+hex-literal = "1.1.0"
+insta = "1.46.0"
+reqwest = "0.12.24"
+serde_json = "1.0.148"
+tokio = { version = "1.49.0", features = ["full"] }
 
 [lib]
 name = "dcap_qvl"
@@ -106,3 +107,9 @@ js = [
 ]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]
 contract = ["getrandom"]
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"

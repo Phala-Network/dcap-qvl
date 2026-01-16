@@ -27,7 +27,7 @@ jobs:
       release-id: ${{ steps.create-release.outputs.id }}
       upload-url: ${{ steps.create-release.outputs.upload_url }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -116,7 +116,7 @@ jobs:
             artifact-name: dcap-qvl-macos-aarch64
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -147,7 +147,7 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

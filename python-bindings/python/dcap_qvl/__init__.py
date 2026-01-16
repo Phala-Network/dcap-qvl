@@ -16,43 +16,27 @@ Main functions:
 """
 
 import time
-import json
-from typing import Optional, Union
+from importlib.metadata import version
+from typing import Optional
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
-from .dcap_qvl import (
+from ._dcap_qvl import (
     PyQuoteCollateralV3 as QuoteCollateralV3,
     PyVerifiedReport as VerifiedReport,
     PyQuote as Quote,
     py_verify as verify,
+    py_verify_with_root_ca as verify_with_root_ca,
     parse_quote,
     get_collateral_for_fmspc,
 )
 
-# Default Intel PCS URL
-PCS_URL = "https://api.trustedservices.intel.com"
+# Default PCCS URL (Phala Network's PCCS server - recommended)
+PHALA_PCCS_URL = "https://pccs.phala.network"
 
+# Intel's official PCS URL
+INTEL_PCS_URL = "https://api.trustedservices.intel.com"
 
-# Note: These functions are now implemented in Rust and imported above
-# The manual parsing logic has been replaced with proper Rust-based parsing
-
-
-def _make_pcs_request(url: str) -> bytes:
-    """Make HTTP request to PCS endpoint."""
-    if requests is None:
-        raise ImportError(
-            "requests library is required for collateral fetching. Install with: pip install requests")
-
-    try:
-        response = requests.get(url, timeout=30, verify=False)
-        response.raise_for_status()
-        return response.content
-    except requests.RequestException as e:
-        raise RuntimeError(f"Failed to fetch from {url}: {e}")
+# Backward compatibility alias
+PCS_URL = INTEL_PCS_URL
 
 
 async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
@@ -68,7 +52,6 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
     Raises:
         ValueError: If quote is invalid or FMSPC cannot be extracted
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
     if not isinstance(raw_quote, (bytes, bytearray)):
         raise TypeError("raw_quote must be bytes")
@@ -83,6 +66,10 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
 async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
     """Get collateral from Intel PCS.
 
+    Use this function to explicitly fetch collateral from Intel's
+    Provisioning Certification Service. For most use cases,
+    use get_collateral() with PHALA_PCCS_URL instead.
+
     Args:
         raw_quote: Raw quote bytes
 
@@ -92,17 +79,18 @@ async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
     Raises:
         ValueError: If quote is invalid or FMSPC cannot be extracted
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
-    return await get_collateral(PCS_URL, raw_quote)
+    return await get_collateral(INTEL_PCS_URL, raw_quote)
 
 
-async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = None) -> VerifiedReport:
+async def get_collateral_and_verify(
+    raw_quote: bytes, pccs_url: Optional[str] = None
+) -> VerifiedReport:
     """Get collateral and verify the quote.
 
     Args:
         raw_quote: Raw quote bytes
-        pccs_url: Optional PCCS URL (defaults to Intel PCS)
+        pccs_url: Optional PCCS URL (defaults to Phala PCCS)
 
     Returns:
         VerifiedReport: Verification result
@@ -110,12 +98,8 @@ async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = 
     Raises:
         ValueError: If quote is invalid or verification fails
         RuntimeError: If network request fails
-        ImportError: If requests library is not available
     """
-    # Use provided PCCS URL or default to Intel PCS
-    url = pccs_url.strip() if pccs_url else PCS_URL
-    if not url:
-        url = PCS_URL
+    url = (pccs_url or "").strip() or PHALA_PCCS_URL
 
     # Get collateral
     collateral = await get_collateral(url, raw_quote)
@@ -123,7 +107,6 @@ async def get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str] = 
     # Get current time
     now_secs = int(time.time())
 
-    print("Collateral:", collateral.to_json())
     # Verify quote
     return verify(raw_quote, collateral, now_secs)
 
@@ -133,10 +116,15 @@ __all__ = [
     "VerifiedReport",
     "Quote",
     "verify",
+    "verify_with_root_ca",
     "get_collateral",
     "get_collateral_from_pcs",
     "get_collateral_and_verify",
     "get_collateral_for_fmspc",
+    "parse_quote",
+    "PHALA_PCCS_URL",
+    "INTEL_PCS_URL",
+    "PCS_URL",
 ]
 
-__version__ = "0.3.2"
+__version__ = version("dcap-qvl")

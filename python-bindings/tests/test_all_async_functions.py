@@ -16,10 +16,11 @@ import time
 
 thisdir = os.path.dirname(os.path.abspath(__file__))
 # Add the python package to the path
-sys.path.insert(0, os.path.join(thisdir, 'python'))
+sys.path.insert(0, os.path.join(thisdir, "python"))
 
 try:
     import dcap_qvl
+
     print("✓ Successfully imported dcap_qvl")
 except ImportError as e:
     print(f"✗ Failed to import dcap_qvl: {e}")
@@ -29,15 +30,16 @@ except ImportError as e:
 
 SAMPLE_SGX_QUOTE = open(os.path.join(thisdir, "../../sample/sgx_quote"), "rb").read()
 
+
 async def test_function_availability():
     """Test that all expected async functions are available."""
     print("\n=== Testing Function Availability ===")
 
     expected_functions = [
-        'get_collateral_for_fmspc',
-        'get_collateral',
-        'get_collateral_from_pcs',
-        'get_collateral_and_verify'
+        "get_collateral_for_fmspc",
+        "get_collateral",
+        "get_collateral_from_pcs",
+        "get_collateral_and_verify",
     ]
 
     all_available = True
@@ -48,6 +50,7 @@ async def test_function_availability():
 
             # Check if function is async (coroutine function)
             import inspect
+
             if inspect.iscoroutinefunction(func):
                 print(f"  ✓ {func_name} is async")
             else:
@@ -57,7 +60,7 @@ async def test_function_availability():
             all_available = False
 
     # Check __all__ exports
-    if hasattr(dcap_qvl, '__all__'):
+    if hasattr(dcap_qvl, "__all__"):
         print(f"\n__all__ exports: {dcap_qvl.__all__}")
         for func_name in expected_functions:
             if func_name in dcap_qvl.__all__:
@@ -88,18 +91,13 @@ async def test_get_collateral_for_fmspc():
 
         start_time = time.time()
         collateral = await dcap_qvl.get_collateral_for_fmspc(
-            pccs_url=pccs_url,
-            fmspc=fmspc,
-            ca=ca,
-            for_sgx=for_sgx
+            pccs_url=pccs_url, fmspc=fmspc, ca=ca, for_sgx=for_sgx
         )
         end_time = time.time()
 
-        print(
-            f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
+        print(f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
         print(f"  Type: {type(collateral)}")
-        print(
-            f"  PCK CRL Issuer Chain length: {len(collateral.pck_crl_issuer_chain)}")
+        print(f"  PCK CRL Issuer Chain length: {len(collateral.pck_crl_issuer_chain)}")
         print(f"  Root CA CRL size: {len(collateral.root_ca_crl)} bytes")
         print(f"  PCK CRL size: {len(collateral.pck_crl)} bytes")
         print(f"  TCB Info length: {len(collateral.tcb_info)}")
@@ -141,8 +139,7 @@ async def test_get_collateral_with_quote():
         collateral = await dcap_qvl.get_collateral(pccs_url, SAMPLE_SGX_QUOTE)
         end_time = time.time()
 
-        print(
-            f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
+        print(f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
         print(f"  Type: {type(collateral)}")
 
         return collateral
@@ -166,8 +163,7 @@ async def test_get_collateral_from_pcs():
         collateral = await dcap_qvl.get_collateral_from_pcs(SAMPLE_SGX_QUOTE)
         end_time = time.time()
 
-        print(
-            f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
+        print(f"✓ Successfully retrieved collateral in {end_time - start_time:.2f}s!")
         print(f"  Type: {type(collateral)}")
 
         return collateral
@@ -191,8 +187,7 @@ async def test_get_collateral_and_verify():
         verified_report = await dcap_qvl.get_collateral_and_verify(SAMPLE_SGX_QUOTE)
         end_time = time.time()
 
-        print(
-            f"✓ Successfully verified quote in {end_time - start_time:.2f}s!")
+        print(f"✓ Successfully verified quote in {end_time - start_time:.2f}s!")
         print(f"  Type: {type(verified_report)}")
         print(f"  Status: {verified_report.status}")
         print(f"  Advisory IDs: {verified_report.advisory_ids}")
@@ -213,27 +208,37 @@ async def test_error_handling():
         {
             "name": "Invalid FMSPC",
             "func": dcap_qvl.get_collateral_for_fmspc,
-            "args": ("https://api.trustedservices.intel.com", "INVALID", "processor", True),
-            "kwargs": {}
+            "args": (
+                "https://api.trustedservices.intel.com",
+                "INVALID",
+                "processor",
+                True,
+            ),
+            "kwargs": {},
         },
         {
             "name": "Invalid URL",
             "func": dcap_qvl.get_collateral_for_fmspc,
-            "args": ("https://invalid-url-that-does-not-exist.com", "B0C06F000000", "processor", True),
-            "kwargs": {}
+            "args": (
+                "https://invalid-url-that-does-not-exist.com",
+                "B0C06F000000",
+                "processor",
+                True,
+            ),
+            "kwargs": {},
         },
         {
             "name": "Invalid quote bytes",
             "func": dcap_qvl.get_collateral,
             "args": ("https://api.trustedservices.intel.com", b"invalid_quote"),
-            "kwargs": {}
-        }
+            "kwargs": {},
+        },
     ]
 
     for test_case in test_cases:
         try:
             print(f"\nTesting {test_case['name']}...")
-            result = await test_case['func'](*test_case['args'], **test_case['kwargs'])
+            result = await test_case["func"](*test_case["args"], **test_case["kwargs"])
             print(f"⚠ Expected error but got result: {type(result)}")
         except Exception as e:
             print(f"✓ Correctly caught error: {type(e).__name__}: {e}")
@@ -256,12 +261,12 @@ async def main():
     results = {}
 
     # Test direct Rust export
-    results['get_collateral_for_fmspc'] = await test_get_collateral_for_fmspc()
+    results["get_collateral_for_fmspc"] = await test_get_collateral_for_fmspc()
 
     # Test Python wrappers
-    results['get_collateral'] = await test_get_collateral_with_quote()
-    results['get_collateral_from_pcs'] = await test_get_collateral_from_pcs()
-    results['get_collateral_and_verify'] = await test_get_collateral_and_verify()
+    results["get_collateral"] = await test_get_collateral_with_quote()
+    results["get_collateral_from_pcs"] = await test_get_collateral_from_pcs()
+    results["get_collateral_and_verify"] = await test_get_collateral_and_verify()
 
     # Test error handling
     await test_error_handling()
@@ -298,5 +303,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n✗ Unexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

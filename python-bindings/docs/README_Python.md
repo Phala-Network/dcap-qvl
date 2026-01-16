@@ -357,7 +357,7 @@ See [PYTHON_TESTING.md](PYTHON_TESTING.md) for detailed information about Python
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](../../LICENSE) for details.
 
 ## Contributing
 

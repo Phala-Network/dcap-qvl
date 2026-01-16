@@ -14,6 +14,7 @@ from typing import List, Dict, Optional
 # Ensure UTF-8 encoding on Windows
 if sys.platform == "win32":
     import codecs
+
     sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
     sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
@@ -22,45 +23,39 @@ PLATFORMS = {
     # Linux platforms (manylinux)
     "linux-x86_64": {
         "target": "x86_64-unknown-linux-gnu",
-        "platform_tag": "manylinux_2_17_x86_64"
+        "platform_tag": "manylinux_2_17_x86_64",
     },
     "linux-aarch64": {
         "target": "aarch64-unknown-linux-gnu",
-        "platform_tag": "manylinux_2_17_aarch64"
+        "platform_tag": "manylinux_2_17_aarch64",
     },
     # Linux platforms (musllinux)
     "linux-x86_64-musl": {
         "target": "x86_64-unknown-linux-musl",
-        "platform_tag": "musllinux_1_1_x86_64"
+        "platform_tag": "musllinux_1_1_x86_64",
     },
     "linux-aarch64-musl": {
         "target": "aarch64-unknown-linux-musl",
-        "platform_tag": "musllinux_1_1_aarch64"
+        "platform_tag": "musllinux_1_1_aarch64",
     },
-
     # Windows platforms
-    "windows-x64": {
-        "target": "x86_64-pc-windows-msvc",
-        "platform_tag": "win_amd64"
-    },
-    "windows-x86": {
-        "target": "i686-pc-windows-msvc",
-        "platform_tag": "win32"
-    },
-
+    "windows-x64": {"target": "x86_64-pc-windows-msvc", "platform_tag": "win_amd64"},
+    "windows-x86": {"target": "i686-pc-windows-msvc", "platform_tag": "win32"},
     # macOS platforms
     "macos-x86_64": {
         "target": "x86_64-apple-darwin",
-        "platform_tag": "macosx_10_12_x86_64"
+        "platform_tag": "macosx_10_12_x86_64",
     },
     "macos-aarch64": {
         "target": "aarch64-apple-darwin",
-        "platform_tag": "macosx_11_0_arm64"
+        "platform_tag": "macosx_11_0_arm64",
     },
 }
 
 
-def run_command(cmd: List[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+def run_command(
+    cmd: List[str], cwd: Optional[Path] = None
+) -> subprocess.CompletedProcess:
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
     if cwd:
@@ -82,7 +77,7 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None) -> subprocess.Comple
         text=True,
         encoding=encoding,
         errors="replace",  # Replace invalid characters instead of failing
-        env=env
+        env=env,
     )
 
     if result.stdout:
@@ -143,10 +138,13 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
 
     # Prepare maturin command
     cmd = [
-        "maturin", "build",
+        "maturin",
+        "build",
         "--release",
-        "--target", target,
-        "--out", str(output_dir)
+        "--target",
+        target,
+        "--out",
+        str(output_dir),
     ]
 
     # Add interpreter selection
@@ -187,35 +185,30 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Build wheels for multiple platforms")
+    parser = argparse.ArgumentParser(description="Build wheels for multiple platforms")
     parser.add_argument(
         "--platforms",
         nargs="+",
         default=["linux-x86_64"],
         choices=list(PLATFORMS.keys()),
-        help="Platforms to build for"
+        help="Platforms to build for",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("../target/wheels"),
-        help="Output directory for wheels"
+        help="Output directory for wheels",
     )
     parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Clean output directory before building"
+        "--clean", action="store_true", help="Clean output directory before building"
     )
     parser.add_argument(
-        "--install-targets",
-        action="store_true",
-        help="Install required Rust targets"
+        "--install-targets", action="store_true", help="Install required Rust targets"
     )
     parser.add_argument(
         "--zig",
         action="store_true",
-        help="Use Zig for cross-compilation (requires zig to be installed)"
+        help="Use Zig for cross-compilation (requires zig to be installed)",
     )
 
     args = parser.parse_args()
@@ -249,10 +242,10 @@ def main():
     # Summary
     print(f"\n=== Build Summary ===")
     print(
-        f"Successful builds ({len(successful_builds)}): {', '.join(successful_builds)}")
+        f"Successful builds ({len(successful_builds)}): {', '.join(successful_builds)}"
+    )
     if failed_builds:
-        print(
-            f"Failed builds ({len(failed_builds)}): {', '.join(failed_builds)}")
+        print(f"Failed builds ({len(failed_builds)}): {', '.join(failed_builds)}")
 
     print(f"\nWheels output directory: {output_dir}")
 

@@ -1,17 +1,14 @@
 """
-Type stubs for dcap_qvl Python bindings.
+Type stubs for the _dcap_qvl C extension module.
 
-This file provides type hints for the compiled Rust extension, enabling better
-IDE support, type checking with mypy, and improved developer experience.
+This file provides detailed type hints for the compiled Rust extension,
+enabling better IDE support, type checking with mypy, and improved
+developer experience.
 """
 
 from typing import List
 
-__version__: str
-__all__: List[str]
-
-
-class QuoteCollateralV3:
+class PyQuoteCollateralV3:
     """
     Represents quote collateral data required for DCAP quote verification.
 
@@ -32,7 +29,7 @@ class QuoteCollateralV3:
         qe_identity_signature: bytes,
     ) -> None:
         """
-        Create a new QuoteCollateralV3 instance.
+        Create a new PyQuoteCollateralV3 instance.
 
         Args:
             pck_crl_issuer_chain: PCK CRL issuer certificate chain (PEM format)
@@ -105,23 +102,22 @@ class QuoteCollateralV3:
         ...
 
     @staticmethod
-    def from_json(json_str: str) -> "QuoteCollateralV3":
+    def from_json(json_str: str) -> "PyQuoteCollateralV3":
         """
-        Create a QuoteCollateralV3 instance from a JSON string.
+        Create a PyQuoteCollateralV3 instance from a JSON string.
 
         Args:
             json_str: JSON string containing collateral data
 
         Returns:
-            New QuoteCollateralV3 instance
+            New PyQuoteCollateralV3 instance
 
         Raises:
             ValueError: If JSON parsing fails or data is invalid
         """
         ...
 
-
-class VerifiedReport:
+class PyVerifiedReport:
     """
     Contains the results of DCAP quote verification.
 
@@ -165,8 +161,7 @@ class VerifiedReport:
         """
         ...
 
-
-class Quote:
+class PyQuote:
     """
     Represents a parsed SGX or TDX quote.
 
@@ -175,7 +170,7 @@ class Quote:
     """
 
     @staticmethod
-    def parse(raw_quote: bytes) -> "Quote":
+    def parse(raw_quote: bytes) -> "PyQuote":
         """
         Parse a raw quote from bytes.
 
@@ -183,20 +178,10 @@ class Quote:
             raw_quote: Raw quote data as bytes (SGX or TDX format)
 
         Returns:
-            Quote instance with parsed quote data
+            PyQuote instance with parsed quote data
 
         Raises:
             ValueError: If quote parsing fails due to invalid format or corrupted data
-
-        Example:
-            >>> import dcap_qvl
-            >>>
-            >>> with open("quote.bin", "rb") as f:
-            ...     quote_data = f.read()
-            >>>
-            >>> quote = dcap_qvl.Quote.parse(quote_data)
-            >>> print(f"Quote type: {quote.quote_type()}")
-            >>> print(f"FMSPC: {quote.fmspc()}")
         """
         ...
 
@@ -212,11 +197,6 @@ class Quote:
 
         Raises:
             ValueError: If FMSPC cannot be extracted from the quote
-
-        Example:
-            >>> quote = dcap_qvl.Quote.parse(quote_data)
-            >>> fmspc = quote.fmspc()
-            >>> print(f"FMSPC: {fmspc}")  # e.g., "00606A000000"
         """
         ...
 
@@ -241,13 +221,6 @@ class Quote:
 
         Returns:
             True if the quote is TDX format, False if SGX format
-
-        Example:
-            >>> quote = dcap_qvl.Quote.parse(quote_data)
-            >>> if quote.is_tdx():
-            ...     print("This is a TDX quote")
-            ... else:
-            ...     print("This is an SGX quote")
         """
         ...
 
@@ -257,13 +230,6 @@ class Quote:
 
         Returns:
             True if the quote is SGX format, False if TDX format
-
-        Example:
-            >>> quote = dcap_qvl.Quote.parse(quote_data)
-            >>> if quote.is_sgx():
-            ...     print("This is an SGX quote")
-            ... else:
-            ...     print("This is a TDX quote")
         """
         ...
 
@@ -273,21 +239,12 @@ class Quote:
 
         Returns:
             "TDX" for TDX quotes, "SGX" for SGX quotes
-
-        Example:
-            >>> quote = dcap_qvl.Quote.parse(quote_data)
-            >>> print(f"Quote type: {quote.quote_type()}")
         """
         ...
 
-# Synchronous functions
-
-
-def verify(
-    raw_quote: bytes,
-    collateral: QuoteCollateralV3,
-    now_secs: int
-) -> VerifiedReport:
+def py_verify(
+    raw_quote: bytes, collateral: PyQuoteCollateralV3, now_secs: int
+) -> PyVerifiedReport:
     """
     Verify an SGX or TDX quote with the provided collateral data.
 
@@ -301,55 +258,71 @@ def verify(
         now_secs: Current timestamp in seconds since Unix epoch for time-based checks
 
     Returns:
-        VerifiedReport containing verification status and advisory information
+        PyVerifiedReport containing verification status and advisory information
 
     Raises:
         ValueError: If verification fails due to invalid data, expired certificates,
                    revoked keys, or other verification errors
-
-    Example:
-        >>> import dcap_qvl
-        >>> import time
-        >>>
-        >>> # Load quote and collateral data
-        >>> with open("quote.bin", "rb") as f:
-        ...     quote_data = f.read()
-        >>>
-        >>> collateral = dcap_qvl.QuoteCollateralV3.from_json(collateral_json)
-        >>> result = dcap_qvl.verify(quote_data, collateral, int(time.time()))
-        >>> print(f"Status: {result.status}")
     """
     ...
 
+def py_verify_with_root_ca(
+    raw_quote: bytes,
+    collateral: PyQuoteCollateralV3,
+    root_ca_der: bytes,
+    now_secs: int
+) -> PyVerifiedReport:
+    """
+    Verify an SGX or TDX quote with the provided collateral data and custom root CA.
 
-def parse_quote(raw_quote: bytes) -> Quote:
+    Args:
+        raw_quote: Raw quote data as bytes (SGX or TDX format)
+        collateral: Quote collateral containing certificates and attestation data
+        root_ca_der: Custom root CA certificate in DER format
+        now_secs: Current timestamp in seconds since Unix epoch for time-based checks
+
+    Returns:
+        PyVerifiedReport containing verification status and advisory information
+
+    Raises:
+        ValueError: If verification fails
+    """
+    ...
+
+def parse_quote(raw_quote: bytes) -> PyQuote:
     """
     Parse a raw quote from bytes (convenience function).
 
-    This is a convenience function that calls Quote.parse() directly.
+    This is a convenience function that calls PyQuote.parse() directly.
 
     Args:
         raw_quote: Raw quote data as bytes (SGX or TDX format)
 
     Returns:
-        Quote instance with parsed quote data
+        PyQuote instance with parsed quote data
 
     Raises:
         ValueError: If quote parsing fails due to invalid format or corrupted data
-
-    Example:
-        >>> import dcap_qvl
-        >>>
-        >>> with open("quote.bin", "rb") as f:
-        ...     quote_data = f.read()
-        >>>
-        >>> quote = dcap_qvl.parse_quote(quote_data)
-        >>> print(f"Quote type: {quote.quote_type()}")
-        >>> print(f"FMSPC: {quote.fmspc()}")
     """
     ...
 
+async def get_collateral_for_fmspc(
+    pccs_url: str, fmspc: str, ca: str, is_sgx: bool
+) -> PyQuoteCollateralV3:
+    """
+    Get collateral for a specific FMSPC from PCCS URL.
 
-async def get_collateral_for_fmspc(pccs_url: str, fmspc: str, ca: str, is_sgx: bool) -> QuoteCollateralV3:
-    """Get collateral for a specific FMSPC from PCCS URL."""
+    Args:
+        pccs_url: PCCS server URL
+        fmspc: FMSPC identifier as hex string
+        ca: Certificate authority identifier
+        is_sgx: True for SGX, False for TDX
+
+    Returns:
+        PyQuoteCollateralV3 with collateral data
+
+    Raises:
+        ValueError: If FMSPC is invalid
+        RuntimeError: If network request fails
+    """
     ...

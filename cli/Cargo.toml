@@ -1,6 +1,6 @@
 [package]
 name = "dcap-qvl-cli"
-version = "0.3.4"
+version = "0.3.8"
 edition = "2021"
 description = "Command line interface for Intel SGX DCAP Quote Verification Library"
 license = "Apache-2.0"
@@ -11,13 +11,31 @@ keywords = ["sgx", "dcap", "attestation", "quote", "verification"]
 name = "dcap-qvl"
 path = "src/main.rs"
 
+[[bin]]
+name = "test_case"
+path = "src/bin/test_case.rs"
+
+[[bin]]
+name = "generate_all_samples"
+path = "src/bin/generate_all_samples.rs"
+
 [dependencies]
 anyhow = "1.0.95"
+base64 = "0.22"
+chrono = "0.4"
 clap = { version = "4.5.27", features = ["derive"] }
-dcap-qvl = { version = "0.3.4", path = "../" }
+dcap-qvl = { version = "0.3.8", path = "../" }
 hex = "0.4.3"
+ring = "0.17"
+scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.137"
 tokio = { version = "1.43.0", features = ["full"] }
 x509-cert = { version = "0.2.4", default-features = false }
 der = { version = "0.7.8", default-features = false, features = ["alloc"] }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"

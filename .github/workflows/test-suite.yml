@@ -1,0 +1,62 @@
+name: Test Suite
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-suite:
+    name: Run Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq bc
+
+      - name: Install wasm-opt
+        run: |
+          wget https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz
+          tar xzf binaryen-version_123-x86_64-linux.tar.gz
+          sudo cp binaryen-version_123/bin/wasm-opt /usr/local/bin/
+          wasm-opt --version
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-wasm-pack
+
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack &> /dev/null; then
+            cargo install wasm-pack
+          else
+            echo "wasm-pack is already installed"
+          fi
+
+      - name: Run test suite
+        run: ./test_suite.sh
