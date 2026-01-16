@@ -408,12 +408,13 @@ fn check_validity(cert: &Certificate, now_secs: u64) -> Result<()> {
 
 /// Verify the certificate chain and check CRLs.
 /// The leaf certificate is first, followed by intermediate certificates.
-/// The chain is verified against the trusted root CA.
+/// The chain is verified against the provided root CA.
 pub fn verify_certificate_chain(
     leaf_cert_der: &[u8],
     intermediate_certs_der: &[Vec<u8>],
     now_secs: u64,
     crl_der: &[&[u8]],
+    root_ca_der: &[u8],
 ) -> Result<()> {
     // Parse all CRLs
     let crls: Vec<SimpleCrl> = crl_der
@@ -421,9 +422,9 @@ pub fn verify_certificate_chain(
         .filter_map(|der| SimpleCrl::from_der(der).ok())
         .collect();
 
-    // Parse the trusted root CA
+    // Parse the root CA
     let root_cert =
-        Certificate::from_der(TRUSTED_ROOT_CA_DER).context("Failed to parse trusted root CA")?;
+        Certificate::from_der(root_ca_der).context("Failed to parse root CA")?;
 
     // Build the certificate chain: leaf -> intermediates -> root
     let leaf_cert =

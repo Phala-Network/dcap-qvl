@@ -192,6 +192,7 @@ fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
     now_secs: u64,
     crls: &[&[u8]],
+    root_ca_der: &[u8],
 ) -> Result<TcbInfo> {
     // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
@@ -216,7 +217,7 @@ fn verify_tcb_info_signature(
     let [tcb_leaf, tcb_chain @ ..] = &tcb_leaf_certs[..] else {
         bail!("Certificate chain is too short for TCB Info");
     };
-    verify_certificate_chain(tcb_leaf, tcb_chain, now_secs, crls)?;
+    verify_certificate_chain(tcb_leaf, tcb_chain, now_secs, crls, root_ca_der)?;
     let tcb_asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     verify_signature_with_cert(
         tcb_leaf,
@@ -237,6 +238,7 @@ fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     now_secs: u64,
     crls: &[&[u8]],
+    root_ca_der: &[u8],
 ) -> Result<QeIdentity> {
     // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
@@ -261,7 +263,7 @@ fn verify_qe_identity_signature(
     let [qe_id_leaf, qe_id_chain @ ..] = &qe_id_certs[..] else {
         bail!("Certificate chain is too short for QE Identity");
     };
-    verify_certificate_chain(qe_id_leaf, qe_id_chain, now_secs, crls)?;
+    verify_certificate_chain(qe_id_leaf, qe_id_chain, now_secs, crls, root_ca_der)?;
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
     verify_signature_with_cert(
         qe_id_leaf,
@@ -295,6 +297,7 @@ fn verify_pck_cert_chain(
     certification_data: &crate::quote::CertificationData,
     now_secs: u64,
     crls: &[&[u8]],
+    root_ca_der: &[u8],
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
     let certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
@@ -313,7 +316,7 @@ fn verify_pck_cert_chain(
     };
 
     // Check PCK cert chain
-    verify_certificate_chain(pck_leaf, pck_chain, now_secs, crls)?;
+    verify_certificate_chain(pck_leaf, pck_chain, now_secs, crls, root_ca_der)?;
 
     // Extract PCK extensions
     let pck_ext = intel::parse_pck_extension(pck_leaf).context("Failed to parse PCK extensions")?;
@@ -509,10 +512,10 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let tcb_info = verify_tcb_info_signature(collateral, now_secs, &crls)?;
+    let tcb_info = verify_tcb_info_signature(collateral, now_secs, &crls, root_ca_der)?;
 
     // Step 2: Verify QE Identity signature
-    let qe_identity = verify_qe_identity_signature(collateral, now_secs, &crls)?;
+    let qe_identity = verify_qe_identity_signature(collateral, now_secs, &crls, root_ca_der)?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -529,7 +532,7 @@ fn verify_impl(
 
     // Step 3: Verify PCK certificate chain
     let pck_result =
-        verify_pck_cert_chain(collateral, &auth_data.certification_data, now_secs, &crls)?;
+        verify_pck_cert_chain(collateral, &auth_data.certification_data, now_secs, &crls, root_ca_der)?;
 
     // Step 4: Verify QE Report signature
     let qe_report = verify_qe_report_signature(&pck_result.pck_leaf_der, &auth_data)?;
