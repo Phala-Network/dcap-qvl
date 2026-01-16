@@ -147,6 +147,34 @@ fn is_revoked(cert: &Certificate, crl: &CertificateList) -> bool {
         .any(|revoked| revoked.serial_number.as_bytes() == serial)
 }
 
+/// Verify that a CRL was signed by the given issuer certificate
+fn verify_crl_signature(crl: &CertificateList, issuer_cert: &Certificate) -> Result<()> {
+    // Encode the TBS cert list to DER
+    let tbs_bytes = crl
+        .tbs_cert_list
+        .to_der()
+        .context("Failed to encode TBS cert list")?;
+
+    // Get the signature bytes from the CRL
+    let signature = crl.signature.raw_bytes();
+
+    // Get the issuer's public key
+    let issuer_public_key = extract_public_key(issuer_cert)?;
+
+    // Verify the signature
+    verify_ecdsa_signature(&issuer_public_key, &tbs_bytes, signature)
+        .context("CRL signature verification failed")
+}
+
+/// Verify a CRL from DER bytes against a potential issuer certificate
+/// This is a convenience wrapper that parses both and verifies the signature
+pub fn verify_crl_from_der(crl_der: &[u8], issuer_cert_der: &[u8]) -> Result<()> {
+    let crl = CertificateList::from_der(crl_der).context("Failed to parse CRL")?;
+    let issuer_cert =
+        Certificate::from_der(issuer_cert_der).context("Failed to parse issuer certificate")?;
+    verify_crl_signature(&crl, &issuer_cert)
+}
+
 /// Extract the public key bytes from a certificate's SubjectPublicKeyInfo
 fn extract_public_key(cert: &Certificate) -> Result<Vec<u8>> {
     let spki = &cert.tbs_certificate.subject_public_key_info;
