@@ -133,10 +133,7 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
 
 /// Parse DER length and return (length_value, bytes_consumed)
 fn parse_der_length(data: &[u8]) -> Result<(usize, usize)> {
-    if data.is_empty() {
-        bail!("Empty data for DER length");
-    }
-    let first = data[0];
+    let first = *data.first().context("Empty data for DER length")?;
     if first < 0x80 {
         // Short form
         Ok((first as usize, 1))
@@ -145,14 +142,20 @@ fn parse_der_length(data: &[u8]) -> Result<(usize, usize)> {
     } else {
         // Long form
         let num_bytes = (first & 0x7F) as usize;
-        if num_bytes > 4 || data.len() < 1 + num_bytes {
+        let required_len = num_bytes.checked_add(1).context("Length overflow")?;
+        if num_bytes > 4 || data.len() < required_len {
             bail!("Invalid DER length encoding");
         }
         let mut length = 0usize;
         for i in 0..num_bytes {
-            length = (length << 8) | (data[1 + i] as usize);
+            let idx = i.checked_add(1).context("Index overflow")?;
+            let byte = *data.get(idx).context("Index out of bounds")?;
+            length = length
+                .checked_shl(8)
+                .and_then(|l| l.checked_add(byte as usize))
+                .context("Length value overflow")?;
         }
-        Ok((length, 1 + num_bytes))
+        Ok((length, required_len))
     }
 }
 
@@ -160,27 +163,34 @@ fn parse_der_length(data: &[u8]) -> Result<(usize, usize)> {
 /// Returns (tbs_bytes, remaining_bytes)
 fn extract_first_sequence_element(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     // Expect SEQUENCE tag (0x30)
-    if data.is_empty() || data[0] != 0x30 {
+    if *data.first().context("Empty data")? != 0x30 {
         bail!("Expected SEQUENCE");
     }
 
     // Parse outer sequence length
-    let (_outer_len, outer_len_bytes) = parse_der_length(&data[1..])?;
-    let content_start = 1 + outer_len_bytes;
+    let (_outer_len, outer_len_bytes) = parse_der_length(data.get(1..).context("No length bytes")?)?;
+    let content_start = outer_len_bytes.checked_add(1).context("Content start overflow")?;
 
     // Parse first element (TBS)
-    let tbs_data = &data[content_start..];
-    if tbs_data.is_empty() || tbs_data[0] != 0x30 {
+    let tbs_data = data.get(content_start..).context("TBS data out of bounds")?;
+    if *tbs_data.first().context("Empty TBS data")? != 0x30 {
         bail!("Expected TBS SEQUENCE");
     }
 
-    let (tbs_len, tbs_len_bytes) = parse_der_length(&tbs_data[1..])?;
-    let tbs_total_len = 1 + tbs_len_bytes + tbs_len;
+    let (tbs_len, tbs_len_bytes) = parse_der_length(tbs_data.get(1..).context("No TBS length bytes")?)?;
+    let tbs_total_len = tbs_len_bytes
+        .checked_add(tbs_len)
+        .and_then(|s| s.checked_add(1))
+        .context("TBS total length overflow")?;
 
-    Ok((
-        tbs_data[..tbs_total_len].to_vec(),
-        content_start + tbs_total_len,
-    ))
+    let tbs_slice = tbs_data
+        .get(..tbs_total_len)
+        .context("TBS slice out of bounds")?;
+    let result_offset = content_start
+        .checked_add(tbs_total_len)
+        .context("Result offset overflow")?;
+
+    Ok((tbs_slice.to_vec(), result_offset))
 }
 
 /// A simple CRL parser that extracts just what we need
@@ -217,56 +227,93 @@ impl SimpleCrl {
         let mut revoked = Vec::new();
 
         // Skip outer SEQUENCE header
-        if tbs_bytes.is_empty() || tbs_bytes[0] != 0x30 {
+        if tbs_bytes.first().is_none_or(|&b| b != 0x30) {
             return Ok(revoked);
         }
-        let (outer_len, outer_len_bytes) = parse_der_length(&tbs_bytes[1..])?;
-        let mut pos = 1 + outer_len_bytes;
-        let end = 1 + outer_len_bytes + outer_len;
+        let (outer_len, outer_len_bytes) = parse_der_length(tbs_bytes.get(1..).context("No length")?)?;
+        let mut pos = outer_len_bytes.checked_add(1).context("Pos overflow")?;
+        let end = outer_len_bytes
+            .checked_add(1)
+            .and_then(|p| p.checked_add(outer_len))
+            .context("End overflow")?;
 
         // Skip through elements looking for a SEQUENCE that could be revokedCertificates
         while pos < end && pos < tbs_bytes.len() {
-            let tag = tbs_bytes[pos];
-            let (elem_len, len_bytes) = parse_der_length(&tbs_bytes[pos + 1..])?;
-            let elem_total = 1 + len_bytes + elem_len;
+            let tag = *tbs_bytes.get(pos).context("Tag out of bounds")?;
+            let (elem_len, len_bytes) = parse_der_length(
+                tbs_bytes
+                    .get(pos.checked_add(1).context("Pos+1 overflow")?..)
+                    .context("Elem len out of bounds")?,
+            )?;
+            let elem_total = len_bytes
+                .checked_add(elem_len)
+                .and_then(|s| s.checked_add(1))
+                .context("Elem total overflow")?;
 
             // revokedCertificates is a SEQUENCE (0x30) that contains SEQUENCEs
             if tag == 0x30 {
                 // Check if this looks like revokedCertificates
                 // Each entry starts with an INTEGER (serial number)
-                let elem_content_start = pos + 1 + len_bytes;
-                if elem_content_start < tbs_bytes.len() && tbs_bytes[elem_content_start] == 0x30 {
+                let elem_content_start = pos
+                    .checked_add(1)
+                    .and_then(|p| p.checked_add(len_bytes))
+                    .context("Content start overflow")?;
+                if elem_content_start < tbs_bytes.len()
+                    && tbs_bytes.get(elem_content_start) == Some(&0x30)
+                {
                     // This might be the revokedCertificates list
                     let mut entry_pos = elem_content_start;
-                    let entry_end = pos + elem_total;
+                    let entry_end = pos.checked_add(elem_total).context("Entry end overflow")?;
 
                     while entry_pos < entry_end && entry_pos < tbs_bytes.len() {
-                        if tbs_bytes[entry_pos] != 0x30 {
+                        if tbs_bytes.get(entry_pos) != Some(&0x30) {
                             break;
                         }
-                        let (entry_len, entry_len_bytes) =
-                            parse_der_length(&tbs_bytes[entry_pos + 1..])?;
-                        let entry_content_start = entry_pos + 1 + entry_len_bytes;
+                        let (entry_len, entry_len_bytes) = parse_der_length(
+                            tbs_bytes
+                                .get(entry_pos.checked_add(1).context("Entry pos+1 overflow")?..)
+                                .context("Entry len out of bounds")?,
+                        )?;
+                        let entry_content_start = entry_pos
+                            .checked_add(1)
+                            .and_then(|p| p.checked_add(entry_len_bytes))
+                            .context("Entry content start overflow")?;
 
                         // First element should be INTEGER (serial number)
                         if entry_content_start < tbs_bytes.len()
-                            && tbs_bytes[entry_content_start] == 0x02
+                            && tbs_bytes.get(entry_content_start) == Some(&0x02)
                         {
-                            let (serial_len, serial_len_bytes) =
-                                parse_der_length(&tbs_bytes[entry_content_start + 1..])?;
-                            let serial_start = entry_content_start + 1 + serial_len_bytes;
-                            let serial_end = serial_start + serial_len;
-                            if serial_end <= tbs_bytes.len() {
-                                revoked.push(tbs_bytes[serial_start..serial_end].to_vec());
+                            let (serial_len, serial_len_bytes) = parse_der_length(
+                                tbs_bytes
+                                    .get(
+                                        entry_content_start
+                                            .checked_add(1)
+                                            .context("Serial pos overflow")?..,
+                                    )
+                                    .context("Serial len out of bounds")?,
+                            )?;
+                            let serial_start = entry_content_start
+                                .checked_add(1)
+                                .and_then(|p| p.checked_add(serial_len_bytes))
+                                .context("Serial start overflow")?;
+                            let serial_end = serial_start
+                                .checked_add(serial_len)
+                                .context("Serial end overflow")?;
+                            if let Some(serial_slice) = tbs_bytes.get(serial_start..serial_end) {
+                                revoked.push(serial_slice.to_vec());
                             }
                         }
 
-                        entry_pos = entry_pos + 1 + entry_len_bytes + entry_len;
+                        entry_pos = entry_pos
+                            .checked_add(1)
+                            .and_then(|p| p.checked_add(entry_len_bytes))
+                            .and_then(|p| p.checked_add(entry_len))
+                            .context("Next entry pos overflow")?;
                     }
                 }
             }
 
-            pos += elem_total;
+            pos = pos.checked_add(elem_total).context("Next pos overflow")?;
         }
 
         Ok(revoked)
@@ -395,7 +442,11 @@ pub fn verify_certificate_chain(
         .collect::<Result<Vec<_>>>()?;
 
     // Verify intermediates
-    for (i, intermediate) in intermediate_certs.iter().enumerate() {
+    for (i, (intermediate, intermediate_der)) in intermediate_certs
+        .iter()
+        .zip(intermediate_certs_der.iter())
+        .enumerate()
+    {
         // Check validity
         check_validity(intermediate, now_secs)?;
 
@@ -409,13 +460,12 @@ pub fn verify_certificate_chain(
         // Verify current cert was signed by this intermediate
         verify_cert_signature(current_cert_der, intermediate)?;
 
-        current_cert_der = &intermediate_certs_der[i];
+        current_cert_der = intermediate_der;
     }
 
     // Verify the last certificate (either leaf or last intermediate) was signed by root
     // First, check if the last intermediate is the root itself or signed by root
-    if !intermediate_certs.is_empty() {
-        let last_intermediate_der = intermediate_certs_der.last().unwrap();
+    if let Some(last_intermediate_der) = intermediate_certs_der.last() {
         verify_cert_signature(last_intermediate_der, &root_cert)
             .context("Failed to verify chain against root CA")?;
     } else {

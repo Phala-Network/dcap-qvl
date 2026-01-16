@@ -15,7 +15,9 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
-    utils::{self, encode_as_der, extract_certs, verify_certificate_chain, verify_signature_with_cert},
+    utils::{
+        self, encode_as_der, extract_certs, verify_certificate_chain, verify_signature_with_cert,
+    },
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -211,13 +213,13 @@ fn verify_tcb_info_signature(
 
     // Check TCB info cert chain and signature
     let tcb_leaf_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
-    if tcb_leaf_certs.len() < 2 {
+    let [tcb_leaf, tcb_chain @ ..] = &tcb_leaf_certs[..] else {
         bail!("Certificate chain is too short for TCB Info");
-    }
-    verify_certificate_chain(&tcb_leaf_certs[0], &tcb_leaf_certs[1..], now_secs, crls)?;
+    };
+    verify_certificate_chain(tcb_leaf, tcb_chain, now_secs, crls)?;
     let tcb_asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     verify_signature_with_cert(
-        &tcb_leaf_certs[0],
+        tcb_leaf,
         collateral.tcb_info.as_bytes(),
         &tcb_asn1_signature,
     )
@@ -256,13 +258,13 @@ fn verify_qe_identity_signature(
 
     // Check QE identity cert chain and signature
     let qe_id_certs = extract_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
-    if qe_id_certs.len() < 2 {
+    let [qe_id_leaf, qe_id_chain @ ..] = &qe_id_certs[..] else {
         bail!("Certificate chain is too short for QE Identity");
-    }
-    verify_certificate_chain(&qe_id_certs[0], &qe_id_certs[1..], now_secs, crls)?;
+    };
+    verify_certificate_chain(qe_id_leaf, qe_id_chain, now_secs, crls)?;
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
     verify_signature_with_cert(
-        &qe_id_certs[0],
+        qe_id_leaf,
         collateral.qe_identity.as_bytes(),
         &qe_id_asn1_signature,
     )
@@ -306,24 +308,19 @@ fn verify_pck_cert_chain(
             .context("Failed to extract PCK certificates from quote")?
     };
 
-    if certification_certs.is_empty() {
+    let [pck_leaf, pck_chain @ ..] = &certification_certs[..] else {
         bail!("Certificate chain is empty in quote");
-    }
+    };
 
     // Check PCK cert chain
-    verify_certificate_chain(
-        &certification_certs[0],
-        &certification_certs.get(1..).unwrap_or(&[]),
-        now_secs,
-        crls,
-    )?;
+    verify_certificate_chain(pck_leaf, pck_chain, now_secs, crls)?;
 
     // Extract PCK extensions
-    let pck_ext = intel::parse_pck_extension(&certification_certs[0])
+    let pck_ext = intel::parse_pck_extension(pck_leaf)
         .context("Failed to parse PCK extensions")?;
 
     Ok(PckCertChainResult {
-        pck_leaf_der: certification_certs[0].clone(),
+        pck_leaf_der: pck_leaf.clone(),
         cpu_svn: pck_ext.cpu_svn,
         pce_svn: pck_ext.pce_svn,
         fmspc: pck_ext.fmspc,
@@ -342,12 +339,8 @@ fn verify_qe_report_signature(
 ) -> Result<EnclaveReport> {
     // Check QE signature
     let asn1_signature = encode_as_der(&auth_data.qe_report_signature)?;
-    verify_signature_with_cert(
-        pck_leaf_der,
-        &auth_data.qe_report,
-        &asn1_signature,
-    )
-    .context("Signature is invalid for qe_report in quote")?;
+    verify_signature_with_cert(pck_leaf_der, &auth_data.qe_report, &asn1_signature)
+        .context("Signature is invalid for qe_report in quote")?;
 
     // Decode QE report
     let mut qe_report_slice = auth_data.qe_report.as_slice();
@@ -369,7 +362,7 @@ fn verify_qe_report_data(
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = Sha256::digest(&qe_hash_data);
+    let qe_hash = Sha256::digest(qe_hash_data);
     if qe_hash[..] != qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
     }
@@ -536,12 +529,8 @@ fn verify_impl(
     }
 
     // Step 3: Verify PCK certificate chain
-    let pck_result = verify_pck_cert_chain(
-        collateral,
-        &auth_data.certification_data,
-        now_secs,
-        &crls,
-    )?;
+    let pck_result =
+        verify_pck_cert_chain(collateral, &auth_data.certification_data, now_secs, &crls)?;
 
     // Step 4: Verify QE Report signature
     let qe_report = verify_qe_report_signature(&pck_result.pck_leaf_der, &auth_data)?;
@@ -554,7 +543,7 @@ fn verify_impl(
 
     // Step 7: Verify ISV Report signature
     // Check signature from auth data
-    let signed_quote_len = raw_quote.len() - auth_data.ecdsa_signature.len();
+    let signed_quote_len = quote.signed_length();
     let mut pub_key = [0x04u8; 65];
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
     let verifying_key = VerifyingKey::from_sec1_bytes(&pub_key)
@@ -565,7 +554,7 @@ fn verify_impl(
         .verify(
             raw_quote
                 .get(..signed_quote_len)
-                .ok_or(anyhow!("Failed to get signed quote"))?,
+                .ok_or_else(|| anyhow!("Failed to get signed quote"))?,
             &signature,
         )
         .map_err(|_| anyhow!("ISV enclave report signature is invalid"))?;
