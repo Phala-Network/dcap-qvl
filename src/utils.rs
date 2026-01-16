@@ -168,16 +168,22 @@ fn extract_first_sequence_element(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     }
 
     // Parse outer sequence length
-    let (_outer_len, outer_len_bytes) = parse_der_length(data.get(1..).context("No length bytes")?)?;
-    let content_start = outer_len_bytes.checked_add(1).context("Content start overflow")?;
+    let (_outer_len, outer_len_bytes) =
+        parse_der_length(data.get(1..).context("No length bytes")?)?;
+    let content_start = outer_len_bytes
+        .checked_add(1)
+        .context("Content start overflow")?;
 
     // Parse first element (TBS)
-    let tbs_data = data.get(content_start..).context("TBS data out of bounds")?;
+    let tbs_data = data
+        .get(content_start..)
+        .context("TBS data out of bounds")?;
     if *tbs_data.first().context("Empty TBS data")? != 0x30 {
         bail!("Expected TBS SEQUENCE");
     }
 
-    let (tbs_len, tbs_len_bytes) = parse_der_length(tbs_data.get(1..).context("No TBS length bytes")?)?;
+    let (tbs_len, tbs_len_bytes) =
+        parse_der_length(tbs_data.get(1..).context("No TBS length bytes")?)?;
     let tbs_total_len = tbs_len_bytes
         .checked_add(tbs_len)
         .and_then(|s| s.checked_add(1))
@@ -230,7 +236,8 @@ impl SimpleCrl {
         if tbs_bytes.first().is_none_or(|&b| b != 0x30) {
             return Ok(revoked);
         }
-        let (outer_len, outer_len_bytes) = parse_der_length(tbs_bytes.get(1..).context("No length")?)?;
+        let (outer_len, outer_len_bytes) =
+            parse_der_length(tbs_bytes.get(1..).context("No length")?)?;
         let mut pos = outer_len_bytes.checked_add(1).context("Pos overflow")?;
         let end = outer_len_bytes
             .checked_add(1)

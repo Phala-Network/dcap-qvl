@@ -316,8 +316,7 @@ fn verify_pck_cert_chain(
     verify_certificate_chain(pck_leaf, pck_chain, now_secs, crls)?;
 
     // Extract PCK extensions
-    let pck_ext = intel::parse_pck_extension(pck_leaf)
-        .context("Failed to parse PCK extensions")?;
+    let pck_ext = intel::parse_pck_extension(pck_leaf).context("Failed to parse PCK extensions")?;
 
     Ok(PckCertChainResult {
         pck_leaf_der: pck_leaf.clone(),
