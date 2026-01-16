@@ -4,8 +4,9 @@ use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
-use der::Decode;
+use der::{Decode, Encode};
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+use x509_cert::crl::CertificateList;
 use x509_cert::Certificate;
 
 use crate::{constants::*, oids};
@@ -131,204 +132,19 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     Ok(writer.finish().context("Failed to finish writer")?.to_vec())
 }
 
-/// Parse DER length and return (length_value, bytes_consumed)
-fn parse_der_length(data: &[u8]) -> Result<(usize, usize)> {
-    let first = *data.first().context("Empty data for DER length")?;
-    if first < 0x80 {
-        // Short form
-        Ok((first as usize, 1))
-    } else if first == 0x80 {
-        bail!("Indefinite length not supported");
-    } else {
-        // Long form
-        let num_bytes = (first & 0x7F) as usize;
-        let required_len = num_bytes.checked_add(1).context("Length overflow")?;
-        if num_bytes > 4 || data.len() < required_len {
-            bail!("Invalid DER length encoding");
-        }
-        let mut length = 0usize;
-        for i in 0..num_bytes {
-            let idx = i.checked_add(1).context("Index overflow")?;
-            let byte = *data.get(idx).context("Index out of bounds")?;
-            length = length
-                .checked_shl(8)
-                .and_then(|l| l.checked_add(byte as usize))
-                .context("Length value overflow")?;
-        }
-        Ok((length, required_len))
-    }
-}
+/// Check if a certificate serial number is in the CRL
+fn is_revoked(cert: &Certificate, crl: &CertificateList) -> bool {
+    let serial = cert.tbs_certificate.serial_number.as_bytes();
 
-/// Extract the first element (TBS) from a DER SEQUENCE
-/// Returns (tbs_bytes, remaining_bytes)
-fn extract_first_sequence_element(data: &[u8]) -> Result<(Vec<u8>, usize)> {
-    // Expect SEQUENCE tag (0x30)
-    if *data.first().context("Empty data")? != 0x30 {
-        bail!("Expected SEQUENCE");
-    }
+    // Check if the CRL has any revoked certificates
+    let Some(revoked_certs) = crl.tbs_cert_list.revoked_certificates.as_ref() else {
+        return false;
+    };
 
-    // Parse outer sequence length
-    let (_outer_len, outer_len_bytes) =
-        parse_der_length(data.get(1..).context("No length bytes")?)?;
-    let content_start = outer_len_bytes
-        .checked_add(1)
-        .context("Content start overflow")?;
-
-    // Parse first element (TBS)
-    let tbs_data = data
-        .get(content_start..)
-        .context("TBS data out of bounds")?;
-    if *tbs_data.first().context("Empty TBS data")? != 0x30 {
-        bail!("Expected TBS SEQUENCE");
-    }
-
-    let (tbs_len, tbs_len_bytes) =
-        parse_der_length(tbs_data.get(1..).context("No TBS length bytes")?)?;
-    let tbs_total_len = tbs_len_bytes
-        .checked_add(tbs_len)
-        .and_then(|s| s.checked_add(1))
-        .context("TBS total length overflow")?;
-
-    let tbs_slice = tbs_data
-        .get(..tbs_total_len)
-        .context("TBS slice out of bounds")?;
-    let result_offset = content_start
-        .checked_add(tbs_total_len)
-        .context("Result offset overflow")?;
-
-    Ok((tbs_slice.to_vec(), result_offset))
-}
-
-/// A simple CRL parser that extracts just what we need
-struct SimpleCrl {
-    /// List of revoked certificate serial numbers
-    revoked_serials: Vec<Vec<u8>>,
-}
-
-impl SimpleCrl {
-    /// Parse a CRL from DER bytes
-    fn from_der(crl_der: &[u8]) -> Result<Self> {
-        // CRL structure: SEQUENCE { tbsCertList, signatureAlgorithm, signatureValue }
-        let (tbs_bytes, _) = extract_first_sequence_element(crl_der)?;
-
-        // Parse revoked certificates from TBS
-        let revoked_serials = Self::parse_revoked_serials(&tbs_bytes)?;
-
-        Ok(SimpleCrl { revoked_serials })
-    }
-
-    fn parse_revoked_serials(tbs_bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
-        // TBSCertList is a SEQUENCE containing:
-        // - version (optional INTEGER)
-        // - signature AlgorithmIdentifier
-        // - issuer Name
-        // - thisUpdate Time
-        // - nextUpdate Time (optional)
-        // - revokedCertificates SEQUENCE OF (optional)
-        // - extensions [0] EXPLICIT (optional)
-        //
-        // We need to find the revokedCertificates if present
-        // It's a SEQUENCE OF SEQUENCE { serialNumber INTEGER, ... }
-
-        let mut revoked = Vec::new();
-
-        // Skip outer SEQUENCE header
-        if tbs_bytes.first().is_none_or(|&b| b != 0x30) {
-            return Ok(revoked);
-        }
-        let (outer_len, outer_len_bytes) =
-            parse_der_length(tbs_bytes.get(1..).context("No length")?)?;
-        let mut pos = outer_len_bytes.checked_add(1).context("Pos overflow")?;
-        let end = outer_len_bytes
-            .checked_add(1)
-            .and_then(|p| p.checked_add(outer_len))
-            .context("End overflow")?;
-
-        // Skip through elements looking for a SEQUENCE that could be revokedCertificates
-        while pos < end && pos < tbs_bytes.len() {
-            let tag = *tbs_bytes.get(pos).context("Tag out of bounds")?;
-            let (elem_len, len_bytes) = parse_der_length(
-                tbs_bytes
-                    .get(pos.checked_add(1).context("Pos+1 overflow")?..)
-                    .context("Elem len out of bounds")?,
-            )?;
-            let elem_total = len_bytes
-                .checked_add(elem_len)
-                .and_then(|s| s.checked_add(1))
-                .context("Elem total overflow")?;
-
-            // revokedCertificates is a SEQUENCE (0x30) that contains SEQUENCEs
-            if tag == 0x30 {
-                // Check if this looks like revokedCertificates
-                // Each entry starts with an INTEGER (serial number)
-                let elem_content_start = pos
-                    .checked_add(1)
-                    .and_then(|p| p.checked_add(len_bytes))
-                    .context("Content start overflow")?;
-                if elem_content_start < tbs_bytes.len()
-                    && tbs_bytes.get(elem_content_start) == Some(&0x30)
-                {
-                    // This might be the revokedCertificates list
-                    let mut entry_pos = elem_content_start;
-                    let entry_end = pos.checked_add(elem_total).context("Entry end overflow")?;
-
-                    while entry_pos < entry_end && entry_pos < tbs_bytes.len() {
-                        if tbs_bytes.get(entry_pos) != Some(&0x30) {
-                            break;
-                        }
-                        let (entry_len, entry_len_bytes) = parse_der_length(
-                            tbs_bytes
-                                .get(entry_pos.checked_add(1).context("Entry pos+1 overflow")?..)
-                                .context("Entry len out of bounds")?,
-                        )?;
-                        let entry_content_start = entry_pos
-                            .checked_add(1)
-                            .and_then(|p| p.checked_add(entry_len_bytes))
-                            .context("Entry content start overflow")?;
-
-                        // First element should be INTEGER (serial number)
-                        if entry_content_start < tbs_bytes.len()
-                            && tbs_bytes.get(entry_content_start) == Some(&0x02)
-                        {
-                            let (serial_len, serial_len_bytes) = parse_der_length(
-                                tbs_bytes
-                                    .get(
-                                        entry_content_start
-                                            .checked_add(1)
-                                            .context("Serial pos overflow")?..,
-                                    )
-                                    .context("Serial len out of bounds")?,
-                            )?;
-                            let serial_start = entry_content_start
-                                .checked_add(1)
-                                .and_then(|p| p.checked_add(serial_len_bytes))
-                                .context("Serial start overflow")?;
-                            let serial_end = serial_start
-                                .checked_add(serial_len)
-                                .context("Serial end overflow")?;
-                            if let Some(serial_slice) = tbs_bytes.get(serial_start..serial_end) {
-                                revoked.push(serial_slice.to_vec());
-                            }
-                        }
-
-                        entry_pos = entry_pos
-                            .checked_add(1)
-                            .and_then(|p| p.checked_add(entry_len_bytes))
-                            .and_then(|p| p.checked_add(entry_len))
-                            .context("Next entry pos overflow")?;
-                    }
-                }
-            }
-
-            pos = pos.checked_add(elem_total).context("Next pos overflow")?;
-        }
-
-        Ok(revoked)
-    }
-
-    fn contains_serial(&self, serial: &[u8]) -> bool {
-        self.revoked_serials.iter().any(|s| s == serial)
-    }
+    // Check if the certificate's serial number is in the revoked list
+    revoked_certs
+        .iter()
+        .any(|revoked| revoked.serial_number.as_bytes() == serial)
 }
 
 /// Extract the public key bytes from a certificate's SubjectPublicKeyInfo
@@ -354,9 +170,10 @@ fn verify_ecdsa_signature(public_key: &[u8], message: &[u8], signature: &[u8]) -
 }
 
 /// Get the TBS (To Be Signed) certificate bytes for signature verification
-fn get_tbs_certificate_bytes(cert_der: &[u8]) -> Result<Vec<u8>> {
-    let (tbs_bytes, _) = extract_first_sequence_element(cert_der)?;
-    Ok(tbs_bytes)
+fn get_tbs_certificate_bytes(cert: &Certificate) -> Result<Vec<u8>> {
+    cert.tbs_certificate
+        .to_der()
+        .context("Failed to encode TBS certificate")
 }
 
 /// Get signature bytes from a certificate
@@ -364,16 +181,11 @@ fn get_signature_bytes(cert: &Certificate) -> Vec<u8> {
     cert.signature.raw_bytes().to_vec()
 }
 
-/// Check if a certificate serial number is in the CRL
-fn is_revoked(cert: &Certificate, crl: &SimpleCrl) -> bool {
-    let serial = cert.tbs_certificate.serial_number.as_bytes();
-    crl.contains_serial(serial)
-}
 
 /// Verify a certificate was signed by an issuer
 fn verify_cert_signature(cert_der: &[u8], issuer_cert: &Certificate) -> Result<()> {
     let cert = Certificate::from_der(cert_der).context("Failed to parse certificate")?;
-    let tbs_bytes = get_tbs_certificate_bytes(cert_der)?;
+    let tbs_bytes = get_tbs_certificate_bytes(&cert)?;
     let signature = get_signature_bytes(&cert);
     let issuer_public_key = extract_public_key(issuer_cert)?;
 
@@ -417,9 +229,9 @@ pub fn verify_certificate_chain(
     root_ca_der: &[u8],
 ) -> Result<()> {
     // Parse all CRLs
-    let crls: Vec<SimpleCrl> = crl_der
+    let crls: Vec<CertificateList> = crl_der
         .iter()
-        .filter_map(|der| SimpleCrl::from_der(der).ok())
+        .filter_map(|der| CertificateList::from_der(der).ok())
         .collect();
 
     // Parse the root CA
@@ -501,7 +313,7 @@ pub fn check_single_cert_crl(cert_der: &[u8], crl_der: &[&[u8]], now_secs: u64) 
 
     // Parse and check CRLs
     for crl_bytes in crl_der {
-        if let Ok(crl) = SimpleCrl::from_der(crl_bytes) {
+        if let Ok(crl) = CertificateList::from_der(crl_bytes) {
             if is_revoked(&cert, &crl) {
                 bail!("Certificate is revoked");
             }
