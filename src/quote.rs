@@ -644,7 +644,7 @@ impl Quote {
         Ok(constants::PROCESSOR_ISSUER_ID)
     }
 
-    /// Get the the length of signed data in the quote.
+    /// Get the length of signed data in the quote.
     pub fn signed_length(&self) -> usize {
         let mut len = match self.report {
             Report::SgxEnclave(_) => HEADER_BYTE_LEN + ENCLAVE_REPORT_BYTE_LEN,
