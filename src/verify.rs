@@ -209,14 +209,12 @@ fn verify_tcb_info_signature(
         bail!("TCBInfo expired");
     }
 
-    // Verify certificate chain
+    // Check TCB info cert chain and signature
     let tcb_leaf_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
     if tcb_leaf_certs.len() < 2 {
         bail!("Certificate chain is too short for TCB Info");
     }
     verify_certificate_chain(&tcb_leaf_certs[0], &tcb_leaf_certs[1..], now_secs, crls)?;
-
-    // Verify signature
     let tcb_asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     verify_signature_with_cert(
         &tcb_leaf_certs[0],
@@ -256,14 +254,12 @@ fn verify_qe_identity_signature(
         bail!("QE Identity expired");
     }
 
-    // Verify certificate chain
+    // Check QE identity cert chain and signature
     let qe_id_certs = extract_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
     if qe_id_certs.len() < 2 {
         bail!("Certificate chain is too short for QE Identity");
     }
     verify_certificate_chain(&qe_id_certs[0], &qe_id_certs[1..], now_secs, crls)?;
-
-    // Verify signature
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
     verify_signature_with_cert(
         &qe_id_certs[0],
@@ -314,7 +310,7 @@ fn verify_pck_cert_chain(
         bail!("Certificate chain is empty in quote");
     }
 
-    // Verify the certificate chain
+    // Check PCK cert chain
     verify_certificate_chain(
         &certification_certs[0],
         &certification_certs.get(1..).unwrap_or(&[]),
@@ -322,7 +318,7 @@ fn verify_pck_cert_chain(
         crls,
     )?;
 
-    // Extract PCK extensions (contains CPU_SVN, PCE_SVN, FMSPC, PPID)
+    // Extract PCK extensions
     let pck_ext = intel::parse_pck_extension(&certification_certs[0])
         .context("Failed to parse PCK extensions")?;
 
@@ -344,7 +340,7 @@ fn verify_qe_report_signature(
     pck_leaf_der: &[u8],
     auth_data: &crate::quote::AuthDataV3,
 ) -> Result<EnclaveReport> {
-    // Verify QE report signature
+    // Check QE signature
     let asn1_signature = encode_as_der(&auth_data.qe_report_signature)?;
     verify_signature_with_cert(
         pck_leaf_der,
@@ -557,8 +553,9 @@ fn verify_impl(
     let qe_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
 
     // Step 7: Verify ISV Report signature
+    // Check signature from auth data
     let signed_quote_len = raw_quote.len() - auth_data.ecdsa_signature.len();
-    let mut pub_key = [0x04u8; 65]; // Prepend 0x04 to specify uncompressed format
+    let mut pub_key = [0x04u8; 65];
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
     let verifying_key = VerifyingKey::from_sec1_bytes(&pub_key)
         .map_err(|_| anyhow!("Failed to parse public key"))?;
