@@ -360,7 +360,6 @@ pub fn verify_certificate_chain(
     intermediate_certs_der: &[Vec<u8>],
     now_secs: u64,
     crl_der: &[&[u8]],
-    trust_anchor: TrustAnchor<'_>,
 ) -> Result<()> {
     // Parse all CRLs
     let crls: Vec<SimpleCrl> = crl_der

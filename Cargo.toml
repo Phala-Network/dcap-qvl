@@ -11,6 +11,7 @@ repository = "https://github.com/Phala-Network/dcap-qvl"
 borsh = { version = "1.5.7", default-features = false, features = [
     "derive",
 ], optional = true }
+derive_more = { version = "1.0", default-features = false, features = ["display"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
