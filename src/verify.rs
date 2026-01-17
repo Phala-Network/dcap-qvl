@@ -428,7 +428,8 @@ fn match_platform_tcb(
         if sgx_components.is_empty() {
             bail!("No SGX components in the TCB info");
         }
-        if cpu_svn < &sgx_components[..] {
+        // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
+        if cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b) {
             continue;
         }
 
@@ -443,7 +444,8 @@ fn match_platform_tcb(
             if tdx_components.is_empty() {
                 bail!("No TDX components in the TCB info");
             }
-            if td_report.tee_tcb_svn[..] < tdx_components[..] {
+            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i]
+            if td_report.tee_tcb_svn.iter().zip(&tdx_components).any(|(a, b)| a < b) {
                 continue;
             }
         }

@@ -132,6 +132,25 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     Ok(writer.finish().context("Failed to finish writer")?.to_vec())
 }
 
+/// Check CRL validity window (thisUpdate and nextUpdate)
+fn check_crl_validity(crl: &CertificateList, now_secs: u64) -> Result<()> {
+    // Check thisUpdate - CRL must not be used before this time
+    let this_update = crl.tbs_cert_list.this_update.to_unix_duration().as_secs();
+    if now_secs < this_update {
+        bail!("CRL is not yet valid (thisUpdate in the future)");
+    }
+
+    // Check nextUpdate - CRL must not be used after this time (if present)
+    if let Some(next_update) = &crl.tbs_cert_list.next_update {
+        let next_update_secs = next_update.to_unix_duration().as_secs();
+        if now_secs > next_update_secs {
+            bail!("CRL has expired (past nextUpdate)");
+        }
+    }
+
+    Ok(())
+}
+
 /// Check if a certificate serial number is in the CRL
 fn is_revoked(cert: &Certificate, crl: &CertificateList) -> bool {
     let serial = cert.tbs_certificate.serial_number.as_bytes();
@@ -147,8 +166,40 @@ fn is_revoked(cert: &Certificate, crl: &CertificateList) -> bool {
         .any(|revoked| revoked.serial_number.as_bytes() == serial)
 }
 
+/// Check that a certificate has KeyUsage with cRLSign bit set
+fn check_key_usage_crl_sign(cert: &Certificate) -> Result<()> {
+    let extensions = cert
+        .tbs_certificate
+        .extensions
+        .as_ref()
+        .context("Certificate has no extensions")?;
+
+    // Find KeyUsage extension (OID 2.5.29.15)
+    let key_usage_oid = const_oid::db::rfc5280::ID_CE_KEY_USAGE;
+    let ku_ext = extensions
+        .iter()
+        .find(|ext| ext.extn_id == key_usage_oid)
+        .context("KeyUsage extension not found")?;
+
+    // Parse KeyUsage - it's a BIT STRING
+    use der::Decode;
+    let key_usage = x509_cert::ext::pkix::KeyUsage::from_der(ku_ext.extn_value.as_bytes())
+        .context("Failed to parse KeyUsage")?;
+
+    // Check cRLSign bit (bit 6)
+    if !key_usage.crl_sign() {
+        bail!("Certificate does not have cRLSign in KeyUsage");
+    }
+
+    Ok(())
+}
+
 /// Verify that a CRL was signed by the given issuer certificate
 fn verify_crl_signature(crl: &CertificateList, issuer_cert: &Certificate) -> Result<()> {
+    // Check that the issuer certificate is authorized to sign CRLs
+    check_key_usage_crl_sign(issuer_cert)
+        .context("CRL issuer certificate not authorized to sign CRLs")?;
+
     // Encode the TBS cert list to DER
     let tbs_bytes = crl
         .tbs_cert_list
@@ -220,6 +271,33 @@ fn verify_cert_signature(cert_der: &[u8], issuer_cert: &Certificate) -> Result<(
         .context("Certificate signature verification failed")
 }
 
+/// Check that a CA certificate has BasicConstraints with ca=true
+fn check_basic_constraints_ca(cert: &Certificate) -> Result<()> {
+    let extensions = cert
+        .tbs_certificate
+        .extensions
+        .as_ref()
+        .context("Certificate has no extensions")?;
+
+    // Find BasicConstraints extension (OID 2.5.29.19)
+    let basic_constraints_oid = const_oid::db::rfc5280::ID_CE_BASIC_CONSTRAINTS;
+    let bc_ext = extensions
+        .iter()
+        .find(|ext| ext.extn_id == basic_constraints_oid)
+        .context("BasicConstraints extension not found")?;
+
+    // Parse BasicConstraints
+    use der::Decode;
+    let basic_constraints = x509_cert::ext::pkix::BasicConstraints::from_der(bc_ext.extn_value.as_bytes())
+        .context("Failed to parse BasicConstraints")?;
+
+    if !basic_constraints.ca {
+        bail!("Certificate does not have ca=true in BasicConstraints");
+    }
+
+    Ok(())
+}
+
 /// Check that a certificate is valid at the given time
 fn check_validity(cert: &Certificate, now_secs: u64) -> Result<()> {
     let validity = &cert.tbs_certificate.validity;
@@ -255,11 +333,17 @@ pub fn verify_certificate_chain(
     crl_der: &[&[u8]],
     root_ca_der: &[u8],
 ) -> Result<()> {
-    // Parse all CRLs
+    // Parse all CRLs and check their validity windows
     let crls: Vec<CertificateList> = crl_der
         .iter()
         .filter_map(|der| CertificateList::from_der(der).ok())
         .collect();
+
+    // Check CRL validity windows before using them
+    for (i, crl) in crls.iter().enumerate() {
+        check_crl_validity(crl, now_secs)
+            .with_context(|| format!("CRL {} validity check failed", i))?;
+    }
 
     // Parse the root CA
     let root_cert = Certificate::from_der(root_ca_der).context("Failed to parse root CA")?;
@@ -280,6 +364,7 @@ pub fn verify_certificate_chain(
 
     // Verify the chain: each certificate should be signed by the next one
     let mut current_cert_der = leaf_cert_der;
+    let mut current_cert = &leaf_cert;
 
     // Parse intermediate certificates
     let intermediate_certs: Vec<Certificate> = intermediate_certs_der
@@ -296,6 +381,18 @@ pub fn verify_certificate_chain(
         // Check validity
         check_validity(intermediate, now_secs)?;
 
+        // Check BasicConstraints: intermediates must have ca=true
+        check_basic_constraints_ca(intermediate)
+            .with_context(|| format!("Intermediate certificate {} must be a CA", i))?;
+
+        // Check issuer/subject linkage: current cert's issuer must match intermediate's subject
+        if current_cert.tbs_certificate.issuer != intermediate.tbs_certificate.subject {
+            bail!(
+                "Certificate chain broken at intermediate {}: issuer does not match subject",
+                i
+            );
+        }
+
         // Check if revoked
         for crl in &crls {
             if is_revoked(intermediate, crl) {
@@ -307,18 +404,18 @@ pub fn verify_certificate_chain(
         verify_cert_signature(current_cert_der, intermediate)?;
 
         current_cert_der = intermediate_der;
+        current_cert = intermediate;
     }
 
     // Verify the last certificate (either leaf or last intermediate) was signed by root
-    // First, check if the last intermediate is the root itself or signed by root
-    if let Some(last_intermediate_der) = intermediate_certs_der.last() {
-        verify_cert_signature(last_intermediate_der, &root_cert)
-            .context("Failed to verify chain against root CA")?;
-    } else {
-        // Leaf is directly signed by root
-        verify_cert_signature(leaf_cert_der, &root_cert)
-            .context("Failed to verify leaf against root CA")?;
+    // Check issuer/subject linkage to root
+    if current_cert.tbs_certificate.issuer != root_cert.tbs_certificate.subject {
+        bail!("Certificate chain broken at root: issuer does not match root CA subject");
     }
+
+    // Verify signature by root
+    verify_cert_signature(current_cert_der, &root_cert)
+        .context("Failed to verify chain against root CA")?;
 
     Ok(())
 }
@@ -332,8 +429,12 @@ pub fn check_single_cert_crl(cert_der: &[u8], crl_der: &[&[u8]], now_secs: u64) 
     check_validity(&cert, now_secs)?;
 
     // Parse and check CRLs
-    for crl_bytes in crl_der {
+    for (i, crl_bytes) in crl_der.iter().enumerate() {
         if let Ok(crl) = CertificateList::from_der(crl_bytes) {
+            // Check CRL validity window
+            check_crl_validity(&crl, now_secs)
+                .with_context(|| format!("CRL {} validity check failed", i))?;
+
             if is_revoked(&cert, &crl) {
                 bail!("Certificate is revoked");
             }
