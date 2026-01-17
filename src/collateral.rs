@@ -449,6 +449,14 @@ pub async fn get_collateral_and_verify(
     crate::verify::verify(quote, &collateral, now)
 }
 
+pub async fn verify_collateral(
+    quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now: u64,
+) -> Result<VerifiedReport> {
+    crate::verify::verify(quote, collateral, now)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
