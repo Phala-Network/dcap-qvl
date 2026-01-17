@@ -391,6 +391,9 @@ function verifyQeIdentityPolicy(qeReport, qeIdentity) {
         throw new Error(`QE ISVPRODID mismatch: expected ${qeIdentity.isvprodid}, got ${qeReport.isvProdId}`);
     }
 
+    // Validate QE report attributes (debug mode check)
+    validateSgx(qeReport);
+
     // Verify MISCSELECT with mask
     const expectedMiscselect = Buffer.from(qeIdentity.miscselect, 'hex');
     const miscselectMask = Buffer.from(qeIdentity.miscselectMask, 'hex');
