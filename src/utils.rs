@@ -167,28 +167,30 @@ fn is_revoked(cert: &Certificate, crl: &CertificateList) -> bool {
 }
 
 /// Check that a certificate has KeyUsage with cRLSign bit set
+/// If KeyUsage extension exists, it MUST have cRLSign
+/// If KeyUsage is missing, allow it (for compatibility with older/custom roots)
 fn check_key_usage_crl_sign(cert: &Certificate) -> Result<()> {
-    let extensions = cert
-        .tbs_certificate
-        .extensions
-        .as_ref()
-        .context("Certificate has no extensions")?;
+    // Get extensions if present
+    let Some(extensions) = cert.tbs_certificate.extensions.as_ref() else {
+        // No extensions at all - allow for compatibility with older roots
+        return Ok(());
+    };
 
     // Find KeyUsage extension (OID 2.5.29.15)
     let key_usage_oid = const_oid::db::rfc5280::ID_CE_KEY_USAGE;
-    let ku_ext = extensions
-        .iter()
-        .find(|ext| ext.extn_id == key_usage_oid)
-        .context("KeyUsage extension not found")?;
+    let Some(ku_ext) = extensions.iter().find(|ext| ext.extn_id == key_usage_oid) else {
+        // KeyUsage extension not present - allow for compatibility
+        return Ok(());
+    };
 
-    // Parse KeyUsage - it's a BIT STRING
+    // KeyUsage exists, so we must enforce cRLSign
     use der::Decode;
     let key_usage = x509_cert::ext::pkix::KeyUsage::from_der(ku_ext.extn_value.as_bytes())
         .context("Failed to parse KeyUsage")?;
 
     // Check cRLSign bit (bit 6)
     if !key_usage.crl_sign() {
-        bail!("Certificate does not have cRLSign in KeyUsage");
+        bail!("Certificate has KeyUsage but does not have cRLSign bit set");
     }
 
     Ok(())
@@ -230,6 +232,11 @@ pub fn verify_crl_from_der(
 
     // Check CRL validity window BEFORE checking signature
     check_crl_validity(&crl, now_secs).context("CRL validity window check failed")?;
+
+    // Check CRL issuer name matches issuer certificate subject
+    if crl.tbs_cert_list.issuer != issuer_cert.tbs_certificate.subject {
+        bail!("CRL issuer name does not match issuer certificate subject");
+    }
 
     // Verify CRL signature and KeyUsage
     verify_crl_signature(&crl, &issuer_cert)
@@ -302,6 +309,36 @@ fn check_basic_constraints_ca(cert: &Certificate) -> Result<()> {
 
     if !basic_constraints.ca {
         bail!("Certificate does not have ca=true in BasicConstraints");
+    }
+
+    Ok(())
+}
+
+/// Check that a CA certificate has KeyUsage with keyCertSign bit set
+/// If KeyUsage extension exists, it MUST have keyCertSign for CAs
+/// If KeyUsage is missing, allow it (for compatibility)
+fn check_key_usage_cert_sign(cert: &Certificate) -> Result<()> {
+    // Get extensions if present
+    let Some(extensions) = cert.tbs_certificate.extensions.as_ref() else {
+        // No extensions at all - allow for compatibility
+        return Ok(());
+    };
+
+    // Find KeyUsage extension (OID 2.5.29.15)
+    let key_usage_oid = const_oid::db::rfc5280::ID_CE_KEY_USAGE;
+    let Some(ku_ext) = extensions.iter().find(|ext| ext.extn_id == key_usage_oid) else {
+        // KeyUsage extension not present - allow for compatibility
+        return Ok(());
+    };
+
+    // KeyUsage exists, so we must enforce keyCertSign for CA certificates
+    use der::Decode;
+    let key_usage = x509_cert::ext::pkix::KeyUsage::from_der(ku_ext.extn_value.as_bytes())
+        .context("Failed to parse KeyUsage")?;
+
+    // Check keyCertSign bit (bit 5)
+    if !key_usage.key_cert_sign() {
+        bail!("CA certificate has KeyUsage but does not have keyCertSign bit set");
     }
 
     Ok(())
@@ -397,6 +434,10 @@ pub fn verify_certificate_chain(
         // Check BasicConstraints: intermediates must have ca=true
         check_basic_constraints_ca(intermediate)
             .with_context(|| format!("Intermediate certificate {} must be a CA", i))?;
+
+        // Check KeyUsage: if present, intermediates must have keyCertSign
+        check_key_usage_cert_sign(intermediate)
+            .with_context(|| format!("Intermediate certificate {} must have keyCertSign", i))?;
 
         // Check issuer/subject linkage: current cert's issuer must match intermediate's subject
         if current_cert.tbs_certificate.issuer != intermediate.tbs_certificate.subject {

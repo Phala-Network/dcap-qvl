@@ -349,6 +349,12 @@ fn verify_qe_report_signature(
     let qe_report =
         EnclaveReport::decode(&mut qe_report_slice).context("Failed to decode QE report")?;
 
+    // Explicitly reject QE in debug mode (bit 1 of attributes[0])
+    let qe_debug = (qe_report.attributes[0] & 0x02) != 0;
+    if qe_debug {
+        bail!("QE is in debug mode");
+    }
+
     Ok(qe_report)
 }
 
