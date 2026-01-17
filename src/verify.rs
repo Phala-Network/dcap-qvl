@@ -643,6 +643,14 @@ fn verify_impl(
     })
 }
 
+fn validate_sgx_attrs(report: &EnclaveReport) -> Result<()> {
+    let is_debug = report.attributes[0] & 0x02 != 0;
+    if is_debug {
+        bail!("Debug mode is enabled");
+    }
+    Ok(())
+}
+
 fn validate_attrs(report: &Report) -> Result<()> {
     fn validate_td10(report: &TDReport10) -> Result<()> {
         let td_attrs =
@@ -667,17 +675,10 @@ fn validate_attrs(report: &Report) -> Result<()> {
         }
         validate_td10(&report.base)
     }
-    fn validate_sgx(report: &EnclaveReport) -> Result<()> {
-        let is_debug = report.attributes[0] & 0x02 != 0;
-        if is_debug {
-            bail!("Debug mode is enabled");
-        }
-        Ok(())
-    }
     match &report {
         Report::TD15(report) => validate_td15(report),
         Report::TD10(report) => validate_td10(report),
-        Report::SgxEnclave(report) => validate_sgx(report),
+        Report::SgxEnclave(report) => validate_sgx_attrs(report),
     }
 }
 
@@ -727,6 +728,8 @@ fn verify_qe_identity_policy(
             hex::encode_upper(qe_report.mr_signer)
         );
     }
+
+    validate_sgx_attrs(qe_report).context("QE report validation failed")?;
 
     // Verify ISVPRODID
     if qe_report.isv_prod_id != qe_identity.isvprodid {
@@ -954,8 +957,7 @@ mod tests {
     #[test]
     fn test_qe_identity_policy_attributes_mismatch() {
         let mut qe_report = make_test_qe_report();
-        // Change DEBUG bit (bit 1 of first byte)
-        qe_report.attributes[0] = 0x13; // 0x11 | 0x02 = 0x13
+        qe_report.attributes[0] = 0;
         let qe_identity = make_test_qe_identity();
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);

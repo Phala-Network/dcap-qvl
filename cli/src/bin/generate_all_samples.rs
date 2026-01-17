@@ -49,6 +49,17 @@ fn sign_data(key_pair: &EcdsaKeyPair, data: &[u8]) -> Result<[u8; 64]> {
     Ok(result)
 }
 
+/// Generate a JSON array of 16 tcbcomponents with specified SVN values
+/// Any unspecified values are padded with zeros
+fn make_tcb_components(svns: &[u8]) -> serde_json::Value {
+    let mut components = Vec::with_capacity(16);
+    for i in 0..16 {
+        let svn = svns.get(i).copied().unwrap_or(0);
+        components.push(json!({"svn": svn}));
+    }
+    json!(components)
+}
+
 fn create_sgx_header(version: u16, attestation_key_type: u16, tee_type: u32) -> Header {
     Header {
         version,
@@ -127,12 +138,12 @@ fn generate_base_quote(version: u16, key_type: u16, debug: bool) -> Result<Vec<u
     // Generate attestation key pair
     let rng = SystemRandom::new();
     let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).map_err(|e| anyhow::anyhow!("{:?}", e))?;
     let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         attestation_pkcs8.as_ref(),
         &rng,
-    )?;
+    ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
     // Get public key (skip 0x04 prefix, take 64 bytes)
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -234,12 +245,12 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     // Generate attestation key pair
     let rng = SystemRandom::new();
     let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).map_err(|e| anyhow::anyhow!("{:?}", e))?;
     let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         attestation_pkcs8.as_ref(),
         &rng,
-    )?;
+    ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
     // Get public key
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -300,6 +311,85 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     Ok(quote.encode())
 }
 
+/// Generate a quote with debug flag set in the QE report
+fn generate_quote_with_debug_qe() -> Result<Vec<u8>> {
+    let header = create_sgx_header(3, 2, 0);
+    let report = create_sgx_report(false);
+
+    // Load PCK certificate chain
+    let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))
+        .unwrap_or_else(|_| String::from("DUMMY_CERT"));
+    let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))
+        .unwrap_or_else(|_| String::from("DUMMY_CERT"));
+    let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
+
+    // Load PCK private key for signing
+    let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
+    let pck_key_pair = load_private_key(pck_key_path)?;
+
+    // Generate attestation key pair
+    let rng = SystemRandom::new();
+    let attestation_pkcs8 =
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
+        &ECDSA_P256_SHA256_FIXED_SIGNING,
+        attestation_pkcs8.as_ref(),
+        &rng,
+    ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+
+    // Get public key
+    let attestation_public_key = attestation_key_pair.public_key().as_ref();
+    let mut ecdsa_attestation_key = [0u8; 64];
+    ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
+
+    // Create auth data
+    let qe_auth_data = vec![0u8; 32];
+
+    // Calculate QE hash
+    let mut qe_hash_data = [0u8; 96];
+    qe_hash_data[0..64].copy_from_slice(&ecdsa_attestation_key);
+    qe_hash_data[64..].copy_from_slice(&qe_auth_data);
+    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
+
+    // Create QE report with DEBUG FLAG SET (true)
+    let mut qe_report_data = create_sgx_report(true);
+    qe_report_data.report_data[0..32].copy_from_slice(qe_hash.as_ref());
+    let qe_report_bytes = qe_report_data.encode();
+    let mut qe_report = [0u8; 384];
+    qe_report[..qe_report_bytes.len()].copy_from_slice(&qe_report_bytes);
+
+    // Sign QE report with PCK key
+    let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
+
+    // Create certification data
+    let certification_data = CertificationData {
+        cert_type: 5,
+        body: Data::<u32>::new(pck_chain_for_quote.into_bytes()),
+    };
+
+    // Sign the quote with attestation key (header + report)
+    let mut signed_data = header.encode();
+    signed_data.extend_from_slice(&report.encode());
+    let ecdsa_signature = sign_data(&attestation_key_pair, &signed_data)?;
+
+    let auth_data = AuthData::V3(AuthDataV3 {
+        ecdsa_signature,
+        ecdsa_attestation_key,
+        qe_report,
+        qe_report_signature,
+        qe_auth_data: Data::<u16>::new(qe_auth_data),
+        certification_data,
+    });
+
+    let quote = Quote {
+        header,
+        report: Report::SgxEnclave(report),
+        auth_data,
+    };
+
+    Ok(quote.encode())
+}
+
 fn generate_invalid_quote() -> Result<Vec<u8>> {
     Ok(vec![0xFF; 100]) // Invalid binary data
 }
@@ -318,12 +408,12 @@ fn generate_cert_type_3_quote() -> Result<Vec<u8>> {
     // Generate attestation key pair
     let rng = SystemRandom::new();
     let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)?;
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).map_err(|e| anyhow::anyhow!("{:?}", e))?;
     let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
         &ECDSA_P256_SHA256_FIXED_SIGNING,
         attestation_pkcs8.as_ref(),
         &rng,
-    )?;
+    ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
     // Get public key
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -415,12 +505,12 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
         "tcbLevels": [{
             "tcb": {
                 "sgxtcbcomponents": [
-                    {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                    {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                    {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                    {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
+                    {"svn": 0}, {"svn": 0}, {"svn": 0}, {"svn": 0},
+                    {"svn": 0}, {"svn": 0}, {"svn": 0}, {"svn": 0},
+                    {"svn": 0}, {"svn": 0}, {"svn": 0}, {"svn": 0},
+                    {"svn": 0}, {"svn": 0}, {"svn": 0}, {"svn": 0}
                 ],
-                "pcesvn": 1
+                "pcesvn": 0
             },
             "tcbDate": "2024-01-01T00:00:00Z",
             "tcbStatus": "UpToDate"
@@ -587,12 +677,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -672,12 +757,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -721,12 +801,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
@@ -789,12 +869,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -833,12 +908,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -891,12 +966,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -934,12 +1004,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -992,12 +1062,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -1035,12 +1100,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1093,12 +1158,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -1136,12 +1196,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1194,12 +1254,7 @@ fn main() -> Result<()> {
                             if let Some(tcb_obj) = level["tcb"].as_object_mut() {
                                 tcb_obj.insert(
                                     "tdxtcbcomponents".to_string(),
-                                    json!([
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1},
-                                        {"svn": 1}, {"svn": 1}, {"svn": 1}, {"svn": 1}
-                                    ]),
+                                    make_tcb_components(&[]),
                                 );
                             }
                         }
@@ -1361,6 +1416,108 @@ fn main() -> Result<()> {
         })),
     });
 
+    // Component-wise SVN comparison test cases
+    samples.push(TestSample {
+        name: "sgx_component_svn_mismatch".to_string(),
+        description: "SGX quote with component SVN mismatch (1,3,2 vs required 1,2,3)".to_string(),
+        should_succeed: false,
+        expected_error: Some("No matching TCB level found".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Set TCB info to require higher SVN values than the quote provides
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    if let Some(levels) = tcb["tcbLevels"].as_array_mut() {
+                        for level in levels {
+                            if let Some(tcb_obj) = level["tcb"].as_object_mut() {
+                                // Set SGX components to require [1, 2, 3, 0...]
+                                tcb_obj.insert("sgxtcbcomponents".to_string(), make_tcb_components(&[1, 2, 3]));
+                            }
+                        }
+                    }
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_component_svn_mismatch".to_string(),
+        description: "TDX quote with component SVN mismatch (1,3,2 vs required 1,2,3)".to_string(),
+        should_succeed: false,
+        expected_error: Some("No matching TCB level found".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Set TCB info to require higher TDX component SVN values
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    // Set TCB info id to TDX for TDX quote
+                    tcb["id"] = json!("TDX");
+                    tcb["version"] = json!(3);
+                    if let Some(levels) = tcb["tcbLevels"].as_array_mut() {
+                        for level in levels {
+                            if let Some(tcb_obj) = level["tcb"].as_object_mut() {
+                                // Set TDX components to require [1, 2, 3, 0...] but quote will have [0, 0, 0...]
+                                tcb_obj.insert("tdxtcbcomponents".to_string(), make_tcb_components(&[1, 2, 3]));
+                            }
+                        }
+                    }
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            // Update QE Identity to TD_QE for TDX quote
+            update_qe_identity(collateral, "TD_QE", 2)?;
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "component_svn_all_higher".to_string(),
+        description: "Quote with all component SVN values higher than required (all zeros pass when required is all zeros)".to_string(),
+        should_succeed: true,
+        expected_error: None,
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Set TCB info to require all zeros - quote has all zeros so should pass
+            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
+                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
+                    if let Some(levels) = tcb["tcbLevels"].as_array_mut() {
+                        for level in levels {
+                            if let Some(tcb_obj) = level["tcb"].as_object_mut() {
+                                // Set SGX components to require all zeros - quote has all zeros so should pass
+                                tcb_obj.insert("sgxtcbcomponents".to_string(), make_tcb_components(&[]));
+                            }
+                        }
+                    }
+                    let new_tcb_info = serde_json::to_string(&tcb)?;
+
+                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+                    let key_pair = load_private_key(key_path)?;
+                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+
+                    collateral["tcb_info"] = json!(new_tcb_info);
+                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+                }
+            }
+            Ok(())
+        })),
+    });
+
     // Category 7: Certificate chain errors
     println!("\nCategory 7: Certificate chain errors");
     samples.push(TestSample {
@@ -1453,12 +1610,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
@@ -1522,12 +1679,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
@@ -1599,12 +1756,12 @@ fn main() -> Result<()> {
             let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
             let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
                 &ECDSA_P256_SHA256_FIXED_SIGNING,
                 attestation_pkcs8.as_ref(),
                 &rng,
-            )?;
+            ).map_err(|e| anyhow::anyhow!("{:?}", e))?;
 
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
@@ -1926,6 +2083,46 @@ fn main() -> Result<()> {
         })),
     });
 
+    samples.push(TestSample {
+        name: "qe_debug_enabled".to_string(),
+        description: "Quote with debug flag set in QE report should be rejected".to_string(),
+        should_succeed: false,
+        expected_error: Some("Debug mode is enabled".to_string()),
+        quote_generator: Box::new(generate_quote_with_debug_qe),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Create QE Identity that requires debug bit to be 0 (production mode)
+            // Using mask 0x02 on byte 0 to check the debug bit
+            let qe_identity = json!({
+                "id": "QE",
+                "version": 2,
+                "issueDate": "2024-01-01T00:00:00Z",
+                "nextUpdate": "2099-12-31T23:59:59Z",
+                "tcbEvaluationDataNumber": 17,
+                "miscselect": "00000000",
+                "miscselectMask": "FFFFFFFF",
+                "attributes": "00000000000000000000000000000000",  // Expects debug bit = 0
+                "attributesMask": "02000000000000000000000000000000",  // Mask checks only debug bit
+                "mrsigner": "0000000000000000000000000000000000000000000000000000000000000000",
+                "isvprodid": 0,
+                "tcbLevels": [{
+                    "tcb": { "isvsvn": 0 },
+                    "tcbDate": "2024-01-01T00:00:00Z",
+                    "tcbStatus": "UpToDate",
+                    "advisoryIDs": []
+                }]
+            });
+            let qe_identity_json = serde_json::to_string(&qe_identity)?;
+
+            let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
+            let key_pair = load_private_key(key_path)?;
+            let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
+
+            collateral["qe_identity"] = json!(qe_identity_json);
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_identity_signature));
+            Ok(())
+        })),
+    });
+
     // Category 12: Unknown TCB status
     println!("\nCategory 12: Unknown TCB status");
 
@@ -2054,6 +2251,58 @@ fn main() -> Result<()> {
         expected_error: Some("Unsupported DCAP PCK cert format".to_string()),
         quote_generator: Box::new(generate_cert_type_3_quote),
         collateral_modifier: None, // No pck_certificate_chain
+    });
+
+    // Category: Certificate chain errors - CA used as end entity
+    println!("\nCategory: CA certificate used as end entity");
+    samples.push(TestSample {
+        name: "ca_used_as_end_entity_tcb".to_string(),
+        description: "TCB Info chain uses CA cert as signing cert (CaUsedAsEndEntity)".to_string(),
+        should_succeed: false,
+        expected_error: Some("CaUsedAsEndEntity".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Use the CA-only chain which has CA:TRUE as the first cert
+            let ca_only_chain = fs::read_to_string(format!("{}/tcb_chain_ca_only.pem", CERT_DIR))?;
+            collateral["tcb_info_issuer_chain"] = json!(ca_only_chain.clone());
+
+            // Re-sign TCB info with the CA key so signature verification passes
+            // but certificate chain verification catches the CA:TRUE issue
+            let ca_key_path = &format!("{}/tcb_signing_ca.pkcs8.key", CERT_DIR);
+            let ca_key_pair = load_private_key(ca_key_path)?;
+            let tcb_info_str = collateral["tcb_info"].as_str().unwrap();
+            let tcb_signature = sign_data(&ca_key_pair, tcb_info_str.as_bytes())?;
+            collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+
+            // Also update QE identity chain and signature since they're verified with the same chain
+            collateral["qe_identity_issuer_chain"] = json!(ca_only_chain);
+            let qe_identity_str = collateral["qe_identity"].as_str().unwrap();
+            let qe_signature = sign_data(&ca_key_pair, qe_identity_str.as_bytes())?;
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_signature));
+            Ok(())
+        })),
+    });
+
+    samples.push(TestSample {
+        name: "ca_used_as_end_entity_qe".to_string(),
+        description: "QE Identity chain uses CA cert as signing cert (CaUsedAsEndEntity)".to_string(),
+        should_succeed: false,
+        expected_error: Some("CaUsedAsEndEntity".to_string()),
+        quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
+        collateral_modifier: Some(Box::new(|collateral| {
+            // Use the CA-only chain for QE Identity which has CA:TRUE as the first cert
+            let ca_only_chain = fs::read_to_string(format!("{}/tcb_chain_ca_only.pem", CERT_DIR))?;
+            collateral["qe_identity_issuer_chain"] = json!(ca_only_chain);
+
+            // Re-sign QE identity with the CA key so signature verification passes
+            // but certificate chain verification catches the CA:TRUE issue
+            let ca_key_path = &format!("{}/tcb_signing_ca.pkcs8.key", CERT_DIR);
+            let ca_key_pair = load_private_key(ca_key_path)?;
+            let qe_identity_str = collateral["qe_identity"].as_str().unwrap();
+            let qe_signature = sign_data(&ca_key_pair, qe_identity_str.as_bytes())?;
+            collateral["qe_identity_signature"] = json!(hex::encode(qe_signature));
+            Ok(())
+        })),
     });
 
     // Write all samples
