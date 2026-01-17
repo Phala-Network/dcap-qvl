@@ -218,11 +218,20 @@ fn verify_crl_signature(crl: &CertificateList, issuer_cert: &Certificate) -> Res
 }
 
 /// Verify a CRL from DER bytes against a potential issuer certificate
-/// This is a convenience wrapper that parses both and verifies the signature
-pub fn verify_crl_from_der(crl_der: &[u8], issuer_cert_der: &[u8]) -> Result<()> {
+/// This wrapper parses both, verifies the signature, and checks validity window
+pub fn verify_crl_from_der(
+    crl_der: &[u8],
+    issuer_cert_der: &[u8],
+    now_secs: u64,
+) -> Result<()> {
     let crl = CertificateList::from_der(crl_der).context("Failed to parse CRL")?;
     let issuer_cert =
         Certificate::from_der(issuer_cert_der).context("Failed to parse issuer certificate")?;
+
+    // Check CRL validity window BEFORE checking signature
+    check_crl_validity(&crl, now_secs).context("CRL validity window check failed")?;
+
+    // Verify CRL signature and KeyUsage
     verify_crl_signature(&crl, &issuer_cert)
 }
 
@@ -333,11 +342,15 @@ pub fn verify_certificate_chain(
     crl_der: &[&[u8]],
     root_ca_der: &[u8],
 ) -> Result<()> {
-    // Parse all CRLs and check their validity windows
+    // Parse all CRLs with strict error handling (no silent failures)
     let crls: Vec<CertificateList> = crl_der
         .iter()
-        .filter_map(|der| CertificateList::from_der(der).ok())
-        .collect();
+        .enumerate()
+        .map(|(i, der)| {
+            CertificateList::from_der(der)
+                .with_context(|| format!("Failed to parse CRL {}", i))
+        })
+        .collect::<Result<_>>()?;
 
     // Check CRL validity windows before using them
     for (i, crl) in crls.iter().enumerate() {
@@ -428,16 +441,17 @@ pub fn check_single_cert_crl(cert_der: &[u8], crl_der: &[&[u8]], now_secs: u64) 
     // Check validity
     check_validity(&cert, now_secs)?;
 
-    // Parse and check CRLs
+    // Parse and check CRLs with strict error handling (no silent failures)
     for (i, crl_bytes) in crl_der.iter().enumerate() {
-        if let Ok(crl) = CertificateList::from_der(crl_bytes) {
-            // Check CRL validity window
-            check_crl_validity(&crl, now_secs)
-                .with_context(|| format!("CRL {} validity check failed", i))?;
+        let crl = CertificateList::from_der(crl_bytes)
+            .with_context(|| format!("Failed to parse CRL {}", i))?;
 
-            if is_revoked(&cert, &crl) {
-                bail!("Certificate is revoked");
-            }
+        // Check CRL validity window
+        check_crl_validity(&crl, now_secs)
+            .with_context(|| format!("CRL {} validity check failed", i))?;
+
+        if is_revoked(&cert, &crl) {
+            bail!("Certificate is revoked");
         }
     }
 

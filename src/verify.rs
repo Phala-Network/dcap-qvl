@@ -483,10 +483,10 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
 ) -> Result<VerifiedReport> {
-    // Verify CRL signatures before using them
-    // Step 1: Verify root CA CRL is signed by the root CA itself
-    utils::verify_crl_from_der(&collateral.root_ca_crl, root_ca_der)
-        .context("Root CA CRL signature verification failed")?;
+    // Verify CRL signatures and validity before using them
+    // Step 1: Verify root CA CRL is signed by the root CA itself and is valid
+    utils::verify_crl_from_der(&collateral.root_ca_crl, root_ca_der, now_secs)
+        .context("Root CA CRL verification failed")?;
 
     // Step 2: Verify the PCK CRL issuer chain against root CA (using only root CA CRL)
     let pck_crl_issuer_certs = extract_certs(collateral.pck_crl_issuer_chain.as_bytes())
@@ -504,9 +504,9 @@ fn verify_impl(
     )
     .context("PCK CRL issuer chain verification failed")?;
 
-    // Step 3: Verify PCK CRL signature using the verified issuer
-    utils::verify_crl_from_der(&collateral.pck_crl, pck_crl_issuer)
-        .context("PCK CRL signature verification failed")?;
+    // Step 3: Verify PCK CRL signature and validity using the verified issuer
+    utils::verify_crl_from_der(&collateral.pck_crl, pck_crl_issuer, now_secs)
+        .context("PCK CRL verification failed")?;
 
     // Setup CRLs array for use in subsequent verification
     let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
