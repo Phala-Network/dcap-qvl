@@ -209,7 +209,6 @@ fn get_signature_bytes(cert: &Certificate) -> Vec<u8> {
     cert.signature.raw_bytes().to_vec()
 }
 
-
 /// Verify a certificate was signed by an issuer
 fn verify_cert_signature(cert_der: &[u8], issuer_cert: &Certificate) -> Result<()> {
     let cert = Certificate::from_der(cert_der).context("Failed to parse certificate")?;
@@ -263,8 +262,7 @@ pub fn verify_certificate_chain(
         .collect();
 
     // Parse the root CA
-    let root_cert =
-        Certificate::from_der(root_ca_der).context("Failed to parse root CA")?;
+    let root_cert = Certificate::from_der(root_ca_der).context("Failed to parse root CA")?;
 
     // Build the certificate chain: leaf -> intermediates -> root
     let leaf_cert =
@@ -321,12 +319,6 @@ pub fn verify_certificate_chain(
         verify_cert_signature(leaf_cert_der, &root_cert)
             .context("Failed to verify leaf against root CA")?;
     }
-
-    // Note: CRL signature verification is complex because CRLs may be signed by
-    // different CAs (e.g., PCK CRL is signed by PCK Processor CA, not Root CA).
-    // The revocation check based on serial numbers is the main purpose here.
-    // CRL authenticity is implicitly trusted since the collateral comes from
-    // Intel's trusted infrastructure.
 
     Ok(())
 }
