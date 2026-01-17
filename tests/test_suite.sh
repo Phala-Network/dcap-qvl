@@ -57,13 +57,9 @@ get_category() {
 }
 
 build_rust_tools() {
-	if [ ! -f "$RUST_TEST_CASE_CLI" ] || [ ! -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ]; then
-		echo "  Building Rust CLI tools..."
-		(cd "$PROJECT_ROOT/cli" && cargo build --release --bin test_case --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
-		echo -e "  ${GREEN}✓${NC} Rust CLI tools built"
-	else
-		echo -e "  ${GREEN}✓${NC} Rust CLI tools already built"
-	fi
+	echo "  Building Rust CLI tools..."
+	(cd "$PROJECT_ROOT/cli" && cargo build --release --bin test_case --bin generate_all_samples --quiet 2>&1 | grep -v "warning:") || true
+	echo -e "  ${GREEN}✓${NC} Rust CLI tools built"
 }
 
 build_python_binding() {
@@ -128,25 +124,18 @@ build_js_binding() {
 	[ -f "$PROJECT_ROOT/cli/target/release/generate_all_samples" ] || build_rust_tools
 }
 
-ensure_certificates() {
-	if [ ! -d "$CERTS_DIR" ] || [ ! -f "$CERTS_DIR/root_ca.der" ]; then
-		echo "  Generating test certificates..."
-		"$SCRIPT_DIR/generate_test_certs.sh" >/dev/null 2>&1
-		echo -e "  ${GREEN}✓${NC} Test certificates generated"
-	else
-		echo -e "  ${GREEN}✓${NC} Certificates found"
-	fi
-}
+regenerate_test_data() {
+	echo "  Cleaning test_data directory..."
+	rm -rf "$PROJECT_ROOT/test_data"
+	echo -e "  ${GREEN}✓${NC} test_data cleaned"
 
-ensure_samples() {
-	if [ ! -d "$SAMPLES_DIR" ] || [ -z "$(ls -A "$SAMPLES_DIR" 2>/dev/null)" ]; then
-		echo "  Running sample generator..."
-		"$PROJECT_ROOT/cli/target/release/generate_all_samples"
-		echo -e "  ${GREEN}✓${NC} Test samples generated"
-	else
-		local count=$(($(find "$SAMPLES_DIR" -maxdepth 1 -type d | wc -l) - 1))
-		echo -e "  ${GREEN}✓${NC} Found $count existing samples"
-	fi
+	echo "  Generating test certificates..."
+	"$SCRIPT_DIR/generate_test_certs.sh" >/dev/null 2>&1
+	echo -e "  ${GREEN}✓${NC} Test certificates generated"
+
+	echo "  Running sample generator..."
+	"$PROJECT_ROOT/cli/target/release/generate_all_samples"
+	echo -e "  ${GREEN}✓${NC} Test samples generated"
 }
 
 run_single_test() {
@@ -435,16 +424,12 @@ run_test_suite() {
 	fi
 	echo ""
 
-	echo -e "${BLUE}━━━ Step 2: Checking test certificates ━━━${NC}"
-	ensure_certificates
-	echo ""
-
-	echo -e "${BLUE}━━━ Step 3: Generating test samples ━━━${NC}"
-	ensure_samples
+	echo -e "${BLUE}━━━ Step 2: Regenerating test data ━━━${NC}"
+	regenerate_test_data
 	echo ""
 
 	# Run tests
-	echo -e "${BLUE}━━━ Step 4: Running verification tests ━━━${NC}"
+	echo -e "${BLUE}━━━ Step 3: Running verification tests ━━━${NC}"
 	echo ""
 
 	local total=0 passed=0 failed=0 warned=0
@@ -487,7 +472,7 @@ run_test_suite() {
 
 	# Run get-collateral test
 	echo ""
-	echo -e "${BLUE}━━━ Step 5: Running get-collateral tests ━━━${NC}"
+	echo -e "${BLUE}━━━ Step 4: Running get-collateral tests ━━━${NC}"
 	echo ""
 
 	run_get_collateral_test "$test_case_cli" "$test_name" ""
