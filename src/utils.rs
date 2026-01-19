@@ -58,7 +58,7 @@ fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>> {
     bail!("Oid is missing");
 }
 
-pub fn get_fmspc(extension_section: &[u8]) -> Result<Fmspc> {
+pub(crate) fn get_fmspc(extension_section: &[u8]) -> Result<Fmspc> {
     let data = find_extension(&[oids::FMSPC.as_bytes()], extension_section)
         .context("Failed to find Fmspc")?;
     if data.len() != 6 {
@@ -96,7 +96,7 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     }
 }
 
-pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
+pub(crate) fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(pem::parse_many(cert_chain)
         .context("Failed to parse certs")?
         .iter()
