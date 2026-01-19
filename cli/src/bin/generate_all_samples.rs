@@ -38,6 +38,19 @@ fn load_private_key(path: &str) -> Result<EcdsaKeyPair> {
         .map_err(|e| anyhow::anyhow!("Failed to parse private key: {:?}", e))
 }
 
+fn generate_attestation_key_pair() -> Result<EcdsaKeyPair> {
+    let rng = SystemRandom::new();
+    let attestation_pkcs8 =
+        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+            .map_err(|e| anyhow::anyhow!("Failed to generate PKCS8: {:?}", e))?;
+    EcdsaKeyPair::from_pkcs8(
+        &ECDSA_P256_SHA256_FIXED_SIGNING,
+        attestation_pkcs8.as_ref(),
+        &rng,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to create key pair from PKCS8: {:?}", e))
+}
+
 fn sign_data(key_pair: &EcdsaKeyPair, data: &[u8]) -> Result<[u8; 64]> {
     let rng = SystemRandom::new();
     let signature = key_pair
@@ -47,6 +60,13 @@ fn sign_data(key_pair: &EcdsaKeyPair, data: &[u8]) -> Result<[u8; 64]> {
     let mut result = [0u8; 64];
     result.copy_from_slice(&sig_bytes[..64]);
     Ok(result)
+}
+
+fn fake_signature_rs_eq_1() -> [u8; 64] {
+    let mut sig = [0u8; 64];
+    sig[31] = 1;
+    sig[63] = 1;
+    sig
 }
 
 /// Generate a JSON array of 16 tcbcomponents with specified SVN values
@@ -136,16 +156,7 @@ fn generate_base_quote(version: u16, key_type: u16, debug: bool) -> Result<Vec<u
     let pck_key_pair = load_private_key(pck_key_path)?;
 
     // Generate attestation key pair
-    let rng = SystemRandom::new();
-    let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        attestation_pkcs8.as_ref(),
-        &rng,
-    )
-    .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let attestation_key_pair = generate_attestation_key_pair()?;
 
     // Get public key (skip 0x04 prefix, take 64 bytes)
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -245,16 +256,7 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     let pck_key_pair = load_private_key(pck_key_path)?;
 
     // Generate attestation key pair
-    let rng = SystemRandom::new();
-    let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        attestation_pkcs8.as_ref(),
-        &rng,
-    )
-    .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let attestation_key_pair = generate_attestation_key_pair()?;
 
     // Get public key
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -412,16 +414,7 @@ fn generate_cert_type_3_quote() -> Result<Vec<u8>> {
     let report = create_sgx_report(false);
 
     // Generate attestation key pair
-    let rng = SystemRandom::new();
-    let attestation_pkcs8 =
-        ring::signature::EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        attestation_pkcs8.as_ref(),
-        &rng,
-    )
-    .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+    let attestation_key_pair = generate_attestation_key_pair()?;
 
     // Get public key
     let attestation_public_key = attestation_key_pair.public_key().as_ref();
@@ -803,18 +796,7 @@ fn main() -> Result<()> {
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
 
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            let attestation_key_pair = generate_attestation_key_pair()?;
 
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
@@ -912,18 +894,7 @@ fn main() -> Result<()> {
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1010,18 +981,7 @@ fn main() -> Result<()> {
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1108,18 +1068,7 @@ fn main() -> Result<()> {
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1206,18 +1155,7 @@ fn main() -> Result<()> {
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1628,19 +1566,7 @@ fn main() -> Result<()> {
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
 
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1699,19 +1625,7 @@ fn main() -> Result<()> {
             let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;
             let pck_chain_for_quote = format!("{}{}", pck_cert, root_cert);
 
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1778,19 +1692,7 @@ fn main() -> Result<()> {
             let pck_key_path = &format!("{}/pck.pkcs8.key", CERT_DIR);
             let pck_key_pair = load_private_key(pck_key_path)?;
 
-            let rng = SystemRandom::new();
-            let attestation_pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attestation_key_pair = EcdsaKeyPair::from_pkcs8(
-                &ECDSA_P256_SHA256_FIXED_SIGNING,
-                attestation_pkcs8.as_ref(),
-                &rng,
-            )
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
+            let attestation_key_pair = generate_attestation_key_pair()?;
             let attestation_public_key = attestation_key_pair.public_key().as_ref();
             let mut ecdsa_attestation_key = [0u8; 64];
             ecdsa_attestation_key.copy_from_slice(&attestation_public_key[1..65]);
@@ -1810,8 +1712,7 @@ fn main() -> Result<()> {
 
             let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
 
-            // Use INVALID quote signature (all zeros)
-            let ecdsa_signature = [0u8; 64];
+            let ecdsa_signature = fake_signature_rs_eq_1();
 
             let certification_data = CertificationData {
                 cert_type: 5,
