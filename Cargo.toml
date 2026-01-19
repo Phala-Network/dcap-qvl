@@ -71,17 +71,8 @@ rustls-pki-types = { version = "1.11", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
-[dependencies.dcap-qvl-webpki]
-git = "https://github.com/kvinwang/dcap-qvl-webpki"
-branch = "rustcrypto-backend"
-features = ["alloc", "rustcrypto"]
+dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc", "rustcrypto"] }
 
-[dependencies.webpki]
-git = "https://github.com/kvinwang/dcap-qvl-webpki"
-branch = "rustcrypto-backend"
-package = "dcap-qvl-webpki"
-default-features = false
-features = ["alloc", "rustcrypto"]
 
 [dev-dependencies]
 hex-literal = "1.1.0"
