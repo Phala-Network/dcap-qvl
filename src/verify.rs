@@ -404,7 +404,7 @@ fn verify_qe_report_data(
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = Sha256::digest(&qe_hash_data);
+    let qe_hash = Sha256::digest(qe_hash_data);
     if qe_hash.as_ref() as &[u8] != &qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
     }
