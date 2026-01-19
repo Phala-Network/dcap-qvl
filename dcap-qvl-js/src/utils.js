@@ -243,6 +243,51 @@ function derToPem(der, label) {
     return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`;
 }
 
+// Check if certificate is a CA certificate (has basicConstraints CA:TRUE)
+function isCaCertificate(certDer) {
+    try {
+        const cert = Certificate.decode(certDer, 'der');
+        const extensions = cert.tbsCertificate.extensions || [];
+
+        // OID for basicConstraints: 2.5.29.19
+        const basicConstraintsOid = [2, 5, 29, 19];
+
+        for (const ext of extensions) {
+            // Compare OID arrays
+            const oid = ext.extnID;
+            if (Array.isArray(oid) && oid.length === 4 &&
+                oid[0] === basicConstraintsOid[0] &&
+                oid[1] === basicConstraintsOid[1] &&
+                oid[2] === basicConstraintsOid[2] &&
+                oid[3] === basicConstraintsOid[3]) {
+                // Parse basicConstraints value
+                // The value is a SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER OPTIONAL }
+                const extValue = ext.extnValue;
+                if (extValue.length >= 2) {
+                    // Check if it's a SEQUENCE (tag 0x30)
+                    if (extValue[0] === 0x30) {
+                        const seqLen = extValue[1];
+                        // If sequence is empty, CA defaults to FALSE
+                        if (seqLen === 0) {
+                            return false;
+                        }
+                        // Check for BOOLEAN (tag 0x01)
+                        if (extValue.length >= 5 && extValue[2] === 0x01 && extValue[3] === 0x01) {
+                            // BOOLEAN value: 0x00 = FALSE, 0xFF = TRUE
+                            return extValue[4] !== 0x00;
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+        // No basicConstraints extension means not a CA
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Simple certificate chain verification using Node.js crypto
 function verifyCertificateChain(leafCertDer, intermediateCertsDer, timeSecs, crlDers, trustAnchorDer) {
     // Build the full chain string in PEM format
@@ -252,6 +297,11 @@ function verifyCertificateChain(leafCertDer, intermediateCertsDer, timeSecs, crl
 
     // Check certificate chain using Node.js crypto
     const leafCert = new crypto.X509Certificate(leafPem);
+
+    // Check that leaf certificate is not a CA certificate (RFC 5280 compliance)
+    if (isCaCertificate(leafCertDer)) {
+        throw new Error('CaUsedAsEndEntity');
+    }
 
     // Verify leaf cert is signed by intermediate (or root if no intermediate)
     const issuerCert = intermediateCertsDer.length > 0

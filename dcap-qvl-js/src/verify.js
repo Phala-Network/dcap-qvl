@@ -391,6 +391,9 @@ function verifyQeIdentityPolicy(qeReport, qeIdentity) {
         throw new Error(`QE ISVPRODID mismatch: expected ${qeIdentity.isvprodid}, got ${qeReport.isvProdId}`);
     }
 
+    // Validate QE report attributes (debug mode check)
+    validateSgx(qeReport);
+
     // Verify MISCSELECT with mask
     const expectedMiscselect = Buffer.from(qeIdentity.miscselect, 'hex');
     const miscselectMask = Buffer.from(qeIdentity.miscselectMask, 'hex');
@@ -444,12 +447,14 @@ function compareSvnArrays(actual, required) {
         return false;
     }
 
-    // Rust implementation uses lexicographical comparison (Vec::cmp), not component-wise
-    // So we convert to Buffer and compare
-    const actualBuf = Buffer.isBuffer(actual) ? actual : Buffer.from(actual);
-    const requiredBuf = Buffer.isBuffer(required) ? required : Buffer.from(required);
-
-    return actualBuf.compare(requiredBuf) >= 0;
+    // Component-wise comparison: every actual[i] must be >= required[i]
+    // This matches the Rust implementation: cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b)
+    for (let i = 0; i < actual.length; i++) {
+        if (actual[i] < required[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Validate report attributes
