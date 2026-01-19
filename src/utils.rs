@@ -118,7 +118,7 @@ pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>
 
 /// Encode two 32-byte values in DER format
 /// This is meant for 256 bit ECC signatures or public keys
-/// TODO: We may could use `asn1_der` crate reimplement this, so we can remove `der` which overlap with `asn1_der`
+/// TODO: We could use `asn1_der` crate to reimplement this, so we can remove `der` which overlaps with `asn1_der`
 pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     let (first, second) = data.split_at_checked(32).context("Invalid key length")?;
     let mut sequence = der::asn1::SequenceOf::<der::asn1::UintRef, 2>::new();
