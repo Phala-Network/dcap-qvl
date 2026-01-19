@@ -1,6 +1,6 @@
 use core::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use rustls_pki_types::UnixTime;
 use scale::Decode;
@@ -396,16 +396,23 @@ fn verify_qe_report_signature(
 // Step 5: Verify QE Report content (QE Hash = hash(attestation_key + auth_data))
 // =============================================================================
 
-/// Verify QE report hash matches attestation key and auth data
+/// Verify QE report hash matches attestation key and auth data (panic-free)
 fn verify_qe_report_data(
     qe_report: &EnclaveReport,
     auth_data: &crate::quote::AuthDataV3,
 ) -> Result<()> {
-    let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
-    qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
+    use crate::constants::{ATTESTATION_KEY_LEN, AUTHENTICATION_DATA_LEN};
+
+    ensure!(
+        auth_data.qe_auth_data.data.len() == AUTHENTICATION_DATA_LEN,
+        "Invalid QE auth data length"
+    );
+    // Build hash data: attestation_key || qe_auth_data
+    let mut qe_hash_data = [0u8; ATTESTATION_KEY_LEN + AUTHENTICATION_DATA_LEN];
+    qe_hash_data[..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
     let qe_hash = Sha256::digest(qe_hash_data);
-    if qe_hash.as_ref() as &[u8] != &qe_report.report_data[0..32] {
+    if qe_hash[..] != qe_report.report_data[..32] {
         bail!("QE report hash mismatch");
     }
     Ok(())
