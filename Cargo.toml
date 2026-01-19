@@ -8,14 +8,18 @@ authors = ["Kevin Wang <wy721@qq.com>"]
 repository = "https://github.com/Phala-Network/dcap-qvl"
 
 [dependencies]
-borsh = { version = "1.6.0", default-features = false, features = ["derive"], optional = true }
+borsh = { version = "1.6.0", default-features = false, features = [
+    "derive",
+], optional = true }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 scale = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = [
     "derive",
 ] }
-scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
+scale-info = { version = "2.11.6", default-features = false, features = [
+    "derive",
+] }
 chrono = { version = "0.4.42", default-features = false, features = [
     "alloc",
     "serde",
@@ -33,9 +37,6 @@ log = { version = "0.4.29", default-features = false }
 
 anyhow = { version = "1.0.100", optional = true }
 
-ring = { version = "0.17", default-features = false, features = [
-    "alloc",
-] }
 reqwest = { version = "0.12.24", optional = true, default-features = false, features = [
     "rustls-tls",
     "blocking",
@@ -48,26 +49,30 @@ serde_json = { version = "1.0.148", optional = true, features = [
 tracing = { version = "0.1", optional = true }
 futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true }
-serde-wasm-bindgen = { version = "0.6.5", optional = true}
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
 wasm-bindgen = { version = "0.2.95", optional = true }
 wasm-bindgen-futures = { version = "0.4.56" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 # Python bindings
-pyo3 = { version = "0.25", optional = true, features = ["extension-module", "abi3-py38", "generate-import-lib"] }
-pyo3-async-runtimes = { version = "0.25", optional = true, features = ["tokio-runtime"] }
+pyo3 = { version = "0.25", optional = true, features = [
+    "extension-module",
+    "abi3-py38",
+    "generate-import-lib",
+] }
+pyo3-async-runtimes = { version = "0.25", optional = true, features = [
+    "tokio-runtime",
+] }
 tokio = { version = "1.49.0", optional = true, features = ["full"] }
 derive_more = { version = "2.1.1", features = ["display"] }
 
-[dependencies.dcap-qvl-webpki]
-version = "0.103.3"
-features = ["alloc", "ring"]
+rustls-pki-types = { version = "1.11", default-features = false }
 
-[dependencies.webpki]
-version = "0.102.8"
-package = "rustls-webpki"
-default-features = false
-features = ["alloc", "ring"]
+sha2 = { version = "0.10", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
+dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc", "rustcrypto"] }
+
 
 [dev-dependencies]
 hex-literal = "1.1.0"
@@ -86,8 +91,6 @@ std = [
     "serde/std",
     "scale/std",
     "scale-info/std",
-    "ring/std",
-    "webpki/std",
     "const-oid/std",
     "pem/std",
     "asn1_der/std",
@@ -100,7 +103,7 @@ std = [
 borsh = ["dep:borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
 report = ["std", "tracing", "futures", "reqwest"]
-js = ["ring/wasm32_unknown_unknown_js", "getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
+js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]
 contract = ["getrandom"]
 
