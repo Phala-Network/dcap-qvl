@@ -49,6 +49,13 @@ fn sign_data(key_pair: &EcdsaKeyPair, data: &[u8]) -> Result<[u8; 64]> {
     Ok(result)
 }
 
+fn fake_signature_rs_eq_1() -> [u8; 64] {
+    let mut sig = [0u8; 64];
+    sig[31] = 1;
+    sig[63] = 1;
+    sig
+}
+
 fn create_sgx_header(version: u16, attestation_key_type: u16, tee_type: u32) -> Header {
     Header {
         version,
@@ -1625,8 +1632,7 @@ fn main() -> Result<()> {
 
             let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
 
-            // Use INVALID quote signature (all zeros)
-            let ecdsa_signature = [0u8; 64];
+            let ecdsa_signature = fake_signature_rs_eq_1();
 
             let certification_data = CertificationData {
                 cert_type: 5,

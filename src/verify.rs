@@ -1,8 +1,7 @@
 use core::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
-use p256::ecdsa::{Signature, VerifyingKey};
-use p256::EncodedPoint;
+use anyhow::{bail, Context, Result};
+use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use rustls_pki_types::UnixTime;
 use scale::Decode;
 use sha2::{Digest, Sha256};
@@ -433,28 +432,22 @@ fn verify_isv_report_signature(
     pub_key_bytes[0] = 0x04;
     pub_key_bytes[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
 
-    // Parse the public key
-    let encoded_point = EncodedPoint::from_bytes(&pub_key_bytes)
-        .map_err(|_| anyhow!("Failed to parse public key"))?;
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
-        .map_err(|_| anyhow!("Failed to create verifying key"))?;
+    // Parse public key & signature (with context)
+    let verifying_key =
+        VerifyingKey::from_sec1_bytes(&pub_key_bytes).context("Failed to parse public key")?;
 
-    // Parse the signature (r || s, 64 bytes)
     let signature = Signature::try_from(auth_data.ecdsa_signature.as_slice())
-        .map_err(|_| anyhow!("Failed to parse signature"))?;
+        .context("ISV enclave report signature is invalid")?;
 
-    // Hash the signed data
-    let signed_quote_len = quote.signed_length();
+    // Verify (Verifier handles SHA256)
     let signed_data = raw_quote
-        .get(..signed_quote_len)
-        .ok_or(anyhow!("Failed to get signed quote"))?;
-    let message_hash = Sha256::digest(signed_data);
+        .get(..quote.signed_length())
+        .context("Failed to get signed quote scope")?;
 
-    // Verify the signature using prehashed data
-    use p256::ecdsa::signature::hazmat::PrehashVerifier;
     verifying_key
-        .verify_prehash(&message_hash, &signature)
-        .map_err(|_| anyhow!("ISV enclave report signature is invalid"))?;
+        .verify(signed_data, &signature)
+        .context("ISV enclave report signature is invalid")?;
+
     Ok(())
 }
 
