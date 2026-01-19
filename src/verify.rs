@@ -1,8 +1,11 @@
 use core::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use p256::ecdsa::{Signature, VerifyingKey};
+use p256::EncodedPoint;
+use rustls_pki_types::UnixTime;
 use scale::Decode;
-use webpki::types::UnixTime;
+use sha2::{Digest, Sha256};
 
 use {
     crate::constants::*,
@@ -22,8 +25,8 @@ use crate::{
     quote::{TDReport10, TDReport15},
     QuoteCollateralV3,
 };
+use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
-use webpki::types::CertificateDer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TeeType {
@@ -192,7 +195,7 @@ fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[&[u8]],
-    trust_anchor: webpki::types::TrustAnchor,
+    trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<TcbInfo> {
     // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
@@ -225,7 +228,7 @@ fn verify_tcb_info_signature(
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
+            webpki::rustcrypto::ECDSA_P256_SHA256,
             collateral.tcb_info.as_bytes(),
             &asn1_signature,
         )
@@ -246,7 +249,7 @@ fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[&[u8]],
-    trust_anchor: webpki::types::TrustAnchor,
+    trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<QeIdentity> {
     // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
@@ -279,7 +282,7 @@ fn verify_qe_identity_signature(
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
     if qe_id_leaf_cert
         .verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
+            webpki::rustcrypto::ECDSA_P256_SHA256,
             collateral.qe_identity.as_bytes(),
             &qe_id_asn1_signature,
         )
@@ -304,7 +307,7 @@ fn verify_pck_cert_chain(
     certification_data: &crate::quote::CertificationData,
     now: UnixTime,
     crls: &[&[u8]],
-    trust_anchor: webpki::types::TrustAnchor,
+    trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
     let certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
@@ -373,7 +376,7 @@ fn verify_qe_report_signature(
     let qe_report_signature = encode_as_der(&auth_data.qe_report_signature)?;
     if pck_leaf_cert
         .verify_signature(
-            webpki::ring::ECDSA_P256_SHA256,
+            webpki::rustcrypto::ECDSA_P256_SHA256,
             &auth_data.qe_report,
             &qe_report_signature,
         )
@@ -402,8 +405,8 @@ fn verify_qe_report_data(
     let mut qe_hash_data = [0u8; QE_HASH_DATA_BYTE_LEN];
     qe_hash_data[0..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = ring::digest::digest(&ring::digest::SHA256, &qe_hash_data);
-    if qe_hash.as_ref() != &qe_report.report_data[0..32] {
+    let qe_hash = Sha256::digest(&qe_hash_data);
+    if qe_hash.as_ref() as &[u8] != &qe_report.report_data[0..32] {
         bail!("QE report hash mismatch");
     }
     Ok(())
@@ -425,18 +428,32 @@ fn verify_isv_report_signature(
     quote: &Quote,
     auth_data: &crate::quote::AuthDataV3,
 ) -> Result<()> {
-    let mut pub_key = [0x04u8; 65];
-    pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
-    let peer_public_key =
-        ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_FIXED, pub_key);
+    // Reconstruct uncompressed public key (0x04 || x || y)
+    let mut pub_key_bytes = [0u8; 65];
+    pub_key_bytes[0] = 0x04;
+    pub_key_bytes[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
+
+    // Parse the public key
+    let encoded_point = EncodedPoint::from_bytes(&pub_key_bytes)
+        .map_err(|_| anyhow!("Failed to parse public key"))?;
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+        .map_err(|_| anyhow!("Failed to create verifying key"))?;
+
+    // Parse the signature (r || s, 64 bytes)
+    let signature = Signature::try_from(auth_data.ecdsa_signature.as_slice())
+        .map_err(|_| anyhow!("Failed to parse signature"))?;
+
+    // Hash the signed data
     let signed_quote_len = quote.signed_length();
-    peer_public_key
-        .verify(
-            raw_quote
-                .get(..signed_quote_len)
-                .ok_or(anyhow!("Failed to get signed quote"))?,
-            &auth_data.ecdsa_signature,
-        )
+    let signed_data = raw_quote
+        .get(..signed_quote_len)
+        .ok_or(anyhow!("Failed to get signed quote"))?;
+    let message_hash = Sha256::digest(signed_data);
+
+    // Verify the signature using prehashed data
+    use p256::ecdsa::signature::hazmat::PrehashVerifier;
+    verifying_key
+        .verify_prehash(&message_hash, &signature)
         .map_err(|_| anyhow!("ISV enclave report signature is invalid"))?;
     Ok(())
 }
@@ -547,7 +564,7 @@ fn verify_impl(
     let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
 
     // Check root CA against CRL
-    dcap_qvl_webpki::check_single_cert_crl(root_ca_der, &crls, now)?;
+    webpki::check_single_cert_crl(root_ca_der, &crls, now)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;

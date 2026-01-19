@@ -4,12 +4,9 @@ use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
-use webpki::{
-    self,
-    types::{TrustAnchor, UnixTime},
-    BorrowedCertRevocationList,
-};
-use webpki::{types::CertificateDer, CertRevocationList};
+use rustls_pki_types::{CertificateDer, TrustAnchor, UnixTime};
+use webpki::CertRevocationList;
+use webpki::{self, BorrowedCertRevocationList};
 use x509_cert::Certificate;
 
 use crate::{constants::*, oids};
@@ -112,7 +109,7 @@ pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>
 
     let raw_certs = extract_raw_certs(cert_chain)?;
     for raw_cert in raw_certs.iter() {
-        let cert = webpki::types::CertificateDer::<'a>::from(raw_cert.to_vec());
+        let cert = rustls_pki_types::CertificateDer::<'a>::from(raw_cert.to_vec());
         certs.push(cert);
     }
 
