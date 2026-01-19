@@ -140,7 +140,7 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
-/// a valid certificate chain that is rooted in one of the trust anchors that was compiled into to the pallet
+/// a valid certificate chain that is rooted in one of the trust anchors that was compiled into the pallet
 ///
 /// It will also check that the certificate is not revoked according to the CRL
 pub fn verify_certificate_chain(
