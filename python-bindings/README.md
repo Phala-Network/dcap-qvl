@@ -82,7 +82,7 @@ async def main():
     # Get collateral from Intel PCS (async)
     quote_data = open("quote.bin", "rb").read()
     collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
-    
+
     # Or get collateral for specific FMSPC (async)
     collateral = await dcap_qvl.get_collateral_for_fmspc(
         pccs_url="https://api.trustedservices.intel.com",
@@ -90,11 +90,11 @@ async def main():
         ca="processor",
         is_sgx=True
     )
-    
+
     # Verify quote with collateral
     result = dcap_qvl.verify(quote_data, collateral, timestamp)
     print(f"Status: {result.status}")
-    
+
     # Or get collateral and verify in one step (async)
     result = await dcap_qvl.get_collateral_and_verify(quote_data)
     print(f"Advisory IDs: {result.advisory_ids}")
@@ -121,7 +121,7 @@ The Python bindings are built using:
 1. Add Rust implementation in `../src/python.rs`
 2. Update Python package in `python/dcap_qvl/__init__.py`
 3. Add tests in `tests/` directory (use appropriate test file)
-5. Update documentation in `docs/`
+4. Update documentation in `docs/`
 
 ### Testing
 
