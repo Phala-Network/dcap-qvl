@@ -150,7 +150,7 @@ For CI/CD pipelines, you can use the testing scripts:
 - name: Test Python versions
   run: |
     ./python-bindings/tests/test_python_versions.sh
-    
+
 - name: Test async functions
   run: |
     cd python-bindings
@@ -203,7 +203,7 @@ The detailed Python script generates a JSON report (`python_version_test_report.
 ## Best Practices
 
 1. **Regular Testing**: Run version tests before releases
-2. **CI Integration**: Include version testing in your CI pipeline 
+2. **CI Integration**: Include version testing in your CI pipeline
 3. **Report Review**: Check detailed reports for any warnings or partial failures
 4. **Environment Isolation**: Scripts use temporary environments to avoid conflicts
 5. **Timeout Handling**: Each version test has a 5-minute timeout to prevent hanging
