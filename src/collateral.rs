@@ -248,9 +248,7 @@ fn extract_fmspc_and_ca(pem_chain: &str) -> Result<(String, &'static str)> {
 fn build_http_client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
-    let builder = builder
-        .danger_accept_invalid_certs(true)
-        .timeout(Duration::from_secs(180));
+    let builder = builder.timeout(Duration::from_secs(180));
     Ok(builder.build()?)
 }
 
