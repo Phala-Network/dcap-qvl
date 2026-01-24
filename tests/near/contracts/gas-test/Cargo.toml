@@ -1,5 +1,5 @@
 [package]
-name = "gas-test"
+name = "dcap-qvl-gas-test"
 description = "NEAR contract for testing dcap-qvl gas consumption"
 version = "0.1.0"
 edition = "2021"
