@@ -116,4 +116,4 @@ test_near_gas:
 	@echo "Running NEAR gas consumption tests..."
 	cd tests/near/contracts/gas-test && cargo test --features test -- --nocapture
 
-.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean test_wasm_web test_wasm_node test_wasm build_near_gas_test test_near_gas
+.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean test_wasm_web test_wasm_node test_wasm test_near_gas
