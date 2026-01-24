@@ -112,7 +112,7 @@ test_wasm: test_wasm_node
 test_near_gas:
 	@echo "Building NEAR gas test contract..."
 	@rustup target add wasm32-unknown-unknown
-	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test --locked
+	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test
 	@echo "Running NEAR gas consumption tests..."
 	cd tests/near/contracts/gas-test && cargo test --features test -- --nocapture
 
