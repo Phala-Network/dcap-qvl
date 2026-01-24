@@ -7,7 +7,7 @@ use std::sync::Arc;
 // The WASM is built to target/near/{package_name}/{package_name}.wasm
 // where package_name has hyphens converted to underscores
 const CONTRACT_WASM: &str =
-    "../../../../../../target/near/dcap_qvl_gas_test/dcap_qvl_gas_test.wasm";
+    "../../../../../../target/near/gas_test/gas_test.wasm";
 
 /// Creates a network configuration for connecting to the sandbox.
 /// Creates a network configuration for connecting to the sandbox.
