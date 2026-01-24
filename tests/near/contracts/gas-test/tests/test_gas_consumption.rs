@@ -52,20 +52,16 @@ async fn test_gas_consumption() -> Result<(), Box<dyn std::error::Error + Send +
     // Access gas burnt from ExecutionResult (available even if execution failed)
     let gas_consumed = result.total_gas_burnt;
 
-    // Print diagnostic info before checking result
-    println!("Gas burnt: {} gas units", gas_consumed.as_gas());
-
     // Check if execution succeeded
     let _execution_outcome = result.into_result().map_err(|e| {
         eprintln!("Execution failed. Full error: {e:#?}");
         format!("Verification should succeed: {e:?}")
     })?;
-    println!("Result: Success");
     println!(
-        "Gas consumed: {} TGas",
-        gas_consumed.as_gas() / 1_000_000_000_000
+        "Gas consumed: {} TGas, {} gas units",
+        gas_consumed.as_gas() / 1_000_000_000_000,
+        gas_consumed.as_gas()
     );
-    println!("Gas consumed: {} gas units", gas_consumed.as_gas());
 
     println!("\n=== Gas Consumption Test Complete ===\n");
 
