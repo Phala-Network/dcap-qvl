@@ -33,9 +33,6 @@ async fn test_gas_consumption() -> Result<(), Box<dyn std::error::Error + Send +
     // Get public key from the signer for display
     let alice_public_key = alice_signer.get_public_key().await?.to_string();
 
-    println!("Testing with Alice's attestation data...");
-    println!("Using public key: {alice_public_key}\n");
-
     // Test: dcap-qvl::verify::verify() gas consumption
     println!("--- Gas Consumption Test: dcap-qvl::verify::verify() ---");
     let result = Contract(contract_id.clone())
