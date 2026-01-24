@@ -3,11 +3,11 @@ use near_api::{Account, AccountId, Contract, NearToken, NetworkConfig, RPCEndpoi
 use near_sandbox::{GenesisAccount, Sandbox};
 use std::sync::Arc;
 
-// Path to the built contract WASM, relative to the test file
+// Path to the built contract WASM, relative to the contract root (where cargo test runs)
 // The WASM is built to target/near/{package_name}/{package_name}.wasm
 // where package_name has hyphens converted to underscores
-const CONTRACT_WASM: &str =
-    "../target/near/dcap_qvl_gas_test.wasm";
+// Package name: dcap-qvl-gas-test -> dcap_qvl_gas_test
+const CONTRACT_WASM: &str = "target/near/dcap_qvl_gas_test.wasm";
 
 /// Creates a network configuration for connecting to the sandbox.
 /// Creates a network configuration for connecting to the sandbox.
