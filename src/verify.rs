@@ -353,24 +353,15 @@ fn verify_pck_cert_chain(
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
     verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
 
-    // Extract PPID from PCK certificate
-    let ppid = intel::parse_pck_extension(pck_leaf)
-        .ok()
-        .map(|ext| ext.ppid.clone())
-        .unwrap_or_default();
-
-    // Extract Intel extension data from PCK cert
-    let extension_section = utils::get_intel_extension(pck_leaf)?;
-    let cpu_svn = utils::get_cpu_svn(&extension_section)?;
-    let pce_svn = utils::get_pce_svn(&extension_section)?;
-    let fmspc = utils::get_fmspc(&extension_section)?;
+    // Extract Intel extension data from PCK cert (parsed once)
+    let pck_ext = intel::parse_pck_extension(pck_leaf)?;
 
     Ok(PckCertChainResult {
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
-        ppid,
-        cpu_svn,
-        pce_svn,
-        fmspc,
+        ppid: pck_ext.ppid,
+        cpu_svn: pck_ext.cpu_svn,
+        pce_svn: pck_ext.pce_svn,
+        fmspc: pck_ext.fmspc,
     })
 }
 
