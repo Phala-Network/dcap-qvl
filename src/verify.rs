@@ -16,7 +16,7 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
-    utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
+    utils::{encode_as_der, extract_certs, parse_crls, verify_certificate_chain},
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -215,7 +215,7 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
     backend: &CryptoBackend,
 ) -> Result<TcbInfo> {
@@ -270,7 +270,7 @@ fn verify_tcb_info_signature(
 fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
     backend: &CryptoBackend,
 ) -> Result<QeIdentity> {
@@ -329,7 +329,7 @@ fn verify_pck_cert_chain(
     collateral: &QuoteCollateralV3,
     certification_data: &crate::quote::CertificationData,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
@@ -585,10 +585,13 @@ fn verify_impl(
     let trust_anchor =
         webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
-    let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+    let raw_crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
 
     // Check root CA against CRL
-    webpki::check_single_cert_crl(root_ca_der, &crls, now)?;
+    webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
+
+    // Parse CRLs once for reuse across all certificate chain verifications
+    let crls = parse_crls(&raw_crls)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;

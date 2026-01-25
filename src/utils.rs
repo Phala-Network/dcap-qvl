@@ -6,7 +6,7 @@ use asn1_der::{
 };
 use rustls_pki_types::{CertificateDer, TrustAnchor, UnixTime};
 use webpki::CertRevocationList;
-use webpki::{self, BorrowedCertRevocationList};
+use webpki::{self, OwnedCertRevocationList};
 use x509_cert::Certificate;
 
 use crate::{constants::*, oids};
@@ -139,6 +139,16 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     Ok(writer.finish().context("Failed to finish writer")?.to_vec())
 }
 
+/// Parse CRL DER bytes into CertRevocationList objects.
+/// Call this once and pass the results to `verify_certificate_chain`.
+pub fn parse_crls(crl_der: &[&[u8]]) -> Result<Vec<CertRevocationList<'static>>> {
+    crl_der
+        .iter()
+        .map(|der| OwnedCertRevocationList::from_der(der).map(CertRevocationList::from))
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to parse CRL")
+}
+
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
 /// a valid certificate chain that is rooted in one of the trust anchors that was compiled into the pallet
 ///
@@ -147,17 +157,11 @@ pub fn verify_certificate_chain(
     leaf_cert: &webpki::EndEntityCert,
     intermediate_certs: &[CertificateDer],
     time: UnixTime,
-    crl_der: &[&[u8]],
+    crls: &[CertRevocationList<'_>],
     trust_anchor: TrustAnchor<'_>,
 ) -> Result<()> {
     let sig_algs = webpki::ALL_VERIFICATION_ALGS;
 
-    // Parse the CRL
-    let crls: Vec<CertRevocationList> = crl_der
-        .iter()
-        .map(|der| BorrowedCertRevocationList::from_der(der).map(|crl| crl.into()))
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to parse CRL")?;
     let crl_slice = crls.iter().collect::<Vec<_>>();
 
     // Create a RevocationOptions object with the CRL
