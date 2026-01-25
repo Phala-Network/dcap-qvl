@@ -1,10 +1,25 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use dcap_qvl::{quote::Quote, verify::verify, QuoteCollateralV3};
+use dcap_qvl::{quote::Quote, verify::VerifiedReport, QuoteCollateralV3};
 use der::Decode as DerDecode;
 use scale::Decode as ScaleDecode;
 use serde_json::Value;
 use x509_cert::crl::CertificateList;
+
+pub fn verify(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+) -> anyhow::Result<VerifiedReport> {
+    use dcap_qvl::verify::{ring, rustcrypto};
+    let ring_result = ring::verify(raw_quote, collateral, now_secs);
+    let rustcrypto_result = rustcrypto::verify(raw_quote, collateral, now_secs);
+    assert_eq!(
+        ring_result.map_err(|e| e.to_string()),
+        rustcrypto_result.map_err(|e| e.to_string())
+    );
+    ring::verify(raw_quote, collateral, now_secs)
+}
 
 fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {
     fn parse_issue_next(json_str: &str) -> (u64, u64) {

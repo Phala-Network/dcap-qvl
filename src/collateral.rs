@@ -15,7 +15,6 @@ use crate::constants::{
     PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN,
 };
 use crate::quote::{EncryptedPpidParams, Quote};
-use crate::verify::VerifiedReport;
 use crate::QuoteCollateralV3;
 
 #[derive(Deserialize)]
@@ -34,7 +33,6 @@ struct QeIdentityResponse {
 
 #[cfg(not(feature = "js"))]
 use core::time::Duration;
-use std::time::SystemTime;
 
 /// Default PCCS URL (Phala Network's PCCS server).
 /// This is the recommended default for most users as it provides better availability
@@ -425,16 +423,19 @@ pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> 
     get_collateral(INTEL_PCS_URL, quote).await
 }
 
-/// Get collateral and verify the quote.
+/// Get collateral and verify the quote (uses ring backend).
 ///
 /// # Arguments
 ///
 /// * `quote` - The raw quote to verify.
 /// * `pccs_url` - Optional PCCS URL. Defaults to Phala PCCS if not provided.
+#[cfg(feature = "_anycrypto")]
 pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
-) -> Result<VerifiedReport> {
+) -> Result<crate::verify::VerifiedReport> {
+    use std::time::SystemTime;
+
     let pccs_url = pccs_url
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
