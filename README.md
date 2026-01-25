@@ -26,8 +26,10 @@ This crate supports two crypto backends: **ring** (optimized, uses assembly) and
 
 | Backend | Gas Consumption |
 |---------|-----------------|
-| ring | ~152 Tgas |
+| ring | ~175 Tgas |
 | rustcrypto | ~288 Tgas |
+
+Ring saves ~113 Tgas (~39%) compared to rustcrypto.
 
 ## Feature Flags
 
