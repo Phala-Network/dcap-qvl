@@ -1,0 +1,61 @@
+[package]
+name = "dcap-qvl-gas-test"
+description = "NEAR contract for testing dcap-qvl gas consumption"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# fields to configure build with WASM reproducibility, according to specs
+# in https://github.com/near/NEPs/blob/master/neps/nep-0330.md
+[package.metadata.near.reproducible_build]
+# docker image, descriptor of build environment
+image = "sourcescan/cargo-near:0.14.1-rust-1.86.0"
+# tag after colon above serves only descriptive purpose; image is identified by digest
+image_digest = "sha256:eaac91be3119cc7c136b6f375f2d3e092001f717ed6151ccc9d5348c2d6a640c"
+# list of environment variables names, whose values, if set, will be used as external build parameters
+# in a reproducible manner
+# supported by `sourcescan/cargo-near:0.10.1-rust-1.82.0` image or later images
+passed_env = []
+# build command inside of docker container
+# if docker image from default gallery is used https://hub.docker.com/r/sourcescan/cargo-near/tags,
+# the command may be any combination of flags of `cargo-near`,
+# supported by respective version of binary inside the container besides `--no-locked` flag
+container_build_command = [
+    "cargo",
+    "near",
+    "build",
+    "non-reproducible-wasm",
+    "--locked",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+# Use dcap-qvl from the project root (4 levels up from tests/near/contracts/dcap-qvl-gas-test)
+dcap-qvl = { path = "../../../../", default-features = false, features = ["contract", "std"] }
+hex = "0.4"
+near-sdk = "5"
+# Force dependencies to versions compatible with Rust 1.86.0
+# These newer versions require Rust 1.88.0, but NEAR requires Rust 1.86.0
+# Adding as direct dependencies to force version resolution for transitive deps
+darling = "=0.21.3"
+darling_core = "=0.21.3"
+darling_macro = "=0.21.3"
+time = "=0.3.45"
+time-core = "=0.1.7"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.16", features = ["custom"] }
+
+[dev-dependencies]
+near-gas = "0.3"
+near-sdk = { version = "5", features = ["unit-testing"] }
+near-sandbox = "0.3.4"
+near-api = "0.8.2"
+tokio = { version = "1", features = ["full"] }
+
+[features]
+test = []
+
+
