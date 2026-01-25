@@ -18,11 +18,61 @@ Add the following dependency to your `Cargo.toml` file to use this crate:
 dcap-qvl = "0.1.0"
 ```
 
+# Crypto Backend Selection
+
+This crate supports two crypto backends: **ring** (optimized, uses assembly) and **rustcrypto** (pure Rust).
+
+## Gas/Performance Comparison (NEAR Contract)
+
+| Backend | Gas Consumption |
+|---------|-----------------|
+| ring | ~152 Tgas |
+| rustcrypto | ~288 Tgas |
+
+## Feature Flags
+
+```toml
+# Default: both backends enabled, ring takes priority
+dcap-qvl = "0.3.11"
+
+# For WASM/NEAR (recommended for gas efficiency):
+dcap-qvl = { version = "0.3.11", default-features = false, features = ["std", "ring"] }
+
+# For pure Rust / no-assembly environments:
+dcap-qvl = { version = "0.3.11", default-features = false, features = ["std", "rustcrypto"] }
+```
+
+## Backend Selection Rules for `verify()`
+
+The top-level `verify()` function selects backend based on enabled features:
+
+| `ring` enabled | `rustcrypto` enabled | `verify()` uses |
+|----------------|----------------------|-----------------|
+| ✓ | ✓ | ring |
+| ✓ | ✗ | ring |
+| ✗ | ✓ | rustcrypto |
+| ✗ | ✗ | compile error |
+
+⚠️ **Important**: Due to Cargo's additive feature model, if **any** crate in your dependency tree enables the `ring` feature, the top-level `verify()` will use ring. This can lead to unexpected behavior in complex projects.
+
+## Explicit Backend Selection (Recommended)
+
+For predictable behavior, especially in complex projects, use explicit backend modules:
+
+```rust
+// Explicitly use ring backend
+use dcap_qvl::verify::ring::verify;
+
+// Explicitly use rustcrypto backend
+use dcap_qvl::verify::rustcrypto::verify;
+```
+
 # Example
 
 ```rust
 use dcap_qvl::collateral::get_collateral;
-use dcap_qvl::verify::verify;
+// Use explicit backend for predictable behavior
+use dcap_qvl::verify::ring::verify;
 use dcap_qvl::PHALA_PCCS_URL;
 
 #[tokio::main]
