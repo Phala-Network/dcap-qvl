@@ -55,7 +55,7 @@ fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>> {
             return Ok(value);
         }
     }
-    bail!("Oid is missing");
+    bail!("OID is missing");
 }
 
 pub(crate) fn get_fmspc(extension_section: &[u8]) -> Result<Fmspc> {
