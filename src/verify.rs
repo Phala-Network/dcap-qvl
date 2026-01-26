@@ -695,7 +695,7 @@ fn validate_attrs(report: &Report) -> Result<()> {
     }
     fn validate_td15(report: &TDReport15) -> Result<()> {
         if report.mr_service_td != [0u8; 48] {
-            bail!("Invalid mr service td");
+            bail!("Invalid MR service TD");
         }
         validate_td10(&report.base)
     }
