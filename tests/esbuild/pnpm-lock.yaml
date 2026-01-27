@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@phala/dcap-qvl-web':
-        specifier: ^0.2.7
-        version: 0.2.7
+        specifier: ^0.3.3
+        version: 0.3.3
     devDependencies:
       esbuild:
         specifier: ^0.20.0
@@ -156,8 +156,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@phala/dcap-qvl-web@0.2.7':
-    resolution: {integrity: sha512-OgDIN8ZRsLg0dJgUAk0HCXMjkAmrif7p0C+P74YrtxgE/8fNSFpqNDjVW3mCVB2Q/V7X6mUhbEQWa5wJmM9OSQ==}
+  '@phala/dcap-qvl-web@0.3.3':
+    resolution: {integrity: sha512-pCSZVCMT13K5dAU+Cb5TURT0GXZ6MKvHfgQxUbELAMY8OiQglztpVN42WOjUt17z2iQjBHUWhpwodPgGO+D+CQ==}
 
   esbuild@0.20.2:
     resolution: {integrity: sha512-WdOOppmUNU+IbZ0PaDiTst80zjnrOkyJNHoKupIcVyU8Lvla3Ugx94VzkQ32Ijqd7UhHJy75gNWDMUekcrSJ6g==}
@@ -235,7 +235,7 @@ snapshots:
   '@esbuild/win32-x64@0.20.2':
     optional: true
 
-  '@phala/dcap-qvl-web@0.2.7': {}
+  '@phala/dcap-qvl-web@0.3.3': {}
 
   esbuild@0.20.2:
     optionalDependencies:
