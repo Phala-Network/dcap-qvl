@@ -47,20 +47,24 @@ check_wasm_opt:
 build_web_pkg: install_wasm_tool check_wasm_opt
 	@echo "Building for web browsers..."
 	$(BUILD_WEB)
+	@echo "Updating package name..."
+	@if command -v jq &> /dev/null; then \
+		jq '.name = "@phala/dcap-qvl-web"' pkg/web/package.json > pkg/web/package.json.tmp && mv pkg/web/package.json.tmp pkg/web/package.json; \
+	else \
+		sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-web"/' pkg/web/package.json && rm pkg/web/package.json.bak; \
+	fi
 
 build_node_pkg: install_wasm_tool check_wasm_opt
 	@echo "Building for Node.js..."
 	$(BUILD_NODE)
-
-publish_npm: build_web_pkg build_node_pkg
-	@echo "Updating package names..."
+	@echo "Updating package name..."
 	@if command -v jq &> /dev/null; then \
-		jq '.name = "@phala/dcap-qvl-web"' pkg/web/package.json > pkg/web/package.json.tmp && mv pkg/web/package.json.tmp pkg/web/package.json; \
 		jq '.name = "@phala/dcap-qvl-node"' pkg/node/package.json > pkg/node/package.json.tmp && mv pkg/node/package.json.tmp pkg/node/package.json; \
 	else \
-		sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-web"/' pkg/web/package.json && rm pkg/web/package.json.bak; \
 		sed -i.bak 's/"name": "dcap-qvl"/"name": "@phala\/dcap-qvl-node"/' pkg/node/package.json && rm pkg/node/package.json.bak; \
 	fi
+
+publish_npm: build_web_pkg build_node_pkg
 	@echo "Publishing web package to npm..."
 	cd pkg/web && npm publish --access public
 	@echo "Publishing node package to npm..."
