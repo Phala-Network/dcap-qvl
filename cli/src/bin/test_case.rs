@@ -101,12 +101,32 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
         .expect("Invalid system time")
         .as_secs();
 
-    let verifier = match root_ca_der {
-        Some(root_ca_der) => QuoteVerifier::new_with_root_ca(root_ca_der),
-        None => QuoteVerifier::new_prod(),
+    let ring_backend = dcap_qvl::verify::ring::backend();
+    let rustcrypto_backend = dcap_qvl::verify::rustcrypto::backend();
+    let ring_verifier = match root_ca_der.clone() {
+        Some(root_ca_der) => QuoteVerifier::new(root_ca_der, ring_backend),
+        None => QuoteVerifier::new_prod(ring_backend),
+    };
+    let rustcrypto_verifier = match root_ca_der {
+        Some(root_ca_der) => QuoteVerifier::new(root_ca_der, rustcrypto_backend),
+        None => QuoteVerifier::new_prod(rustcrypto_backend),
     };
 
-    match verifier.verify(&quote_bytes, &collateral, now) {
+    let ring_result = ring_verifier
+        .verify(&quote_bytes, &collateral, now)
+        .map_err(|e| format!("{e:#}"));
+    let rustcrypto_result = rustcrypto_verifier
+        .verify(&quote_bytes, &collateral, now)
+        .map_err(|e| format!("{e:#}"));
+    if ring_result != rustcrypto_result {
+        eprintln!("Verification results differ between ring and rustcrypto");
+        eprintln!("Ring result: {ring_result:?}");
+        eprintln!("Rustcrypto result: {rustcrypto_result:?}");
+        return 1;
+    }
+
+    let ring_result1 = ring_verifier.verify(&quote_bytes, &collateral, now);
+    match ring_result1 {
         Ok(verified_report) => {
             println!("Verification successful");
             println!("Status: {:?}", verified_report.status);

@@ -68,10 +68,13 @@ derive_more = { version = "2.1.1", features = ["display"] }
 
 rustls-pki-types = { version = "1.11", default-features = false }
 
-sha2 = { version = "0.10", default-features = false }
-p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+# Crypto backends (choose one via features: "ring" or "rustcrypto")
+ring = { version = "0.17", default-features = false, features = ["alloc"], optional = true }
+sha2 = { version = "0.10", default-features = false, optional = true }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
+signature = { version = "2.2", default-features = false, optional = true }
 
-dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc", "rustcrypto"] }
+dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 
 
 [dev-dependencies]
@@ -86,7 +89,7 @@ name = "dcap_qvl"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["std", "report"]
+default = ["std", "report", "ring", "rustcrypto"]
 std = [
     "serde/std",
     "scale/std",
@@ -104,7 +107,10 @@ borsh = ["dep:borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
 report = ["std", "tracing", "futures", "reqwest"]
 js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
-python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report"]
+python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
+ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
+rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
+_anycrypto = []
 contract = ["getrandom"]
 
 [lints.clippy]

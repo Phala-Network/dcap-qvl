@@ -33,7 +33,7 @@ container_build_command = [
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 # Use dcap-qvl from the project root (4 levels up from tests/near/contracts/dcap-qvl-gas-test)
-dcap-qvl = { path = "../../../../", default-features = false, features = ["contract", "std"] }
+dcap-qvl = { path = "../../../../", default-features = false, features = ["contract", "std", "ring"] }
 hex = "0.4"
 near-sdk = "5"
 # Force dependencies to versions compatible with Rust 1.86.0

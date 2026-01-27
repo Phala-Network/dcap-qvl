@@ -1,10 +1,8 @@
 use core::time::Duration;
 
 use anyhow::{bail, ensure, Context, Result};
-use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use rustls_pki_types::UnixTime;
 use scale::Decode;
-use sha2::{Digest, Sha256};
 
 use {
     crate::constants::*,
@@ -18,7 +16,7 @@ use {
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     quote::{Report, TDAttributes},
-    utils::{self, encode_as_der, extract_certs, verify_certificate_chain},
+    utils::{encode_as_der, extract_certs, parse_crls, verify_certificate_chain},
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -26,6 +24,23 @@ use crate::{
 };
 use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "ring")]
+pub(crate) use self::ring as default_crypto;
+#[cfg(all(not(feature = "ring"), feature = "rustcrypto"))]
+pub(crate) use self::rustcrypto as default_crypto;
+
+/// Crypto backend configuration for quote verification.
+///
+/// Holds the signature verification algorithm and SHA-256 implementation
+/// needed by the verification logic. Use [`ring::backend()`] or
+/// [`rustcrypto::backend()`] to obtain a pre-configured instance.
+pub struct CryptoBackend {
+    /// ECDSA P-256 SHA-256 algorithm for certificate and raw signature verification
+    pub sig_algo: &'static dyn rustls_pki_types::SignatureVerificationAlgorithm,
+    /// SHA-256 hash function
+    pub sha256: fn(&[u8]) -> [u8; 32],
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TeeType {
@@ -67,7 +82,7 @@ use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct VerifiedReport {
@@ -80,26 +95,27 @@ pub struct VerifiedReport {
     pub platform_status: TcbStatusWithAdvisory,
 }
 
-/// Quote verifier with configurable root certificate
+/// Quote verifier with configurable root certificate and crypto backend.
 ///
-/// This allows using custom root certificates for testing or private deployments.
-#[derive(Clone)]
+/// This allows using custom root certificates for testing or private deployments,
+/// and selecting between different cryptographic backends (ring or rustcrypto).
 pub struct QuoteVerifier {
     root_ca_der: Vec<u8>,
+    backend: CryptoBackend,
 }
 
 impl QuoteVerifier {
-    /// Create a new verifier using Intel's production root certificate
-    pub fn new_prod() -> Self {
-        Self::new_with_root_ca(TRUSTED_ROOT_CA_DER.to_vec())
+    /// Create a new verifier with a custom root certificate and crypto backend.
+    pub fn new(root_ca_der: Vec<u8>, backend: CryptoBackend) -> Self {
+        Self {
+            root_ca_der,
+            backend,
+        }
     }
 
-    /// Create a new verifier with a custom root certificate
-    ///
-    /// # Arguments
-    /// * `root_ca_der` - DER-encoded root certificate
-    pub fn new_with_root_ca(root_ca_der: Vec<u8>) -> Self {
-        Self { root_ca_der }
+    /// Create a new verifier using Intel's production root certificate with ring backend.
+    pub fn new_prod(backend: CryptoBackend) -> Self {
+        Self::new(TRUSTED_ROOT_CA_DER.to_vec(), backend)
     }
 
     /// Verify a quote with the configured root certificate
@@ -118,11 +134,17 @@ impl QuoteVerifier {
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        verify_impl(raw_quote, collateral, now_secs, &self.root_ca_der)
+        verify_impl(
+            raw_quote,
+            collateral,
+            now_secs,
+            &self.root_ca_der,
+            &self.backend,
+        )
     }
 }
 
-#[cfg(feature = "js")]
+#[cfg(all(feature = "js", feature = "_anycrypto"))]
 #[wasm_bindgen]
 pub fn js_verify(
     raw_quote: JsValue,
@@ -143,7 +165,7 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
-#[cfg(feature = "js")]
+#[cfg(all(feature = "js", feature = "_anycrypto"))]
 #[wasm_bindgen]
 pub fn js_verify_with_root_ca(
     raw_quote: JsValue,
@@ -157,7 +179,7 @@ pub fn js_verify_with_root_ca(
     let root_ca_der: Vec<u8> = serde_wasm_bindgen::from_value(root_ca_der)
         .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
 
-    let verifier = QuoteVerifier::new_with_root_ca(root_ca_der);
+    let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
     let verified_report = verifier
         .verify(&raw_quote, &quote_collateral, now)
         .map_err(|e| {
@@ -193,8 +215,9 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    backend: &CryptoBackend,
 ) -> Result<TcbInfo> {
     // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
@@ -227,7 +250,7 @@ fn verify_tcb_info_signature(
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
-            webpki::rustcrypto::ECDSA_P256_SHA256,
+            backend.sig_algo,
             collateral.tcb_info.as_bytes(),
             &asn1_signature,
         )
@@ -247,8 +270,9 @@ fn verify_tcb_info_signature(
 fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    backend: &CryptoBackend,
 ) -> Result<QeIdentity> {
     // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
@@ -281,7 +305,7 @@ fn verify_qe_identity_signature(
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
     if qe_id_leaf_cert
         .verify_signature(
-            webpki::rustcrypto::ECDSA_P256_SHA256,
+            backend.sig_algo,
             collateral.qe_identity.as_bytes(),
             &qe_id_asn1_signature,
         )
@@ -305,7 +329,7 @@ fn verify_pck_cert_chain(
     collateral: &QuoteCollateralV3,
     certification_data: &crate::quote::CertificationData,
     now: UnixTime,
-    crls: &[&[u8]],
+    crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
@@ -329,24 +353,15 @@ fn verify_pck_cert_chain(
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
     verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
 
-    // Extract PPID from PCK certificate
-    let ppid = intel::parse_pck_extension(pck_leaf)
-        .ok()
-        .map(|ext| ext.ppid.clone())
-        .unwrap_or_default();
-
-    // Extract Intel extension data from PCK cert
-    let extension_section = utils::get_intel_extension(pck_leaf)?;
-    let cpu_svn = utils::get_cpu_svn(&extension_section)?;
-    let pce_svn = utils::get_pce_svn(&extension_section)?;
-    let fmspc = utils::get_fmspc(&extension_section)?;
+    // Extract Intel extension data from PCK cert (parsed once)
+    let pck_ext = intel::parse_pck_extension(pck_leaf)?;
 
     Ok(PckCertChainResult {
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
-        ppid,
-        cpu_svn,
-        pce_svn,
-        fmspc,
+        ppid: pck_ext.ppid,
+        cpu_svn: pck_ext.cpu_svn,
+        pce_svn: pck_ext.pce_svn,
+        fmspc: pck_ext.fmspc,
     })
 }
 
@@ -367,6 +382,7 @@ struct PckCertChainResult {
 fn verify_qe_report_signature(
     pck_leaf: &CertificateDer,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<EnclaveReport> {
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
@@ -374,11 +390,7 @@ fn verify_qe_report_signature(
     // Verify QE report signature (signed by PCK)
     let qe_report_signature = encode_as_der(&auth_data.qe_report_signature)?;
     if pck_leaf_cert
-        .verify_signature(
-            webpki::rustcrypto::ECDSA_P256_SHA256,
-            &auth_data.qe_report,
-            &qe_report_signature,
-        )
+        .verify_signature(backend.sig_algo, &auth_data.qe_report, &qe_report_signature)
         .is_err()
     {
         bail!("Signature is invalid for qe_report in quote");
@@ -400,6 +412,7 @@ fn verify_qe_report_signature(
 fn verify_qe_report_data(
     qe_report: &EnclaveReport,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<()> {
     use crate::constants::{ATTESTATION_KEY_LEN, AUTHENTICATION_DATA_LEN};
 
@@ -411,7 +424,7 @@ fn verify_qe_report_data(
     let mut qe_hash_data = [0u8; ATTESTATION_KEY_LEN + AUTHENTICATION_DATA_LEN];
     qe_hash_data[..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = Sha256::digest(qe_hash_data);
+    let qe_hash = (backend.sha256)(&qe_hash_data);
     if qe_hash[..] != qe_report.report_data[..32] {
         bail!("QE report hash mismatch");
     }
@@ -433,29 +446,23 @@ fn verify_isv_report_signature(
     raw_quote: &[u8],
     quote: &Quote,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<()> {
-    // Reconstruct uncompressed public key (0x04 || x || y)
-    let mut pub_key_bytes = [0u8; 65];
-    pub_key_bytes[0] = 0x04;
-    pub_key_bytes[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
+    // Prepend 0x04 to raw public key for SEC1 uncompressed format
+    let mut pub_key = [0x04u8; 65];
+    pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
 
-    // Parse public key & signature (with context)
-    let verifying_key =
-        VerifyingKey::from_sec1_bytes(&pub_key_bytes).context("Failed to parse public key")?;
+    // DER-encode the raw r||s signature for SignatureVerificationAlgorithm
+    let der_sig = encode_as_der(&auth_data.ecdsa_signature)?;
 
-    let signature = Signature::try_from(auth_data.ecdsa_signature.as_slice())
-        .context("ISV enclave report signature is invalid")?;
-
-    // Verify (Verifier handles SHA256)
     let signed_data = raw_quote
         .get(..quote.signed_length())
         .context("Failed to get signed quote scope")?;
 
-    verifying_key
-        .verify(signed_data, &signature)
-        .context("ISV enclave report signature is invalid")?;
-
-    Ok(())
+    backend
+        .sig_algo
+        .verify_signature(&pub_key, signed_data, &der_sig)
+        .map_err(|_| anyhow::anyhow!("ISV enclave report signature is invalid"))
 }
 
 // =============================================================================
@@ -562,16 +569,20 @@ fn verify_impl(
     collateral: &QuoteCollateralV3,
     now_secs: u64,
     root_ca_der: &[u8],
+    backend: &CryptoBackend,
 ) -> Result<VerifiedReport> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
     let trust_anchor =
         webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
-    let crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+    let raw_crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
 
     // Check root CA against CRL
-    webpki::check_single_cert_crl(root_ca_der, &crls, now)?;
+    webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
+
+    // Parse CRLs once for reuse across all certificate chain verifications
+    let crls = parse_crls(&raw_crls)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;
@@ -598,10 +609,12 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let tcb_info = verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone())?;
+    let tcb_info =
+        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
 
     // Step 2: Verify QE Identity signature
-    let qe_identity = verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone())?;
+    let qe_identity =
+        verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -627,16 +640,16 @@ fn verify_impl(
     let pck_leaf = CertificateDer::from(pck_result.pck_leaf_der.as_slice());
 
     // Step 4: Verify QE Report signature
-    let qe_report = verify_qe_report_signature(&pck_leaf, &auth_data)?;
+    let qe_report = verify_qe_report_signature(&pck_leaf, &auth_data, backend)?;
 
     // Step 5: Verify QE Report content (hash check)
-    verify_qe_report_data(&qe_report, &auth_data)?;
+    verify_qe_report_data(&qe_report, &auth_data, backend)?;
 
     // Step 6: Verify QE Report policy
     let qe_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
 
     // Step 7: Verify ISV Report signature
-    verify_isv_report_signature(raw_quote, &quote, &auth_data)?;
+    verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
 
     // Step 8: Match Platform TCB
     let platform_status = match_platform_tcb(
@@ -706,7 +719,74 @@ fn validate_attrs(report: &Report) -> Result<()> {
     }
 }
 
-/// Verify a quote using Intel's trusted root CA
+/// Ring crypto backend module.
+///
+/// Provides a pre-configured [`CryptoBackend`] using ring for ECDSA P-256 and SHA-256.
+#[cfg(feature = "ring")]
+pub mod ring {
+    use super::*;
+
+    fn ring_sha256(data: &[u8]) -> [u8; 32] {
+        let digest = ::ring::digest::digest(&::ring::digest::SHA256, data);
+        let mut out = [0u8; 32];
+        out.copy_from_slice(digest.as_ref());
+        out
+    }
+
+    /// Returns a [`CryptoBackend`] backed by ring.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: webpki::ring::ECDSA_P256_SHA256,
+            sha256: ring_sha256,
+        }
+    }
+
+    /// Verify a quote using Intel's trusted root CA and ring backend.
+    pub fn verify(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+}
+
+/// RustCrypto backend module.
+///
+/// Provides a pre-configured [`CryptoBackend`] using RustCrypto (sha2 + p256) for ECDSA P-256 and SHA-256.
+#[cfg(feature = "rustcrypto")]
+pub mod rustcrypto {
+    use super::*;
+
+    fn rustcrypto_sha256(data: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(data).into()
+    }
+
+    /// Returns a [`CryptoBackend`] backed by RustCrypto.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: webpki::rustcrypto::ECDSA_P256_SHA256,
+            sha256: rustcrypto_sha256,
+        }
+    }
+
+    /// Verify a quote using Intel's trusted root CA and RustCrypto backend.
+    pub fn verify(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+}
+
+/// Verify a quote using Intel's trusted root CA (ring backend).
+///
+/// This is a backwards-compatible convenience function that uses the ring backend.
+/// For rustcrypto, use [`rustcrypto::verify()`].
 ///
 /// # Arguments
 ///
@@ -718,13 +798,8 @@ fn validate_attrs(report: &Report) -> Result<()> {
 ///
 /// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
-pub fn verify(
-    raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
-    now_secs: u64,
-) -> Result<VerifiedReport> {
-    QuoteVerifier::new_prod().verify(raw_quote, collateral, now_secs)
-}
+#[cfg(feature = "_anycrypto")]
+pub use self::default_crypto::verify;
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB
