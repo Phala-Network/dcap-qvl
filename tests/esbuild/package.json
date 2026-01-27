@@ -11,6 +11,6 @@
     "esbuild": "^0.20.0"
   },
   "dependencies": {
-    "@phala/dcap-qvl-web": "^0.2.7"
+    "@phala/dcap-qvl-web": "link:../../pkg/web"
   }
 }
