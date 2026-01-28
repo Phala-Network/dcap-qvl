@@ -504,7 +504,7 @@ impl Decode for Quote {
     fn decode<I: Input>(input: &mut I) -> Result<Self, scale::Error> {
         let header = Header::decode(input)?;
         let report;
-            match header.version {
+        match header.version {
             3 => {
                 if header.tee_type != TEE_TYPE_SGX {
                     return Err(scale::Error::from("Invalid TEE type"));
