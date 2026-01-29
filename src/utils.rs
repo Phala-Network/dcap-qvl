@@ -25,7 +25,7 @@ pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>> {
 
     let extension = extension_iter.next().context("Intel extension not found")?;
     if extension_iter.next().is_some() {
-        //"There should only be one section containing Intel extensions"
+        //"There should only be one Intel extension"
         bail!("Intel extension ambiguity");
     }
     Ok(extension.into_bytes())
