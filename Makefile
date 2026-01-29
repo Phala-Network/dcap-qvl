@@ -90,8 +90,6 @@ test_python:
 	cd python-bindings && uv run python tests/test_with_samples.py
 	@echo "Testing across Python versions with cross-version script..."
 	cd python-bindings && ./tests/test_cross_versions.sh
-	@echo "Testing async collateral functions with sample data..."
-	cd python-bindings && uv run python tests/test_with_samples.py
 	@echo "Running comprehensive async function tests..."
 	cd python-bindings && uv run python tests/test_all_async_functions.py
 
