@@ -79,7 +79,7 @@ dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 
 [dev-dependencies]
 hex-literal = "1.1.0"
-insta = "1.46.0"
+insta = "1.46.3"
 reqwest = "0.12.24"
 serde_json = "1.0.148"
 tokio = { version = "1.49.0", features = ["full"] }
