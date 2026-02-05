@@ -48,9 +48,7 @@ jobs:
 
       - name: Run Python unit tests (no network)
         run: |
-          pytest -q \
-            python-bindings/tests/test_python_bindings.py \
-            python-bindings/tests/test_quote_parsing_samples.py
+          pytest -q python-bindings/tests
 
   wasm:
     name: Check WebAssembly target
