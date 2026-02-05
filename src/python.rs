@@ -452,24 +452,18 @@ impl PyQuote {
     #[getter]
     fn report<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         match &self.inner.report {
-            Report::SgxEnclave(r) => Ok(
-                Py::new(py, PySgxEnclaveReport { inner: *r })?
-                    .into_pyobject(py)
-                    .unwrap()
-                    .into_any(),
-            ),
-            Report::TD10(r) => Ok(
-                Py::new(py, PyTdReport10 { inner: *r })?
-                    .into_pyobject(py)
-                    .unwrap()
-                    .into_any(),
-            ),
-            Report::TD15(r) => Ok(
-                Py::new(py, PyTdReport15 { inner: *r })?
-                    .into_pyobject(py)
-                    .unwrap()
-                    .into_any(),
-            ),
+            Report::SgxEnclave(r) => Ok(Py::new(py, PySgxEnclaveReport { inner: *r })?
+                .into_pyobject(py)
+                .unwrap()
+                .into_any()),
+            Report::TD10(r) => Ok(Py::new(py, PyTdReport10 { inner: *r })?
+                .into_pyobject(py)
+                .unwrap()
+                .into_any()),
+            Report::TD15(r) => Ok(Py::new(py, PyTdReport15 { inner: *r })?
+                .into_pyobject(py)
+                .unwrap()
+                .into_any()),
         }
     }
 
