@@ -11,10 +11,11 @@ in your environment.
 
 from __future__ import annotations
 
-import inspect
 import os
 
 import pytest
+
+from ._async_utils import is_async_callable
 
 
 dcap_qvl = pytest.importorskip("dcap_qvl")
@@ -24,7 +25,16 @@ RUN_NETWORK = os.getenv("DCAP_QVL_RUN_NETWORK_TESTS") == "1"
 
 def test_get_collateral_for_fmspc_exported_and_async() -> None:
     assert hasattr(dcap_qvl, "get_collateral_for_fmspc")
-    assert inspect.iscoroutinefunction(dcap_qvl.get_collateral_for_fmspc)
+
+    # `get_collateral_for_fmspc` may be a built-in function (PyO3) which returns
+    # an awaitable but isn't detected by `inspect.iscoroutinefunction`.
+    assert is_async_callable(
+        dcap_qvl.get_collateral_for_fmspc,
+        pccs_url="https://api.trustedservices.intel.com",
+        fmspc="000000000000",
+        ca="processor",
+        for_sgx=True,
+    )
 
 
 @pytest.mark.asyncio

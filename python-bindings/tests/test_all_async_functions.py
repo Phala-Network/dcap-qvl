@@ -12,10 +12,11 @@ To enable real network calls (Intel PCS), set:
 
 from __future__ import annotations
 
-import inspect
 import os
 
 import pytest
+
+from ._async_utils import is_async_callable
 
 
 dcap_qvl = pytest.importorskip("dcap_qvl")
@@ -33,7 +34,25 @@ def test_async_functions_are_exported() -> None:
 
     for name in expected:
         assert hasattr(dcap_qvl, name), f"{name} is not exported"
-        assert inspect.iscoroutinefunction(getattr(dcap_qvl, name)), f"{name} is not async"
+
+    # get_collateral_for_fmspc can be a PyO3 built-in which returns an awaitable
+    # but isn't detected as a coroutine function.
+    assert is_async_callable(
+        dcap_qvl.get_collateral_for_fmspc,
+        pccs_url="https://api.trustedservices.intel.com",
+        fmspc="000000000000",
+        ca="processor",
+        for_sgx=True,
+    )
+
+    # These are Python-level async wrappers.
+    assert is_async_callable(
+        dcap_qvl.get_collateral,
+        "http://example.com",
+        b"short",
+    )
+    assert is_async_callable(dcap_qvl.get_collateral_from_pcs, b"short")
+    assert is_async_callable(dcap_qvl.get_collateral_and_verify, b"short")
 
 
 @pytest.mark.asyncio
