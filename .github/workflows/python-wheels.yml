@@ -56,19 +56,7 @@ jobs:
           fi
 
           export VERSION_SEMVER
-          python - <<'PY'
-import os, re
-from pathlib import Path
-
-ver = os.environ["VERSION_SEMVER"]
-path = Path("Cargo.toml")
-text = path.read_text(encoding="utf-8")
-text2, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{ver}"', text, flags=re.M)
-if n != 1:
-    raise SystemExit(f"Failed to patch Cargo.toml version (matches={n})")
-path.write_text(text2, encoding="utf-8")
-print(f"Updated Cargo.toml version to {ver}")
-PY
+          python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn(r"^(version\\s*=\\s*)\\\"[^\\\"]*\\\"", lambda m: m.group(1)+f"\\\"{ver}\\\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
 
           grep '^version' Cargo.toml
       - name: Install uv
@@ -129,19 +117,7 @@ PY
             VERSION_SEMVER="${BASE}-${PRE}.${NUM}"
           fi
           export VERSION_SEMVER
-          python - <<'PY'
-import os, re
-from pathlib import Path
-
-ver = os.environ["VERSION_SEMVER"]
-path = Path("Cargo.toml")
-text = path.read_text(encoding="utf-8")
-text2, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{ver}"', text, flags=re.M)
-if n != 1:
-    raise SystemExit(f"Failed to patch Cargo.toml version (matches={n})")
-path.write_text(text2, encoding="utf-8")
-print(f"Updated Cargo.toml version to {ver}")
-PY
+          python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn(r"^(version\\s*=\\s*)\\\"[^\\\"]*\\\"", lambda m: m.group(1)+f"\\\"{ver}\\\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -188,19 +164,7 @@ PY
             VERSION_SEMVER="${BASE}-${PRE}.${NUM}"
           fi
           export VERSION_SEMVER
-          python - <<'PY'
-import os, re
-from pathlib import Path
-
-ver = os.environ["VERSION_SEMVER"]
-path = Path("Cargo.toml")
-text = path.read_text(encoding="utf-8")
-text2, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{ver}"', text, flags=re.M)
-if n != 1:
-    raise SystemExit(f"Failed to patch Cargo.toml version (matches={n})")
-path.write_text(text2, encoding="utf-8")
-print(f"Updated Cargo.toml version to {ver}")
-PY
+          python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn(r"^(version\\s*=\\s*)\\\"[^\\\"]*\\\"", lambda m: m.group(1)+f"\\\"{ver}\\\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -249,19 +213,7 @@ PY
             VERSION_SEMVER="${BASE}-${PRE}.${NUM}"
           fi
           export VERSION_SEMVER
-          python - <<'PY'
-import os, re
-from pathlib import Path
-
-ver = os.environ["VERSION_SEMVER"]
-path = Path("Cargo.toml")
-text = path.read_text(encoding="utf-8")
-text2, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{ver}"', text, flags=re.M)
-if n != 1:
-    raise SystemExit(f"Failed to patch Cargo.toml version (matches={n})")
-path.write_text(text2, encoding="utf-8")
-print(f"Updated Cargo.toml version to {ver}")
-PY
+          python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn(r"^(version\\s*=\\s*)\\\"[^\\\"]*\\\"", lambda m: m.group(1)+f"\\\"{ver}\\\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - uses: actions-rs/toolchain@v1
         with:
