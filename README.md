@@ -104,7 +104,7 @@ Python bindings are available for this crate, providing a Pythonic interface to 
 make build_python
 make test_python
 
-# Test across Python versions (3.8-3.12)
+# Test across Python versions (3.8-3.13)
 make test_python_versions
 ```
 
