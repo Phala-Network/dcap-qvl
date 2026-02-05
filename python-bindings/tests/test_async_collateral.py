@@ -11,6 +11,7 @@ in your environment.
 
 from __future__ import annotations
 
+import inspect
 import os
 
 import pytest
@@ -23,18 +24,23 @@ dcap_qvl = pytest.importorskip("dcap_qvl")
 RUN_NETWORK = os.getenv("DCAP_QVL_RUN_NETWORK_TESTS") == "1"
 
 
-def test_get_collateral_for_fmspc_exported_and_async() -> None:
+def test_get_collateral_for_fmspc_exported() -> None:
     assert hasattr(dcap_qvl, "get_collateral_for_fmspc")
+    assert callable(dcap_qvl.get_collateral_for_fmspc)
 
-    # `get_collateral_for_fmspc` may be a built-in function (PyO3) which returns
-    # an awaitable but isn't detected by `inspect.iscoroutinefunction`.
-    assert is_async_callable(
-        dcap_qvl.get_collateral_for_fmspc,
+
+@pytest.mark.asyncio
+async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
+    # Requires a running event loop for some PyO3 async exports.
+    ret = dcap_qvl.get_collateral_for_fmspc(
         pccs_url="https://api.trustedservices.intel.com",
         fmspc="000000000000",
         ca="processor",
         for_sgx=True,
     )
+    assert inspect.isawaitable(ret)
+    if inspect.iscoroutine(ret):
+        ret.close()
 
 
 @pytest.mark.asyncio

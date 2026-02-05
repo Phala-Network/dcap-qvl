@@ -33,6 +33,12 @@ def is_async_callable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> b
 
     try:
         ret = fn(*args, **kwargs)
+    except RuntimeError as e:
+        # Some PyO3 async exports require an active running event loop even to
+        # create the awaitable.
+        if "no running event loop" in str(e):
+            return True
+        raise
     except TypeError:
         # wrong signature; cannot determine
         return False
