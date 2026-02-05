@@ -6,7 +6,8 @@ use serde_json;
 
 use crate::{
     collateral::get_collateral_for_fmspc,
-    quote::Quote,
+    intel,
+    quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
     verify::{verify, VerifiedReport},
     QuoteCollateralV3,
 };
@@ -124,13 +125,299 @@ impl PyVerifiedReport {
     }
 
     #[getter]
-    fn ppid(&self) -> Vec<u8> {
-        self.inner.ppid.clone()
+    fn ppid(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.ppid).into()
     }
 
     fn to_json(&self) -> PyResult<String> {
         serde_json::to_string_pretty(&self.inner)
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize to JSON: {}", e)))
+    }
+}
+
+/// Quote header parsed from raw quote.
+#[pyclass]
+#[derive(Clone, Copy)]
+pub struct PyQuoteHeader {
+    inner: Header,
+}
+
+#[pymethods]
+impl PyQuoteHeader {
+    #[getter]
+    fn version(&self) -> u16 {
+        self.inner.version
+    }
+
+    #[getter]
+    fn attestation_key_type(&self) -> u16 {
+        self.inner.attestation_key_type
+    }
+
+    #[getter]
+    fn tee_type(&self) -> u32 {
+        self.inner.tee_type
+    }
+
+    #[getter]
+    fn qe_svn(&self) -> u16 {
+        self.inner.qe_svn
+    }
+
+    #[getter]
+    fn pce_svn(&self) -> u16 {
+        self.inner.pce_svn
+    }
+
+    #[getter]
+    fn qe_vendor_id(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.qe_vendor_id).into()
+    }
+
+    #[getter]
+    fn user_data(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.user_data).into()
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Copy)]
+pub struct PyTdReport10 {
+    inner: TDReport10,
+}
+
+#[pymethods]
+impl PyTdReport10 {
+    #[getter]
+    fn tee_tcb_svn(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.tee_tcb_svn).into()
+    }
+    #[getter]
+    fn mr_seam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_seam).into()
+    }
+    #[getter]
+    fn mr_signer_seam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_signer_seam).into()
+    }
+    #[getter]
+    fn seam_attributes(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.seam_attributes).into()
+    }
+    #[getter]
+    fn td_attributes(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.td_attributes).into()
+    }
+    #[getter]
+    fn xfam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.xfam).into()
+    }
+    #[getter]
+    fn mr_td(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_td).into()
+    }
+    #[getter]
+    fn mr_config_id(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_config_id).into()
+    }
+    #[getter]
+    fn mr_owner(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_owner).into()
+    }
+    #[getter]
+    fn mr_owner_config(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_owner_config).into()
+    }
+    #[getter]
+    fn rt_mr0(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.rt_mr0).into()
+    }
+    #[getter]
+    fn rt_mr1(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.rt_mr1).into()
+    }
+    #[getter]
+    fn rt_mr2(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.rt_mr2).into()
+    }
+    #[getter]
+    fn rt_mr3(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.rt_mr3).into()
+    }
+    #[getter]
+    fn report_data(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.report_data).into()
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Copy)]
+pub struct PyTdReport15 {
+    inner: TDReport15,
+}
+
+#[pymethods]
+impl PyTdReport15 {
+    // Flatten fields from base TDReport10
+    #[getter]
+    fn tee_tcb_svn(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.tee_tcb_svn).into()
+    }
+    #[getter]
+    fn mr_seam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_seam).into()
+    }
+    #[getter]
+    fn mr_signer_seam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_signer_seam).into()
+    }
+    #[getter]
+    fn seam_attributes(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.seam_attributes).into()
+    }
+    #[getter]
+    fn td_attributes(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.td_attributes).into()
+    }
+    #[getter]
+    fn xfam(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.xfam).into()
+    }
+    #[getter]
+    fn mr_td(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_td).into()
+    }
+    #[getter]
+    fn mr_config_id(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_config_id).into()
+    }
+    #[getter]
+    fn mr_owner(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_owner).into()
+    }
+    #[getter]
+    fn mr_owner_config(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.mr_owner_config).into()
+    }
+    #[getter]
+    fn rt_mr0(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.rt_mr0).into()
+    }
+    #[getter]
+    fn rt_mr1(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.rt_mr1).into()
+    }
+    #[getter]
+    fn rt_mr2(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.rt_mr2).into()
+    }
+    #[getter]
+    fn rt_mr3(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.rt_mr3).into()
+    }
+    #[getter]
+    fn report_data(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.base.report_data).into()
+    }
+
+    // TD15 extra fields
+    #[getter]
+    fn tee_tcb_svn2(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.tee_tcb_svn2).into()
+    }
+
+    #[getter]
+    fn mr_service_td(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_service_td).into()
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Copy)]
+pub struct PySgxEnclaveReport {
+    inner: EnclaveReport,
+}
+
+#[pymethods]
+impl PySgxEnclaveReport {
+    #[getter]
+    fn cpu_svn(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.cpu_svn).into()
+    }
+
+    #[getter]
+    fn attributes(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.attributes).into()
+    }
+
+    #[getter]
+    fn mr_enclave(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_enclave).into()
+    }
+
+    #[getter]
+    fn mr_signer(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.mr_signer).into()
+    }
+
+    #[getter]
+    fn report_data(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.report_data).into()
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyPckExtension {
+    inner: intel::PckExtension,
+}
+
+#[pymethods]
+impl PyPckExtension {
+    #[getter]
+    fn ppid(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.ppid).into()
+    }
+
+    #[getter]
+    fn cpu_svn(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.cpu_svn).into()
+    }
+
+    #[getter]
+    fn pce_svn(&self) -> u16 {
+        self.inner.pce_svn
+    }
+
+    #[getter]
+    fn pce_id(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.pce_id).into()
+    }
+
+    #[getter]
+    fn fmspc(&self, py: Python<'_>) -> PyObject {
+        PyBytes::new(py, &self.inner.fmspc).into()
+    }
+
+    #[getter]
+    fn sgx_type(&self) -> u64 {
+        self.inner.sgx_type
+    }
+
+    #[getter]
+    fn platform_instance_id(&self, py: Python<'_>) -> Option<PyObject> {
+        self.inner
+            .platform_instance_id
+            .as_ref()
+            .map(|v| PyBytes::new(py, v).into())
+    }
+
+    fn ppid_hex(&self) -> String {
+        hex::encode(&self.inner.ppid)
+    }
+
+    fn fmspc_hex(&self) -> String {
+        hex::encode(&self.inner.fmspc)
     }
 }
 
@@ -150,6 +437,39 @@ impl PyQuote {
                 "Failed to parse quote: {}",
                 e
             ))),
+        }
+    }
+
+    /// Parsed quote header.
+    #[getter]
+    fn header(&self) -> PyQuoteHeader {
+        PyQuoteHeader {
+            inner: self.inner.header,
+        }
+    }
+
+    /// Parsed quote report (TDX TDREPORT10/15 or SGX enclave report).
+    #[getter]
+    fn report<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match &self.inner.report {
+            Report::SgxEnclave(r) => Ok(
+                Py::new(py, PySgxEnclaveReport { inner: *r })?
+                    .into_pyobject(py)
+                    .unwrap()
+                    .into_any(),
+            ),
+            Report::TD10(r) => Ok(
+                Py::new(py, PyTdReport10 { inner: *r })?
+                    .into_pyobject(py)
+                    .unwrap()
+                    .into_any(),
+            ),
+            Report::TD15(r) => Ok(
+                Py::new(py, PyTdReport15 { inner: *r })?
+                    .into_pyobject(py)
+                    .unwrap()
+                    .into_any(),
+            ),
         }
     }
 
@@ -180,6 +500,39 @@ impl PyQuote {
             "SGX".to_string()
         } else {
             "TDX".to_string()
+        }
+    }
+
+    /// Get the embedded PCK certificate chain in PEM form, if present.
+    ///
+    /// Returns bytes instead of str to avoid implicit decoding/copying.
+    fn cert_chain_pem_bytes(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let raw = match self.inner.raw_cert_chain() {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+        let mut end = raw.len();
+        while end > 0 && raw[end - 1] == 0 {
+            end -= 1;
+        }
+        Ok(Some(PyBytes::new(py, &raw[..end]).into()))
+    }
+
+    /// Parse the Intel SGX extension from the leaf PCK certificate.
+    ///
+    /// Returns None if the quote does not contain a parseable leaf certificate.
+    fn pck_extension(&self) -> PyResult<Option<PyPckExtension>> {
+        let certs = match intel::extract_cert_chain(&self.inner) {
+            Ok(certs) => certs,
+            Err(_) => return Ok(None),
+        };
+        let leaf = match certs.first() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        match intel::parse_pck_extension(leaf) {
+            Ok(ext) => Ok(Some(PyPckExtension { inner: ext })),
+            Err(_) => Ok(None),
         }
     }
 }
@@ -253,6 +606,11 @@ fn get_collateral_for_fmspc_py<'py>(
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
+    m.add_class::<PyQuoteHeader>()?;
+    m.add_class::<PyTdReport10>()?;
+    m.add_class::<PyTdReport15>()?;
+    m.add_class::<PySgxEnclaveReport>()?;
+    m.add_class::<PyPckExtension>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;

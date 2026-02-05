@@ -1,12 +1,17 @@
+"""Tests for the Python bindings of dcap-qvl.
+
+These tests require the extension module to be built (e.g. via `maturin develop`).
 """
-Tests for the Python bindings of dcap-qvl.
-"""
+
+from __future__ import annotations
 
 import json
-import pytest
 from pathlib import Path
 
-import dcap_qvl
+import pytest
+
+
+dcap_qvl = pytest.importorskip("dcap_qvl")
 
 
 class TestQuoteCollateralV3:

@@ -22,12 +22,19 @@ from typing import Optional
 from ._dcap_qvl import (
     PyQuoteCollateralV3 as QuoteCollateralV3,
     PyVerifiedReport as VerifiedReport,
+    PyQuoteHeader as QuoteHeader,
+    PyTdReport10 as TdReport10,
+    PyTdReport15 as TdReport15,
+    PySgxEnclaveReport as SgxEnclaveReport,
+    PyPckExtension as PckExtension,
     PyQuote as Quote,
     py_verify as verify,
     py_verify_with_root_ca as verify_with_root_ca,
     parse_quote,
     get_collateral_for_fmspc,
 )
+
+from .enums import AttestationKeyType, TeeType
 
 # Default PCCS URL (Phala Network's PCCS server - recommended)
 PHALA_PCCS_URL = "https://pccs.phala.network"
@@ -114,6 +121,13 @@ async def get_collateral_and_verify(
 __all__ = [
     "QuoteCollateralV3",
     "VerifiedReport",
+    "QuoteHeader",
+    "TdReport10",
+    "TdReport15",
+    "SgxEnclaveReport",
+    "PckExtension",
+    "AttestationKeyType",
+    "TeeType",
     "Quote",
     "verify",
     "verify_with_root_ca",

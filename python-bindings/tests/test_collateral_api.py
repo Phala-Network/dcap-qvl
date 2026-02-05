@@ -1,12 +1,18 @@
-"""Test the synchronous Python API implementation."""
+"""Test the Python API.
 
-import dcap_qvl
-import pytest
-import sys
+These tests require the extension module to be built (e.g. via `maturin develop`).
+They should not hard-fail collection when the module isn't available.
+"""
+
 import os
+import sys
 
-# Add the python package to the path
+import pytest
+
+# Ensure local python package is importable when running from repo.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
+
+dcap_qvl = pytest.importorskip("dcap_qvl")
 
 
 class TestCollateralAPI:
