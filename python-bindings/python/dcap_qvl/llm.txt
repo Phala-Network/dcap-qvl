@@ -1,0 +1,66 @@
+dcap-qvl Python bindings (import name: dcap_qvl)
+
+Purpose
+- Parse Intel SGX / TDX DCAP quotes and (optionally) verify them.
+- Milestone-1 focus: parsing only (structured objects, bytes-first, robust).
+
+Key APIs
+
+Parsing
+- dcap_qvl.parse_quote(raw_quote: bytes) -> dcap_qvl.Quote
+- dcap_qvl.Quote.parse(raw_quote: bytes) -> dcap_qvl.Quote
+
+Quote object
+- q.header -> QuoteHeader
+  - version: int
+  - attestation_key_type: int  (cast to dcap_qvl.AttestationKeyType)
+  - tee_type: int              (cast to dcap_qvl.TeeType)
+  - qe_vendor_id: bytes
+  - user_data: bytes
+
+- q.report -> Union[TdReport10, TdReport15, SgxEnclaveReport]
+  (All fields are bytes unless otherwise noted.)
+
+- q.cert_chain_pem_bytes() -> Optional[bytes]
+  Best-effort extraction of embedded PCK certificate chain as PEM.
+
+- q.pck_extension() -> Optional[PckExtension]
+  Best-effort parse of Intel SGX extension values from the leaf PCK cert.
+  Returns None on failure (do not rely on exceptions).
+
+- q.fmspc() -> str
+- q.ca() -> str  ("processor" or "platform")
+- q.is_tdx() / q.is_sgx() -> bool
+
+PckExtension
+- ppid: bytes
+- fmspc: bytes
+- ppid_hex() / fmspc_hex() -> str
+
+Verification
+- dcap_qvl.verify(raw_quote: bytes, collateral: QuoteCollateralV3, now_secs: int) -> VerifiedReport
+- VerifiedReport.status: str
+- VerifiedReport.advisory_ids: list[str]
+- VerifiedReport.ppid: bytes
+
+Async collateral (network)
+- await dcap_qvl.get_collateral_for_fmspc(pccs_url: str, fmspc: str, ca: str, is_sgx: bool) -> QuoteCollateralV3
+- await dcap_qvl.get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3
+- await dcap_qvl.get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3
+- await dcap_qvl.get_collateral_and_verify(raw_quote: bytes, pccs_url: Optional[str]=None) -> VerifiedReport
+
+Examples
+
+Parse quote:
+    import dcap_qvl
+    raw = open('quote.bin','rb').read()
+    q = dcap_qvl.Quote.parse(raw)
+    hdr = q.header
+    tee = dcap_qvl.TeeType(hdr.tee_type)
+    ak  = dcap_qvl.AttestationKeyType(hdr.attestation_key_type)
+    pem = q.cert_chain_pem_bytes()
+    ext = q.pck_extension()
+
+Testing
+- Offline unit tests: pytest -q python-bindings/tests
+- Network tests (optional): DCAP_QVL_RUN_NETWORK_TESTS=1 pytest -q python-bindings/tests

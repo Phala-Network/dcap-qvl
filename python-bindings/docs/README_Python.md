@@ -2,6 +2,9 @@
 
 This package provides Python bindings for the DCAP (Data Center Attestation Primitives) quote verification library implemented in Rust.
 
+> Note: The canonical README for the Python package is now `python-bindings/README.md`.
+> This file is kept for backwards links and may be shorter/less up-to-date.
+
 ## Quick Start
 
 ```bash

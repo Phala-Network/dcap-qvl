@@ -9,7 +9,7 @@ description = "Python bindings for DCAP (Data Center Attestation Primitives) quo
 authors = [
     {name = "Kevin Wang", email = "wy721@qq.com"},
 ]
-readme = "docs/README_Python.md"
+readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 classifiers = [
