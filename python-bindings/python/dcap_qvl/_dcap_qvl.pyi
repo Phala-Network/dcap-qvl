@@ -6,7 +6,9 @@ enabling better IDE support, type checking with mypy, and improved
 developer experience.
 """
 
-from typing import List
+from __future__ import annotations
+
+from typing import List, Optional, Union
 
 class PyQuoteCollateralV3:
     """
@@ -149,6 +151,11 @@ class PyVerifiedReport:
         """
         ...
 
+    @property
+    def ppid(self) -> bytes:
+        """Platform PPID parsed from the PCK certificate SGX extension."""
+        ...
+
     def to_json(self) -> str:
         """
         Serialize the verification report to a JSON string.
@@ -160,6 +167,138 @@ class PyVerifiedReport:
             ValueError: If serialization fails
         """
         ...
+
+class PyQuoteHeader:
+    """Structured quote header parsed from raw quote."""
+
+    @property
+    def version(self) -> int: ...
+
+    @property
+    def attestation_key_type(self) -> int: ...
+
+    @property
+    def tee_type(self) -> int: ...
+
+    @property
+    def qe_svn(self) -> int: ...
+
+    @property
+    def pce_svn(self) -> int: ...
+
+    @property
+    def qe_vendor_id(self) -> bytes: ...
+
+    @property
+    def user_data(self) -> bytes: ...
+
+
+class PyTdReport10:
+    """TDX TDREPORT (1.0) structure."""
+
+    @property
+    def tee_tcb_svn(self) -> bytes: ...
+
+    @property
+    def mr_seam(self) -> bytes: ...
+
+    @property
+    def mr_signer_seam(self) -> bytes: ...
+
+    @property
+    def seam_attributes(self) -> bytes: ...
+
+    @property
+    def td_attributes(self) -> bytes: ...
+
+    @property
+    def xfam(self) -> bytes: ...
+
+    @property
+    def mr_td(self) -> bytes: ...
+
+    @property
+    def mr_config_id(self) -> bytes: ...
+
+    @property
+    def mr_owner(self) -> bytes: ...
+
+    @property
+    def mr_owner_config(self) -> bytes: ...
+
+    @property
+    def rt_mr0(self) -> bytes: ...
+
+    @property
+    def rt_mr1(self) -> bytes: ...
+
+    @property
+    def rt_mr2(self) -> bytes: ...
+
+    @property
+    def rt_mr3(self) -> bytes: ...
+
+    @property
+    def report_data(self) -> bytes: ...
+
+
+class PyTdReport15(PyTdReport10):
+    """TDX TDREPORT 1.5 structure."""
+
+    @property
+    def tee_tcb_svn2(self) -> bytes: ...
+
+    @property
+    def mr_service_td(self) -> bytes: ...
+
+
+class PySgxEnclaveReport:
+    """SGX enclave report structure."""
+
+    @property
+    def cpu_svn(self) -> bytes: ...
+
+    @property
+    def attributes(self) -> bytes: ...
+
+    @property
+    def mr_enclave(self) -> bytes: ...
+
+    @property
+    def mr_signer(self) -> bytes: ...
+
+    @property
+    def report_data(self) -> bytes: ...
+
+
+class PyPckExtension:
+    """Parsed values from Intel SGX extension in the PCK leaf certificate."""
+
+    @property
+    def ppid(self) -> bytes: ...
+
+    @property
+    def cpu_svn(self) -> bytes: ...
+
+    @property
+    def pce_svn(self) -> int: ...
+
+    @property
+    def pce_id(self) -> bytes: ...
+
+    @property
+    def fmspc(self) -> bytes: ...
+
+    @property
+    def sgx_type(self) -> int: ...
+
+    @property
+    def platform_instance_id(self) -> Optional[bytes]: ...
+
+    def ppid_hex(self) -> str: ...
+
+    def fmspc_hex(self) -> str: ...
+
 
 class PyQuote:
     """
@@ -182,6 +321,30 @@ class PyQuote:
 
         Raises:
             ValueError: If quote parsing fails due to invalid format or corrupted data
+        """
+        ...
+
+    @property
+    def header(self) -> PyQuoteHeader:
+        """Structured quote header."""
+        ...
+
+    @property
+    def report(self) -> Union[PyTdReport10, PyTdReport15, PySgxEnclaveReport]:
+        """Structured quote report (TDX TDREPORT10/15 or SGX enclave report)."""
+        ...
+
+    def cert_chain_pem_bytes(self) -> Optional[bytes]:
+        """Return embedded PCK certificate chain as PEM bytes (best-effort).
+
+        Returns None if the quote doesn't contain a PEM chain.
+        """
+        ...
+
+    def pck_extension(self) -> Optional[PyPckExtension]:
+        """Parse Intel SGX extension from leaf PCK certificate (best-effort).
+
+        Returns None if parsing fails or the leaf certificate isn't available.
         """
         ...
 

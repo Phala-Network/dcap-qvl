@@ -1,12 +1,17 @@
-"""Test the synchronous Python API implementation."""
+"""Test the Python API.
 
-import dcap_qvl
-import pytest
-import sys
+These tests require the extension module to be built (e.g. via `maturin develop`).
+They should not hard-fail collection when the module isn't available.
+"""
+
 import os
 
-# Add the python package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
+import pytest
+
+
+dcap_qvl = pytest.importorskip("dcap_qvl")
+
+RUN_NETWORK = os.getenv("DCAP_QVL_RUN_NETWORK_TESTS") == "1"
 
 
 class TestCollateralAPI:
@@ -99,22 +104,22 @@ class TestCollateralAPI:
         assert collateral2.tcb_info == collateral.tcb_info
 
     @pytest.mark.asyncio
-    async def test_get_collateral_and_verify_happy_path(self):
-        """Test get_collateral_and_verify with real sample quote data."""
+    @pytest.mark.skipif(
+        not RUN_NETWORK,
+        reason="Network test disabled (set DCAP_QVL_RUN_NETWORK_TESTS=1 to enable)",
+    )
+    async def test_get_collateral_and_verify_network_smoke(self):
+        """Network smoke test for get_collateral_and_verify (Intel PCS)."""
 
-        # Load real sample quote data from the samples directory
         sample_dir = os.path.join(os.path.dirname(__file__), "..", "..", "sample")
 
         try:
             with open(os.path.join(sample_dir, "tdx_quote"), "rb") as f:
                 test_quote = f.read()
         except FileNotFoundError:
-            # If no sample files found, skip this test
             pytest.skip("Sample quote files not found")
 
         result = await dcap_qvl.get_collateral_and_verify(bytes(test_quote))
-
-        # If it somehow succeeds, verify the result structure
         assert hasattr(result, "status")
         assert hasattr(result, "advisory_ids")
 

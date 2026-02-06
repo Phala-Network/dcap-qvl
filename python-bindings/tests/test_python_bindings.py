@@ -1,12 +1,18 @@
+"""Tests for the Python bindings of dcap-qvl.
+
+These tests require the extension module to be built (e.g. via `maturin develop`).
 """
-Tests for the Python bindings of dcap-qvl.
-"""
+
+from __future__ import annotations
 
 import json
-import pytest
+import os
 from pathlib import Path
 
-import dcap_qvl
+import pytest
+
+
+dcap_qvl = pytest.importorskip("dcap_qvl")
 
 
 class TestQuoteCollateralV3:
@@ -78,15 +84,19 @@ class TestVerify:
 
 
 @pytest.mark.skipif(
-    not Path("sample/tdx_quote").exists()
-    or not Path("sample/tdx_quote_collateral.json").exists(),
-    reason="Sample files not available",
+    os.getenv("DCAP_QVL_RUN_SAMPLE_VERIFY") != "1",
+    reason="Sample verify is an integration test. Set DCAP_QVL_RUN_SAMPLE_VERIFY=1 to run.",
 )
 class TestWithSampleData:
-    """Test with actual sample data if available."""
+    """Integration test with actual sample data (time-sensitive)."""
 
     def test_verify_with_sample_data(self):
         """Test verification with sample TDX quote and collateral."""
+        if not Path("sample/tdx_quote").exists() or not Path(
+            "sample/tdx_quote_collateral.json"
+        ).exists():
+            pytest.skip("Sample files not available")
+
         # Load sample quote
         with open("sample/tdx_quote", "rb") as f:
             quote_data = f.read()
