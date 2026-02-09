@@ -35,7 +35,7 @@ der = { version = "0.7.8", default-features = false, features = ["alloc"] }
 
 log = { version = "0.4.29", default-features = false }
 
-anyhow = { version = "1.0.100", optional = true }
+anyhow = { version = "1.0.101", optional = true }
 
 reqwest = { version = "0.12.24", optional = true, default-features = false, features = [
     "rustls-tls",
