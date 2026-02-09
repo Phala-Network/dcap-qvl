@@ -31,6 +31,7 @@ from ._dcap_qvl import (
     py_verify as verify,
     py_verify_with_root_ca as verify_with_root_ca,
     parse_quote,
+    parse_pck_extension_from_pem,
     get_collateral_for_fmspc,
 )
 
@@ -136,6 +137,7 @@ __all__ = [
     "get_collateral_and_verify",
     "get_collateral_for_fmspc",
     "parse_quote",
+    "parse_pck_extension_from_pem",
     "PHALA_PCCS_URL",
     "INTEL_PCS_URL",
     "PCS_URL",

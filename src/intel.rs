@@ -21,6 +21,18 @@ pub struct PckExtension {
     pub fmspc: Fmspc,
     pub sgx_type: u64,
     pub platform_instance_id: Option<Vec<u8>>,
+    pub raw_extension: Vec<u8>,
+}
+
+impl PckExtension {
+    /// Look up an arbitrary OID inside the raw Intel SGX extension.
+    ///
+    /// The search is recursive: nested SEQUENCE containers are walked
+    /// automatically so the caller only needs to supply the leaf OID.
+    pub fn get_value(&self, oid: &const_oid::ObjectIdentifier) -> Result<Option<Vec<u8>>> {
+        let obj = DerObject::decode(&self.raw_extension).context("Failed to decode DER object")?;
+        find_recursive(oid, obj)
+    }
 }
 
 /// Return the PCK certificate chain (DER encoded) embedded inside the quote.
@@ -70,7 +82,19 @@ pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
         fmspc,
         sgx_type,
         platform_instance_id,
+        raw_extension: extension,
     })
+}
+
+/// Parse the Intel SGX extension from a PEM-encoded certificate chain.
+///
+/// The first (leaf) certificate in the chain is used.
+pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
+    let certs = utils::extract_certs(pem_data)?;
+    let leaf = certs
+        .first()
+        .ok_or_else(|| anyhow!("No certificates found in PEM chain"))?;
+    parse_pck_extension(leaf)
 }
 
 fn find_extension_required(
@@ -109,6 +133,44 @@ fn sub_object_opt<'a>(
         let value = entry_seq.get(1).context("Failed to read value")?;
         if name.value() == oid.as_bytes() {
             return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn find_recursive<'a>(
+    oid: &const_oid::ObjectIdentifier,
+    obj: DerObject<'a>,
+) -> Result<Option<Vec<u8>>> {
+    let seq = match Sequence::load(obj) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
+    for idx in 0..seq.len() {
+        let entry = match seq.get(idx) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let entry_seq = match Sequence::load(entry) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let name = match entry_seq.get(0) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let value = match entry_seq.get(1) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if name.value() == oid.as_bytes() {
+            return Ok(Some(value.value().to_vec()));
+        }
+        // Tag 0x30 = SEQUENCE — recurse into nested containers
+        if value.tag() == 0x30 {
+            if let Some(found) = find_recursive(oid, value)? {
+                return Ok(Some(found));
+            }
         }
     }
     Ok(None)

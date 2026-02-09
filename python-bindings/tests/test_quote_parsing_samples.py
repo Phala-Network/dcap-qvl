@@ -73,3 +73,67 @@ def test_parse_sample_quote(sample_name: str, expected_type: str):
         assert len(ext.fmspc) == 6
         assert isinstance(ext.ppid, (bytes, bytearray))
         assert len(ext.ppid) > 0
+
+
+@pytest.mark.parametrize("sample_name", ["tdx_quote", "sgx_quote"])
+def test_parse_pck_extension_from_pem(sample_name: str):
+    """parse_pck_extension_from_pem should produce the same result as q.pck_extension()."""
+    raw = _load_sample(sample_name)
+    q = dcap_qvl.parse_quote(raw)
+    pem = q.cert_chain_pem_bytes()
+    assert pem is not None
+
+    ext_from_quote = q.pck_extension()
+    assert ext_from_quote is not None
+
+    ext_from_pem = dcap_qvl.parse_pck_extension_from_pem(pem)
+    assert ext_from_pem.fmspc == ext_from_quote.fmspc
+    assert ext_from_pem.ppid == ext_from_quote.ppid
+    assert ext_from_pem.cpu_svn == ext_from_quote.cpu_svn
+    assert ext_from_pem.pce_svn == ext_from_quote.pce_svn
+    assert ext_from_pem.pce_id == ext_from_quote.pce_id
+    assert ext_from_pem.sgx_type == ext_from_quote.sgx_type
+
+
+@pytest.mark.parametrize("sample_name", ["tdx_quote", "sgx_quote"])
+def test_get_value_matches_typed_fields(sample_name: str):
+    """get_value() for known OIDs should match the typed PckExtension fields."""
+    raw = _load_sample(sample_name)
+    q = dcap_qvl.parse_quote(raw)
+    ext = q.pck_extension()
+    assert ext is not None
+
+    assert ext.get_value("1.2.840.113741.1.13.1.1") == bytes(ext.ppid)
+    assert ext.get_value("1.2.840.113741.1.13.1.3") == bytes(ext.pce_id)
+    assert ext.get_value("1.2.840.113741.1.13.1.4") == bytes(ext.fmspc)
+
+    pcesvn_bytes = ext.get_value("1.2.840.113741.1.13.1.2.17")
+    assert pcesvn_bytes is not None
+
+    cpusvn_bytes = ext.get_value("1.2.840.113741.1.13.1.2.18")
+    assert cpusvn_bytes is not None
+    assert cpusvn_bytes == bytes(ext.cpu_svn)
+
+
+@pytest.mark.parametrize("sample_name", ["tdx_quote", "sgx_quote"])
+def test_get_value_missing_oid_returns_none(sample_name: str):
+    """get_value() for a non-existent OID should return None."""
+    raw = _load_sample(sample_name)
+    ext = dcap_qvl.parse_quote(raw).pck_extension()
+    assert ext is not None
+    assert ext.get_value("1.2.840.113741.1.13.1.99") is None
+
+
+def test_get_value_invalid_oid_raises():
+    """get_value() with a malformed OID string should raise ValueError."""
+    raw = _load_sample("tdx_quote")
+    ext = dcap_qvl.parse_quote(raw).pck_extension()
+    assert ext is not None
+    with pytest.raises(ValueError):
+        ext.get_value("not.a.valid.oid")
+
+
+def test_parse_pck_extension_from_pem_bad_input():
+    """parse_pck_extension_from_pem with invalid data should raise ValueError."""
+    with pytest.raises(ValueError):
+        dcap_qvl.parse_pck_extension_from_pem(b"not a PEM")
