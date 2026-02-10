@@ -1,6 +1,6 @@
 # Python Bindings for DCAP-QVL
 
-This package provides Python bindings for the DCAP (Data Center Attestation Primitives) quote verification library implemented in Rust.
+Python bindings for parsing and verifying Intel SGX/TDX DCAP (Data Center Attestation Primitives) quotes. Built on a Rust implementation for use in TEE (Trusted Execution Environment) remote attestation workflows.
 
 ## Quick Start
 
@@ -18,12 +18,13 @@ print(f'Available functions: {dcap_qvl.__all__}')
 
 ## Features
 
-- Verify SGX and TDX quotes
-- Handle quote collateral data
-- Parse verification results
+- Parse and inspect SGX/TDX quotes (headers, reports, embedded certificates)
+- Extract PCK certificate extension fields (FMSPC, PPID, CPU SVN, etc.) or look up arbitrary OIDs
+- Verify SGX and TDX quotes against collateral data
+- Handle quote collateral data (serialize/deserialize JSON)
+- Asynchronous collateral fetching from PCCS/PCS with async/await support
 - Pure Rust implementation with Python bindings
 - Cross-platform compatibility (Linux, macOS, Windows)
-- Asynchronous collateral fetching from PCCS/PCS with async/await support
 - Compatible with Python 3.8+
 
 ## Installation
@@ -41,6 +42,59 @@ uv add dcap-qvl
 ```
 
 ## Usage
+
+### Parsing Quotes
+
+```python
+import dcap_qvl
+
+raw = open("quote.bin", "rb").read()
+quote = dcap_qvl.parse_quote(raw)
+
+# Quote type
+print(quote.quote_type())  # "SGX" or "TDX"
+print(quote.fmspc())       # e.g. "B0C06F000000"
+
+# Header fields
+hdr = quote.header
+print(hdr.version, hdr.tee_type, hdr.attestation_key_type)
+
+# Report body (TdReport10, TdReport15, or SgxEnclaveReport)
+report = quote.report
+if quote.is_tdx():
+    print(report.mr_td.hex())
+    print(report.rt_mr0.hex())
+else:
+    print(report.mr_enclave.hex())
+    print(report.mr_signer.hex())
+print(report.report_data.hex())
+
+# Embedded PEM certificate chain
+pem = quote.cert_chain_pem_bytes()  # bytes or None
+```
+
+### PCK Extension Parsing
+
+```python
+# From a parsed quote
+ext = quote.pck_extension()  # PckExtension or None
+if ext:
+    print(ext.fmspc.hex())   # 6-byte FMSPC
+    print(ext.ppid.hex())    # PPID
+    print(ext.cpu_svn.hex()) # CPU SVN
+    print(ext.pce_svn)       # PCE SVN (int)
+    print(ext.pce_id.hex())  # PCE ID
+    print(ext.sgx_type)      # SGX type (int)
+
+# From a PEM certificate chain directly
+ext = dcap_qvl.parse_pck_extension_from_pem(pem_bytes)
+print(ext.fmspc.hex())
+
+# Look up any OID in the Intel SGX extension (recursive search)
+value = ext.get_value("1.2.840.113741.1.13.1.2.17")  # PCESVN
+if value is not None:
+    print(value.hex())
+```
 
 ### Basic Quote Verification
 
@@ -259,13 +313,76 @@ QuoteCollateralV3(
 Contains the results of quote verification.
 
 **Properties:**
-- `status: str`: Verification status
-- `advisory_ids: List[str]`: List of advisory IDs
+- `status: str`: Verification status (e.g., "OK", "SW_HARDENING_NEEDED", "CONFIGURATION_NEEDED", "OUT_OF_DATE", "REVOKED")
+- `advisory_ids: List[str]`: List of Intel security advisory IDs (e.g., "INTEL-SA-00334")
+- `ppid: bytes`: Platform PPID parsed from the PCK certificate
 
 **Methods:**
 - `to_json() -> str`: Serialize to JSON string
 
+#### `Quote`
+
+Represents a parsed SGX or TDX quote. Created via `parse_quote()` or `Quote.parse()`.
+
+**Properties:**
+- `header: QuoteHeader`: Parsed quote header
+- `report: Union[TdReport10, TdReport15, SgxEnclaveReport]`: Parsed report body
+
+**Methods:**
+- `parse(raw_quote: bytes) -> Quote`: Parse from raw bytes (static method)
+- `fmspc() -> str`: FMSPC as uppercase hex string
+- `ca() -> str`: Certificate Authority identifier
+- `is_sgx() -> bool` / `is_tdx() -> bool`: Check quote type
+- `quote_type() -> str`: Returns "SGX" or "TDX"
+- `cert_chain_pem_bytes() -> Optional[bytes]`: Embedded PEM certificate chain
+- `pck_extension() -> Optional[PckExtension]`: Parse Intel SGX extension from leaf PCK cert
+
+#### `QuoteHeader`
+
+**Properties:**
+- `version: int`, `attestation_key_type: int`, `tee_type: int`
+- `qe_svn: int`, `pce_svn: int`
+- `qe_vendor_id: bytes` (16 bytes), `user_data: bytes` (20 bytes)
+
+#### `TdReport10` / `TdReport15`
+
+TDX TDREPORT structures. TdReport15 extends TdReport10 with `tee_tcb_svn2` and `mr_service_td`.
+
+**Properties (TdReport10):**
+- `tee_tcb_svn: bytes`, `mr_seam: bytes`, `mr_signer_seam: bytes`, `seam_attributes: bytes`
+- `td_attributes: bytes`, `xfam: bytes`, `mr_td: bytes`, `mr_config_id: bytes`
+- `mr_owner: bytes`, `mr_owner_config: bytes`
+- `rt_mr0: bytes`, `rt_mr1: bytes`, `rt_mr2: bytes`, `rt_mr3: bytes`
+- `report_data: bytes`
+
+#### `SgxEnclaveReport`
+
+**Properties:**
+- `cpu_svn: bytes`, `attributes: bytes`
+- `mr_enclave: bytes`, `mr_signer: bytes`
+- `report_data: bytes`
+
+#### `PckExtension`
+
+Parsed values from the Intel SGX extension in the PCK leaf certificate.
+
+**Properties:**
+- `ppid: bytes`, `cpu_svn: bytes`, `pce_svn: int`, `pce_id: bytes`
+- `fmspc: bytes` (6 bytes), `sgx_type: int`
+- `platform_instance_id: Optional[bytes]`
+
+**Methods:**
+- `get_value(oid: str) -> Optional[bytes]`: Look up any OID in the Intel SGX extension by dotted-decimal string. Returns raw DER value bytes, or None if not found.
+
 ### Functions
+
+#### `parse_quote(raw_quote: bytes) -> Quote`
+
+Parse a raw SGX or TDX quote from bytes.
+
+#### `parse_pck_extension_from_pem(pem_bytes: bytes) -> PckExtension`
+
+Parse the Intel SGX extension from a PEM-encoded certificate chain (uses the first/leaf certificate).
 
 #### `verify(raw_quote: bytes, collateral: QuoteCollateralV3, now_secs: int) -> VerifiedReport`
 
@@ -281,6 +398,10 @@ Verify a quote with the provided collateral data.
 
 **Raises:**
 - `ValueError`: If verification fails
+
+#### `verify_with_root_ca(raw_quote: bytes, collateral: QuoteCollateralV3, root_ca_der: bytes, now_secs: int) -> VerifiedReport`
+
+Verify a quote with a custom root CA certificate (DER format) instead of the built-in Intel root CA.
 
 ## Development
 
@@ -300,7 +421,7 @@ uv sync
 uv run maturin develop --features python
 
 # Run tests
-uv run python -m pytest tests/test_python_bindings.py
+uv run pytest tests/ -v
 ```
 
 **Note:** maturin is only required for building from source. Regular users installing from PyPI don't need maturin.

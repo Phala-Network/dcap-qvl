@@ -295,9 +295,22 @@ class PyPckExtension:
     @property
     def platform_instance_id(self) -> Optional[bytes]: ...
 
-    def ppid_hex(self) -> str: ...
+    def get_value(self, oid: str) -> Optional[bytes]:
+        """Look up an arbitrary OID inside the raw Intel SGX extension.
 
-    def fmspc_hex(self) -> str: ...
+        The search is recursive so nested OIDs can be found with a single
+        OID string (e.g. ``"1.2.840.113741.1.13.1.2.17"`` for PCESVN).
+
+        Args:
+            oid: Dotted-decimal OID string
+
+        Returns:
+            Raw DER value bytes, or None if the OID is not present.
+
+        Raises:
+            ValueError: If the OID string is malformed.
+        """
+        ...
 
 
 class PyQuote:
@@ -466,6 +479,22 @@ def parse_quote(raw_quote: bytes) -> PyQuote:
 
     Raises:
         ValueError: If quote parsing fails due to invalid format or corrupted data
+    """
+    ...
+
+def parse_pck_extension_from_pem(pem_bytes: bytes) -> PyPckExtension:
+    """Parse the Intel SGX extension from a PEM-encoded certificate chain.
+
+    The first (leaf) certificate in the chain is used.
+
+    Args:
+        pem_bytes: PEM-encoded certificate chain as bytes
+
+    Returns:
+        PyPckExtension with parsed extension fields
+
+    Raises:
+        ValueError: If parsing fails or no certificates are found
     """
     ...
 

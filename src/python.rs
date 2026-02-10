@@ -412,12 +412,18 @@ impl PyPckExtension {
             .map(|v| PyBytes::new(py, v).into())
     }
 
-    fn ppid_hex(&self) -> String {
-        hex::encode(&self.inner.ppid)
-    }
-
-    fn fmspc_hex(&self) -> String {
-        hex::encode(&self.inner.fmspc)
+    /// Look up an arbitrary OID inside the raw Intel SGX extension.
+    fn get_value(&self, oid: &str, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        let parsed_oid = const_oid::ObjectIdentifier::new(oid)
+            .map_err(|e| PyValueError::new_err(format!("Invalid OID '{}': {}", oid, e)))?;
+        match self.inner.get_value(&parsed_oid) {
+            Ok(Some(bytes)) => Ok(Some(PyBytes::new(py, &bytes).into())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(PyValueError::new_err(format!(
+                "Failed to look up OID: {}",
+                e
+            ))),
+        }
     }
 }
 
@@ -574,6 +580,18 @@ fn parse_quote(raw_quote: &Bound<'_, PyBytes>) -> PyResult<PyQuote> {
     PyQuote::parse(raw_quote)
 }
 
+#[pyfunction]
+fn parse_pck_extension_from_pem(pem_bytes: &Bound<'_, PyBytes>) -> PyResult<PyPckExtension> {
+    let pem_data = pem_bytes.as_bytes();
+    match intel::parse_pck_extension_from_pem(pem_data) {
+        Ok(ext) => Ok(PyPckExtension { inner: ext }),
+        Err(e) => Err(PyValueError::new_err(format!(
+            "Failed to parse PCK extension: {}",
+            e
+        ))),
+    }
+}
+
 #[pyfunction(name = "get_collateral_for_fmspc")]
 fn get_collateral_for_fmspc_py<'py>(
     py: Python<'py>,
@@ -609,6 +627,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;
     m.add_function(wrap_pyfunction!(parse_quote, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_pck_extension_from_pem, m)?)?;
     m.add_function(wrap_pyfunction!(get_collateral_for_fmspc_py, m)?)?;
 
     Ok(())
