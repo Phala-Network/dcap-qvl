@@ -11,7 +11,7 @@ use crate::{
     utils,
 };
 
-/// Parsed values from the Intel SGX extension.
+/// Parsed values from the Intel SGX extension in a PCK certificate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PckExtension {
     pub ppid: Vec<u8>,
@@ -21,6 +21,15 @@ pub struct PckExtension {
     pub fmspc: Fmspc,
     pub sgx_type: u64,
     pub platform_instance_id: Option<Vec<u8>>,
+    /// Whether the platform can be extended with additional packages
+    /// (Platform CA certs only; `None` for Processor CA certs)
+    pub dynamic_platform: Option<bool>,
+    /// Whether platform root keys are cached by SGX Registration Backend
+    /// (Platform CA certs only; `None` for Processor CA certs)
+    pub cached_keys: Option<bool>,
+    /// Whether SMT (simultaneous multithreading / hyperthreading) is enabled
+    /// (Platform CA certs only; `None` for Processor CA certs)
+    pub smt_enabled: Option<bool>,
 }
 
 /// Return the PCK certificate chain (DER encoded) embedded inside the quote.
@@ -62,6 +71,20 @@ pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
     let sgx_type = decode_enumerated(&find_extension_required(&[oids::SGX_TYPE], &extension)?)?;
     let platform_instance_id = find_extension_optional(&[oids::PLATFORM_INSTANCE_ID], &extension)?;
 
+    // Configuration flags (only present in Platform CA certs, under OID 1.2.840.113741.1.13.1.7)
+    let dynamic_platform =
+        find_extension_optional(&[oids::CONFIGURATION, oids::DYNAMIC_PLATFORM], &extension)?
+            .map(|v| decode_boolean(&v))
+            .transpose()?;
+    let cached_keys =
+        find_extension_optional(&[oids::CONFIGURATION, oids::CACHED_KEYS], &extension)?
+            .map(|v| decode_boolean(&v))
+            .transpose()?;
+    let smt_enabled =
+        find_extension_optional(&[oids::CONFIGURATION, oids::SMT_ENABLED], &extension)?
+            .map(|v| decode_boolean(&v))
+            .transpose()?;
+
     Ok(PckExtension {
         ppid,
         cpu_svn,
@@ -70,6 +93,9 @@ pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
         fmspc,
         sgx_type,
         platform_instance_id,
+        dynamic_platform,
+        cached_keys,
+        smt_enabled,
     })
 }
 
@@ -112,6 +138,14 @@ fn sub_object_opt<'a>(
         }
     }
     Ok(None)
+}
+
+fn decode_boolean(bytes: &[u8]) -> Result<bool> {
+    match bytes[..] {
+        [0x00] => Ok(false),
+        [_] => Ok(true),
+        _ => bail!("Unexpected BOOLEAN length: {}", bytes.len()),
+    }
 }
 
 fn decode_enumerated(bytes: &[u8]) -> Result<u64> {

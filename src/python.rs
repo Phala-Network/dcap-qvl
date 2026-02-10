@@ -8,7 +8,7 @@ use crate::{
     collateral::get_collateral_for_fmspc,
     intel,
     quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
-    verify::{verify, VerifiedReport},
+    verify::{QuoteVerifier, VerifiedReport},
     QuoteCollateralV3,
 };
 
@@ -538,10 +538,10 @@ fn py_verify(
     now_secs: u64,
 ) -> PyResult<PyVerifiedReport> {
     let quote_bytes = raw_quote.as_bytes();
-
-    match verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
+    let verifier = QuoteVerifier::new_prod(crate::verify::ring::backend());
+    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
+        Ok(supplemental) => Ok(PyVerifiedReport {
+            inner: supplemental.into_report(),
         }),
         Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
     }
@@ -557,13 +557,10 @@ fn py_verify_with_root_ca(
     let quote_bytes = raw_quote.as_bytes();
     let root_ca = root_ca_der.as_bytes();
 
-    let verifier = crate::verify::QuoteVerifier::new(
-        root_ca.to_vec(),
-        crate::verify::default_crypto::backend(),
-    );
+    let verifier = QuoteVerifier::new(root_ca.to_vec(), crate::verify::ring::backend());
     match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
+        Ok(supplemental) => Ok(PyVerifiedReport {
+            inner: supplemental.into_report(),
         }),
         Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
     }
