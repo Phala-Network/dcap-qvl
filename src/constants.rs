@@ -1,9 +1,14 @@
 #![allow(dead_code)]
 
+/// MR_SIGNER measurement (32 bytes)
 pub type MrSigner = [u8; 32];
+/// MR_ENCLAVE measurement (32 bytes)
 pub type MrEnclave = [u8; 32];
+/// FMSPC - Firmware Security Version & Package Configuration (6 bytes)
 pub type Fmspc = [u8; 6];
+/// CPU SVN - Security Version Number for CPU microcode (16 bytes)
 pub type CpuSvn = [u8; 16];
+/// SVN - Security Version Number (16-bit)
 pub type Svn = u16;
 
 pub const ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE: u16 = 2;
