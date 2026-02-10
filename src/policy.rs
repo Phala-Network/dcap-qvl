@@ -449,6 +449,12 @@ pub struct SupplementalData {
     /// Corresponds to Intel's `smt_enabled`.
     pub smt_enabled: PckCertFlag,
 
+    /// Platform Provider ID from the PCK certificate.
+    /// Only present for Multi-Package platforms (Platform CA certs).
+    /// Used by Rego's `platform_provider_id_ok` check against
+    /// `policy.reference.accepted_platform_provider_ids`.
+    pub platform_provider_id: Option<String>,
+
     // ── Full TCB level details ──────────────────────────────────────────
     /// The matched platform TCB level (includes `tcb_date`, `tcb_status`, `advisory_ids`).
     pub platform_tcb_level: TcbLevel,
@@ -563,6 +569,11 @@ pub(crate) mod rego_policy {
                 );
             }
 
+            // Platform provider ID (only emit if present)
+            if let Some(ref provider_id) = self.platform_provider_id {
+                m.insert("platform_provider_id".into(), json!(provider_id));
+            }
+
             // Advisory IDs
             if !self.advisory_ids.is_empty() {
                 m.insert("advisory_ids".into(), json!(self.advisory_ids));
@@ -634,6 +645,11 @@ pub(crate) mod rego_policy {
                     "smt_enabled".into(),
                     json!(self.smt_enabled == PckCertFlag::True),
                 );
+            }
+
+            // Platform provider ID (only emit if present)
+            if let Some(ref provider_id) = self.platform_provider_id {
+                m.insert("platform_provider_id".into(), json!(provider_id));
             }
 
             // Advisory IDs from platform (unmerged)
@@ -1122,6 +1138,7 @@ mod tests {
             dynamic_platform: PckCertFlag::Undefined,
             cached_keys: PckCertFlag::Undefined,
             smt_enabled: PckCertFlag::Undefined,
+            platform_provider_id: None,
             platform_tcb_level: TcbLevel {
                 tcb: Tcb {
                     sgx_components: vec![TcbComponents { svn: 0 }; 16],

@@ -160,9 +160,19 @@ impl QuoteVerificationResult {
 
         // 3. Tenant measurement (enclave or TD report)
         let tenant_cid = tenant_class_id(&self.report);
+        let mut tenant_m = tenant_measurement(&self.report);
+        // For SGX enclave, add sgx_ce_attributes from the QE report
+        if let Report::SgxEnclave(_) = &self.report {
+            if let Some(obj) = tenant_m.as_object_mut() {
+                obj.insert(
+                    "sgx_ce_attributes".into(),
+                    serde_json::json!(hex::encode_upper(self.supplemental.qe_report.attributes)),
+                );
+            }
+        }
         result.push(serde_json::json!({
             "environment": { "class_id": tenant_cid },
-            "measurement": tenant_measurement(&self.report),
+            "measurement": tenant_m,
         }));
 
         result
@@ -808,6 +818,7 @@ fn verify_impl(
             dynamic_platform: pck_result.dynamic_platform,
             cached_keys: pck_result.cached_keys,
             smt_enabled: pck_result.smt_enabled,
+            platform_provider_id: None, // not yet extracted from PCK cert
             platform_tcb_level,
             qe_tcb_level,
             qe_report,
