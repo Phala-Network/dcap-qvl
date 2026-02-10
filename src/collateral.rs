@@ -423,7 +423,7 @@ pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> 
     get_collateral(INTEL_PCS_URL, quote).await
 }
 
-/// Get collateral and verify the quote (uses ring backend).
+/// Get collateral and verify the quote, returning [`QuoteVerificationResult`](crate::verify::QuoteVerificationResult).
 ///
 /// # Arguments
 ///
@@ -433,7 +433,8 @@ pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> 
 pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
-) -> Result<crate::verify::VerifiedReport> {
+) -> Result<crate::verify::QuoteVerificationResult> {
+    use crate::verify::QuoteVerifier;
     use std::time::SystemTime;
 
     let pccs_url = pccs_url
@@ -445,7 +446,7 @@ pub async fn get_collateral_and_verify(
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
         .as_secs();
-    crate::verify::verify(quote, &collateral, now)
+    QuoteVerifier::new_prod_default_crypto().verify(quote, &collateral, now)
 }
 
 #[cfg(test)]

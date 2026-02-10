@@ -139,6 +139,33 @@ pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
     Ok(writer.finish().context("Failed to finish writer")?.to_vec())
 }
 
+/// Extract the CRL Number (OID 2.5.29.20) from a DER-encoded CRL.
+///
+/// Returns `Ok(0)` if the CRL Number extension is not present.
+pub fn extract_crl_number(crl_der: &[u8]) -> Result<u32> {
+    use der::Decode as _;
+    let crl = x509_cert::crl::CertificateList::from_der(crl_der).context("Failed to parse CRL")?;
+    let Some(extensions) = &crl.tbs_cert_list.crl_extensions else {
+        return Ok(0);
+    };
+    for ext in extensions.iter() {
+        // OID 2.5.29.20 = id-ce-cRLNumber
+        if ext.extn_id.to_string() == "2.5.29.20" {
+            // CRL Number is encoded as an ASN.1 INTEGER
+            let crl_num =
+                der::asn1::UintRef::from_der(ext.extn_value.as_bytes()).context("CRL number")?;
+            let bytes = crl_num.as_bytes();
+            // Convert big-endian bytes to u32 (CRL numbers are typically small)
+            let mut val: u32 = 0;
+            for &b in bytes {
+                val = val.checked_shl(8).context("CRL number too large for u32")? | u32::from(b);
+            }
+            return Ok(val);
+        }
+    }
+    Ok(0)
+}
+
 /// Parse CRL DER bytes into CertRevocationList objects.
 /// Call this once and pass the results to `verify_certificate_chain`.
 pub fn parse_crls(crl_der: &[&[u8]]) -> Result<Vec<CertRevocationList<'static>>> {

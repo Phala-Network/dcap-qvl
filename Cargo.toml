@@ -76,6 +76,11 @@ signature = { version = "2.2", default-features = false, optional = true }
 
 dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 
+# Rego policy engine (optional, for Intel QAL compatibility)
+regorus = { version = "0.9", optional = true, default-features = false, features = [
+    "arc", "time", "regex", "semver",
+] }
+
 
 [dev-dependencies]
 hex-literal = "1.1.0"
@@ -89,7 +94,7 @@ name = "dcap_qvl"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["std", "report", "ring", "rustcrypto"]
+default = ["std", "report", "ring", "rustcrypto", "rego"]
 std = [
     "serde/std",
     "scale/std",
@@ -112,6 +117,7 @@ ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
 _anycrypto = []
 contract = ["getrandom"]
+rego = ["dep:regorus", "std", "serde_json"]
 
 [lints.clippy]
 unwrap_used = "deny"
