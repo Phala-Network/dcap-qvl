@@ -93,6 +93,9 @@ pub mod verify;
 #[cfg(feature = "python")]
 pub mod python;
 
+#[cfg(feature = "go")]
+mod ffi;
+
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 

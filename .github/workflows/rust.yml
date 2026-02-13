@@ -50,6 +50,59 @@ jobs:
         run: |
           pytest -q python-bindings/tests
 
+  golang-bindings:
+    name: Build & Test Go bindings (unit)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.21"
+
+      - name: Build Rust static library for Go bindings
+        run: |
+          cargo build --release
+          mkdir -p golang-bindings/lib/darwin_arm64
+          cp target/release/libdcap_qvl.a golang-bindings/lib/darwin_arm64/libdcap_qvl.a
+
+      - name: Run Go unit tests
+        working-directory: golang-bindings
+        run: go test ./...
+
+  golang-bindings-integration:
+    name: Build & Test Go bindings (integration)
+    runs-on: macos-14
+    needs: golang-bindings
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.21"
+
+      - name: Build Rust static library for Go bindings
+        run: |
+          cargo build --release
+          mkdir -p golang-bindings/lib/darwin_arm64
+          cp target/release/libdcap_qvl.a golang-bindings/lib/darwin_arm64/libdcap_qvl.a
+
+      - name: Run Go integration tests
+        working-directory: golang-bindings
+        run: go test -tags integration -count=1 ./...
+
   wasm:
     name: Check WebAssembly target
     runs-on: ubuntu-latest
