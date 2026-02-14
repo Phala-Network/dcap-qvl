@@ -3,8 +3,8 @@ package dcap
 /*
 #cgo linux,amd64  LDFLAGS: -Wl,-Bstatic -ldcap_qvl -Wl,-Bdynamic -lm -ldl -lpthread
 #cgo linux,arm64  LDFLAGS: -Wl,-Bstatic -ldcap_qvl -Wl,-Bdynamic -lm -ldl -lpthread
-#cgo darwin,amd64 LDFLAGS: -ldcap_qvl -framework Security -framework CoreFoundation
-#cgo darwin,arm64 LDFLAGS: -ldcap_qvl -framework Security -framework CoreFoundation
+#cgo darwin,amd64 LDFLAGS: -ldcap_qvl
+#cgo darwin,arm64 LDFLAGS: -ldcap_qvl
 #include "dcap_qvl.h"
 #include <stdlib.h>
 */
@@ -12,6 +12,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 	"unsafe"
 )
@@ -146,30 +147,47 @@ func GetCollateral(pccsURL string, rawQuote []byte) (*QuoteCollateralV3, error) 
 		return nil, fmt.Errorf("dcap: empty quote input")
 	}
 
-	urlBytes := []byte(pccsURL)
+	q, err := ParseQuote(rawQuote)
+	if err != nil {
+		return nil, fmt.Errorf("dcap: failed to parse quote: %w", err)
+	}
 
-	var outJSON *C.char
-	var outLen C.size_t
+	client := &http.Client{Timeout: httpTimeout}
 
-	rc := C.dcap_get_collateral(
-		(*C.char)(unsafe.Pointer(&urlBytes[0])),
-		C.size_t(len(urlBytes)),
-		(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
-		C.size_t(len(rawQuote)),
-		&outJSON,
-		&outLen,
-	)
+	// Get PCK certificate chain
+	var pckChain string
+	switch {
+	case q.CertType == 5:
+		// cert_type 5: PCK cert chain is embedded in the quote
+		pckChain = q.CertChainPEM
+	case q.CertType == 2 || q.CertType == 3:
+		// cert_type 2/3: fetch PCK cert from PCCS using encrypted PPID
+		if q.CertPCESVN == nil {
+			return nil, fmt.Errorf("dcap: cert_type %d but missing encrypted PPID params", q.CertType)
+		}
+		pckChain, err = fetchPCKCertificate(client, pccsURL, q)
+		if err != nil {
+			return nil, fmt.Errorf("dcap: failed to fetch PCK certificate: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("dcap: unsupported cert_type %d", q.CertType)
+	}
 
-	data, err := ffiResult(rc, outJSON, outLen)
+	// Extract FMSPC and CA from the PCK certificate chain
+	fmspc, ca, err := extractFMSPCAndCA(pckChain)
+	if err != nil {
+		return nil, fmt.Errorf("dcap: failed to extract FMSPC/CA: %w", err)
+	}
+
+	isSGX := q.QuoteType == "SGX"
+	coll, err := getCollateralForFMSPCImpl(client, pccsURL, fmspc, ca, isSGX)
 	if err != nil {
 		return nil, err
 	}
 
-	var coll QuoteCollateralV3
-	if err := json.Unmarshal(data, &coll); err != nil {
-		return nil, fmt.Errorf("dcap: failed to unmarshal collateral: %w", err)
-	}
-	return &coll, nil
+	// Attach the PCK certificate chain for offline verification
+	coll.PCKCertificateChain = pckChain
+	return coll, nil
 }
 
 // GetCollateralForFMSPC fetches collateral for a known FMSPC and CA type.
@@ -184,40 +202,8 @@ func GetCollateralForFMSPC(pccsURL, fmspc, ca string, isSGX bool) (*QuoteCollate
 		return nil, fmt.Errorf("dcap: empty CA input")
 	}
 
-	urlBytes := []byte(pccsURL)
-	fmspcBytes := []byte(fmspc)
-	caBytes := []byte(ca)
-
-	isSGXInt := C.int(0)
-	if isSGX {
-		isSGXInt = C.int(1)
-	}
-
-	var outJSON *C.char
-	var outLen C.size_t
-
-	rc := C.dcap_get_collateral_for_fmspc(
-		(*C.char)(unsafe.Pointer(&urlBytes[0])),
-		C.size_t(len(urlBytes)),
-		(*C.char)(unsafe.Pointer(&fmspcBytes[0])),
-		C.size_t(len(fmspcBytes)),
-		(*C.char)(unsafe.Pointer(&caBytes[0])),
-		C.size_t(len(caBytes)),
-		isSGXInt,
-		&outJSON,
-		&outLen,
-	)
-
-	data, err := ffiResult(rc, outJSON, outLen)
-	if err != nil {
-		return nil, err
-	}
-
-	var coll QuoteCollateralV3
-	if err := json.Unmarshal(data, &coll); err != nil {
-		return nil, fmt.Errorf("dcap: failed to unmarshal collateral: %w", err)
-	}
-	return &coll, nil
+	client := &http.Client{Timeout: httpTimeout}
+	return getCollateralForFMSPCImpl(client, pccsURL, fmspc, ca, isSGX)
 }
 
 // GetCollateralAndVerify fetches collateral and verifies in one call.

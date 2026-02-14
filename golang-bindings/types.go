@@ -35,10 +35,17 @@ func (h *HexBytes) UnmarshalJSON(data []byte) error {
 type Quote struct {
 	Header       QuoteHeader `json:"header"`
 	Report       QuoteReport `json:"report"`
+	CertType     uint16      `json:"cert_type"`
 	CertChainPEM string      `json:"cert_chain_pem,omitempty"`
-	FMSPC        string      `json:"fmspc"`
-	CA           string      `json:"ca"`
+	FMSPC        string      `json:"fmspc,omitempty"`
+	CA           string      `json:"ca,omitempty"`
 	QuoteType    string      `json:"quote_type"`
+	// cert_type 2/3: encrypted PPID params for PCK cert fetch
+	QEID         HexBytes `json:"qe_id,omitempty"`
+	EncryptedPPID HexBytes `json:"encrypted_ppid,omitempty"`
+	CertCPUSVN   HexBytes `json:"cert_cpusvn,omitempty"`
+	CertPCESVN   *uint16  `json:"cert_pcesvn,omitempty"`
+	CertPCEID    HexBytes `json:"cert_pceid,omitempty"`
 }
 
 // QuoteHeader is the quote header.

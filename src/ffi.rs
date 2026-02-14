@@ -18,11 +18,25 @@ use crate::QuoteCollateralV3;
 struct FfiQuote {
     header: Header,
     report: FfiReport,
+    cert_type: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     cert_chain_pem: Option<String>,
-    fmspc: String,
-    ca: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fmspc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ca: Option<String>,
     quote_type: &'static str,
+    // cert_type 2/3: encrypted PPID params for PCK cert fetch
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    qe_id: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    encrypted_ppid: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    cert_cpusvn: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cert_pcesvn: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    cert_pceid: Option<Vec<u8>>,
 }
 
 #[derive(Serialize)]
@@ -265,6 +279,9 @@ pub unsafe extern "C" fn dcap_parse_quote(
         Err(e) => return write_error(format!("Failed to parse quote: {e}"), out_json, out_len),
     };
 
+    let cert_type = parsed.inner_cert_type();
+    let quote_type = if parsed.header.is_sgx() { "SGX" } else { "TDX" };
+
     let cert_chain_pem = parsed.raw_cert_chain().ok().map(|raw| {
         let mut end = raw.len();
         while end > 0 && raw[end.saturating_sub(1)] == 0 {
@@ -273,25 +290,49 @@ pub unsafe extern "C" fn dcap_parse_quote(
         String::from_utf8_lossy(&raw[..end]).into_owned()
     });
 
-    let fmspc = match parsed.fmspc() {
-        Ok(f) => hex::encode_upper(f),
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
+    // For cert_type 5: extract fmspc/ca from embedded cert chain
+    // For cert_type 2/3: these are unavailable until PCK cert is fetched
+    let (fmspc, ca) = if cert_chain_pem.is_some() {
+        let fmspc = match parsed.fmspc() {
+            Ok(f) => Some(hex::encode_upper(f)),
+            Err(e) => return write_error(format_error(&e), out_json, out_len),
+        };
+        let ca = match parsed.ca() {
+            Ok(c) => Some(c.to_string()),
+            Err(e) => return write_error(format_error(&e), out_json, out_len),
+        };
+        (fmspc, ca)
+    } else {
+        (None, None)
     };
 
-    let ca = match parsed.ca() {
-        Ok(c) => c.to_string(),
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
-    };
-
-    let quote_type = if parsed.header.is_sgx() { "SGX" } else { "TDX" };
+    // For cert_type 2/3: extract encrypted PPID params
+    let (qe_id, encrypted_ppid, cert_cpusvn, cert_pcesvn, cert_pceid) =
+        if let Ok(params) = parsed.encrypted_ppid_params() {
+            (
+                Some(parsed.qeid().to_vec()),
+                Some(params.encrypted_ppid),
+                Some(params.cpusvn.to_vec()),
+                Some(params.pcesvn),
+                Some(params.pceid.to_vec()),
+            )
+        } else {
+            (None, None, None, None, None)
+        };
 
     let ffi_quote = FfiQuote {
         header: parsed.header,
         report: FfiReport::from_report(&parsed.report),
+        cert_type,
         cert_chain_pem,
         fmspc,
         ca,
         quote_type,
+        qe_id,
+        encrypted_ppid,
+        cert_cpusvn,
+        cert_pcesvn,
+        cert_pceid,
     };
 
     let json = match serde_json::to_string(&ffi_quote) {
@@ -386,6 +427,7 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca(
     0
 }
 
+#[cfg(all(feature = "report", feature = "tokio"))]
 #[no_mangle]
 pub unsafe extern "C" fn dcap_get_collateral(
     pccs_url: *const u8,
@@ -421,6 +463,7 @@ pub unsafe extern "C" fn dcap_get_collateral(
     0
 }
 
+#[cfg(all(feature = "report", feature = "tokio"))]
 #[no_mangle]
 pub unsafe extern "C" fn dcap_get_collateral_for_fmspc(
     pccs_url: *const u8,

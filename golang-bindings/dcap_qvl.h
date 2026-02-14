@@ -28,18 +28,6 @@ int dcap_verify_with_root_ca(const uint8_t *quote, size_t quote_len,
                              uint64_t now_secs,
                              char **out_json, size_t *out_len);
 
-/* Fetch collateral from PCCS given a raw quote */
-int dcap_get_collateral(const char *pccs_url, size_t url_len,
-                        const uint8_t *quote, size_t quote_len,
-                        char **out_json, size_t *out_len);
-
-/* Fetch collateral for a known FMSPC */
-int dcap_get_collateral_for_fmspc(const char *pccs_url, size_t url_len,
-                                  const char *fmspc, size_t fmspc_len,
-                                  const char *ca, size_t ca_len,
-                                  int is_sgx,
-                                  char **out_json, size_t *out_len);
-
 /* Parse PCK extension from PEM certificate chain */
 int dcap_parse_pck_extension_from_pem(const uint8_t *pem, size_t pem_len,
                                       char **out_json, size_t *out_len);
