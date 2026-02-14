@@ -1,8 +1,8 @@
 package dcap
 
 /*
-#cgo linux,amd64  LDFLAGS: -ldcap_qvl -lm -ldl -lpthread
-#cgo linux,arm64  LDFLAGS: -ldcap_qvl -lm -ldl -lpthread
+#cgo linux,amd64  LDFLAGS: -Wl,-Bstatic -ldcap_qvl -Wl,-Bdynamic -lm -ldl -lpthread
+#cgo linux,arm64  LDFLAGS: -Wl,-Bstatic -ldcap_qvl -Wl,-Bdynamic -lm -ldl -lpthread
 #cgo darwin,amd64 LDFLAGS: -ldcap_qvl -framework Security -framework CoreFoundation
 #cgo darwin,arm64 LDFLAGS: -ldcap_qvl -framework Security -framework CoreFoundation
 #include "dcap_qvl.h"
