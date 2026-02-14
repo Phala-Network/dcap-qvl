@@ -69,11 +69,11 @@ jobs:
       - name: Build Rust static library for Go bindings
         run: |
           cargo build --release --features go
-          mkdir -p golang-bindings/lib/linux_amd64
-          cp target/release/libdcap_qvl.a golang-bindings/lib/linux_amd64/libdcap_qvl.a
 
       - name: Run Go unit tests
         working-directory: golang-bindings
+        env:
+          CGO_LDFLAGS: -L${{ github.workspace }}/target/release
         run: go test ./...
 
   golang-bindings-integration:
@@ -96,11 +96,11 @@ jobs:
       - name: Build Rust static library for Go bindings
         run: |
           cargo build --release --features go
-          mkdir -p golang-bindings/lib/linux_amd64
-          cp target/release/libdcap_qvl.a golang-bindings/lib/linux_amd64/libdcap_qvl.a
 
       - name: Run Go integration tests
         working-directory: golang-bindings
+        env:
+          CGO_LDFLAGS: -L${{ github.workspace }}/target/release
         run: go test -tags integration -count=1 ./...
 
   wasm:
