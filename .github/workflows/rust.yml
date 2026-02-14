@@ -52,7 +52,7 @@ jobs:
 
   golang-bindings:
     name: Build & Test Go bindings (unit)
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -68,9 +68,9 @@ jobs:
 
       - name: Build Rust static library for Go bindings
         run: |
-          cargo build --release
-          mkdir -p golang-bindings/lib/darwin_arm64
-          cp target/release/libdcap_qvl.a golang-bindings/lib/darwin_arm64/libdcap_qvl.a
+          cargo build --release --features go
+          mkdir -p golang-bindings/lib/linux_amd64
+          cp target/release/libdcap_qvl.a golang-bindings/lib/linux_amd64/libdcap_qvl.a
 
       - name: Run Go unit tests
         working-directory: golang-bindings
@@ -78,7 +78,7 @@ jobs:
 
   golang-bindings-integration:
     name: Build & Test Go bindings (integration)
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     needs: golang-bindings
     steps:
       - uses: actions/checkout@v6
@@ -95,9 +95,9 @@ jobs:
 
       - name: Build Rust static library for Go bindings
         run: |
-          cargo build --release
-          mkdir -p golang-bindings/lib/darwin_arm64
-          cp target/release/libdcap_qvl.a golang-bindings/lib/darwin_arm64/libdcap_qvl.a
+          cargo build --release --features go
+          mkdir -p golang-bindings/lib/linux_amd64
+          cp target/release/libdcap_qvl.a golang-bindings/lib/linux_amd64/libdcap_qvl.a
 
       - name: Run Go integration tests
         working-directory: golang-bindings
