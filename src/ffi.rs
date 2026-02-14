@@ -369,10 +369,7 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca(
         }
     };
 
-    let verifier = verify::QuoteVerifier::new(
-        root_ca.to_vec(),
-        verify::default_crypto::backend(),
-    );
+    let verifier = verify::QuoteVerifier::new(root_ca.to_vec(), verify::default_crypto::backend());
 
     let report = match verifier.verify(quote_slice, &collateral, now_secs) {
         Ok(r) => r,
