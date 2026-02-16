@@ -114,6 +114,12 @@ rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcryp
 _anycrypto = []
 contract = ["getrandom"]
 
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+panic = "abort"
+strip = "symbols"
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
