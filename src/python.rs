@@ -601,11 +601,7 @@ fn get_collateral_for_fmspc_py<'py>(
     for_sgx: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     future_into_py(py, async move {
-        // Convert ca String to &'static str by leaking it
-        // This is necessary because the Rust function expects &'static str
-        let ca_static: &'static str = Box::leak(ca.into_boxed_str());
-
-        match get_collateral_for_fmspc(&pccs_url, fmspc, ca_static, for_sgx).await {
+        match get_collateral_for_fmspc(&pccs_url, fmspc, &ca, for_sgx).await {
             Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
             Err(e) => Err(PyValueError::new_err(format!(
                 "Failed to get collateral for FMSPC: {}",
