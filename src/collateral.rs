@@ -445,7 +445,7 @@ pub async fn get_collateral_and_verify(
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
         .as_secs();
-    crate::verify::verify(quote, &collateral, now)
+    crate::verify::verify(quote, &collateral, now, false)
 }
 
 #[cfg(test)]

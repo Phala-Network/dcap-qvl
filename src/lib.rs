@@ -30,7 +30,7 @@
 //!     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
 //!
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-//!     let report = verify(&quote, &collateral, now).expect("failed to verify quote");
+//!     let report = verify(&quote, &collateral, now, false).expect("failed to verify quote");
 //!     println!("{:?}", report);
 //! }
 //! ```

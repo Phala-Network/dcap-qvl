@@ -12,13 +12,13 @@ pub fn verify(
     now_secs: u64,
 ) -> anyhow::Result<VerifiedReport> {
     use dcap_qvl::verify::{ring, rustcrypto};
-    let ring_result = ring::verify(raw_quote, collateral, now_secs);
-    let rustcrypto_result = rustcrypto::verify(raw_quote, collateral, now_secs);
+    let ring_result = ring::verify(raw_quote, collateral, now_secs, false);
+    let rustcrypto_result = rustcrypto::verify(raw_quote, collateral, now_secs, false);
     assert_eq!(
         ring_result.map_err(|e| e.to_string()),
         rustcrypto_result.map_err(|e| e.to_string())
     );
-    ring::verify(raw_quote, collateral, now_secs)
+    ring::verify(raw_quote, collateral, now_secs, false)
 }
 
 fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {

@@ -133,6 +133,7 @@ impl QuoteVerifier {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
+        override_azure_tcbinfo: bool,
     ) -> Result<VerifiedReport> {
         verify_impl(
             raw_quote,
@@ -140,6 +141,7 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
+            override_azure_tcbinfo,
         )
     }
 }
@@ -477,6 +479,7 @@ fn match_platform_tcb(
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
+    override_azure_tcbinfo: bool,
 ) -> Result<TcbStatusWithAdvisory> {
     // Verify FMSPC matches
     let tcb_fmspc = hex::decode(&tcb_info.fmspc)
@@ -506,10 +509,19 @@ fn match_platform_tcb(
             continue;
         }
 
-        let sgx_components: Vec<u8> = tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
+        let mut sgx_components: Vec<u8> =
+            tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
         if sgx_components.is_empty() {
             bail!("No SGX components in the TCB info");
         }
+
+        // Azure override
+        if override_azure_tcbinfo {
+            if sgx_components[7] > 3 {
+                sgx_components[7] = 3;
+            }
+        }
+
         // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
         if cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b) {
             continue;
@@ -570,6 +582,7 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
+    override_azure_tcbinfo: bool,
 ) -> Result<VerifiedReport> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
@@ -659,6 +672,7 @@ fn verify_impl(
         &pck_result.cpu_svn,
         pck_result.pce_svn,
         &pck_result.fmspc,
+        override_azure_tcbinfo,
     )?;
 
     // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
@@ -746,9 +760,14 @@ pub mod ring {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
+        override_azure_tcbinfo: bool,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .verify(raw_quote, collateral, now_secs)
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_azure_tcbinfo,
+        )
     }
 }
 
@@ -777,9 +796,14 @@ pub mod rustcrypto {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
+        override_azure_tcbinfo: bool,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .verify(raw_quote, collateral, now_secs)
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_azure_tcbinfo,
+        )
     }
 }
 
