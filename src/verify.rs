@@ -133,7 +133,7 @@ impl QuoteVerifier {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: bool,
+        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         verify_impl(
             raw_quote,
@@ -157,7 +157,8 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
     let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
 
-    let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
+    let verified_report =
+        verify(&raw_quote, &quote_collateral, now, None::<fn(TcbInfo) -> TcbInfo>).map_err(|e| {
         let error_msg = format_error_chain(&e);
         serde_wasm_bindgen::to_value(&error_msg)
             .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
@@ -183,7 +184,7 @@ pub fn js_verify_with_root_ca(
 
     let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
     let verified_report = verifier
-        .verify(&raw_quote, &quote_collateral, now)
+        .verify(&raw_quote, &quote_collateral, now, None::<fn(TcbInfo) -> TcbInfo>)
         .map_err(|e| {
             let error_msg = format_error_chain(&e);
             serde_wasm_bindgen::to_value(&error_msg)
@@ -479,7 +480,6 @@ fn match_platform_tcb(
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
-    override_azure_tcbinfo: bool,
 ) -> Result<TcbStatusWithAdvisory> {
     // Verify FMSPC matches
     let tcb_fmspc = hex::decode(&tcb_info.fmspc)
@@ -509,17 +509,9 @@ fn match_platform_tcb(
             continue;
         }
 
-        let mut sgx_components: Vec<u8> =
-            tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
+        let sgx_components: Vec<u8> = tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
         if sgx_components.is_empty() {
             bail!("No SGX components in the TCB info");
-        }
-
-        // Azure override
-        if override_azure_tcbinfo {
-            if sgx_components[7] > 3 {
-                sgx_components[7] = 3;
-            }
         }
 
         // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
@@ -582,7 +574,7 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
-    override_azure_tcbinfo: bool,
+    override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
 ) -> Result<VerifiedReport> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
@@ -622,8 +614,17 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let tcb_info =
-        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+    let tcb_info = verify_tcb_info_signature(
+        collateral,
+        now,
+        &crls,
+        trust_anchor.clone(),
+        backend,
+    )?;
+    let tcb_info = match override_azure_tcbinfo {
+        Some(override_tcbinfo) => override_tcbinfo(tcb_info),
+        None => tcb_info,
+    };
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
@@ -672,7 +673,6 @@ fn verify_impl(
         &pck_result.cpu_svn,
         pck_result.pce_svn,
         &pck_result.fmspc,
-        override_azure_tcbinfo,
     )?;
 
     // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
@@ -760,7 +760,7 @@ pub mod ring {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: bool,
+        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
             raw_quote,
@@ -796,7 +796,7 @@ pub mod rustcrypto {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: bool,
+        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
             raw_quote,
