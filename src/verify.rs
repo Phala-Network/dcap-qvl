@@ -133,7 +133,7 @@ impl QuoteVerifier {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
+        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         verify_impl(
             raw_quote,
@@ -141,7 +141,7 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
-            override_azure_tcbinfo,
+            override_tcb_info,
         )
     }
 }
@@ -157,8 +157,13 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
     let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
 
-    let verified_report =
-        verify(&raw_quote, &quote_collateral, now, None::<fn(TcbInfo) -> TcbInfo>).map_err(|e| {
+    let verified_report = verify(
+        &raw_quote,
+        &quote_collateral,
+        now,
+        None::<fn(TcbInfo) -> TcbInfo>,
+    )
+    .map_err(|e| {
         let error_msg = format_error_chain(&e);
         serde_wasm_bindgen::to_value(&error_msg)
             .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
@@ -184,7 +189,12 @@ pub fn js_verify_with_root_ca(
 
     let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
     let verified_report = verifier
-        .verify(&raw_quote, &quote_collateral, now, None::<fn(TcbInfo) -> TcbInfo>)
+        .verify(
+            &raw_quote,
+            &quote_collateral,
+            now,
+            None::<fn(TcbInfo) -> TcbInfo>,
+        )
         .map_err(|e| {
             let error_msg = format_error_chain(&e);
             serde_wasm_bindgen::to_value(&error_msg)
@@ -574,7 +584,7 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
-    override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
+    override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
 ) -> Result<VerifiedReport> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
@@ -614,15 +624,10 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let tcb_info = verify_tcb_info_signature(
-        collateral,
-        now,
-        &crls,
-        trust_anchor.clone(),
-        backend,
-    )?;
-    let tcb_info = match override_azure_tcbinfo {
-        Some(override_tcbinfo) => override_tcbinfo(tcb_info),
+    let tcb_info =
+        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+    let tcb_info = match override_tcb_info {
+        Some(override_tcb_info) => override_tcb_info(tcb_info),
         None => tcb_info,
     };
 
@@ -760,13 +765,13 @@ pub mod ring {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
+        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
             raw_quote,
             collateral,
             now_secs,
-            override_azure_tcbinfo,
+            override_tcb_info,
         )
     }
 }
@@ -796,13 +801,13 @@ pub mod rustcrypto {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_azure_tcbinfo: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
+        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
             raw_quote,
             collateral,
             now_secs,
-            override_azure_tcbinfo,
+            override_tcb_info,
         )
     }
 }
