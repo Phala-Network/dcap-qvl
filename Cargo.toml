@@ -113,7 +113,7 @@ rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcryp
 _anycrypto = []
 contract = ["getrandom"]
 # Allows overriding TCB info after signature check - dangerous configuration
-danger_allow_tcb_override = []
+danger-allow-tcb-override = []
 
 [lints.clippy]
 unwrap_used = "deny"

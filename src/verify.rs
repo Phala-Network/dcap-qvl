@@ -140,7 +140,7 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
-            #[cfg(feature = "danger_allow_tcb_override")]
+            #[cfg(feature = "danger-allow-tcb-override")]
             None::<fn(_) -> _>,
         )
     }
@@ -156,7 +156,7 @@ impl QuoteVerifier {
     /// # Returns
     /// * `Ok(VerifiedReport)` - The verified report
     /// * `Err(Error)` - The error
-    #[cfg(feature = "danger_allow_tcb_override")]
+    #[cfg(feature = "danger-allow-tcb-override")]
     pub fn verify_with_tcb_override(
         &self,
         raw_quote: &[u8],
@@ -602,7 +602,7 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
-    #[cfg(feature = "danger_allow_tcb_override")] override_tcb_info: Option<
+    #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
         impl FnOnce(TcbInfo) -> TcbInfo,
     >,
 ) -> Result<VerifiedReport> {
@@ -647,7 +647,7 @@ fn verify_impl(
     let tcb_info =
         verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
 
-    #[cfg(feature = "danger_allow_tcb_override")]
+    #[cfg(feature = "danger-allow-tcb-override")]
     let tcb_info = match override_tcb_info {
         Some(override_tcb_info) => override_tcb_info(tcb_info),
         None => tcb_info,
@@ -794,7 +794,7 @@ pub mod ring {
 
     /// Verify a quote using Intel's trusted root CA and ring backend,
     /// passing a function to override TCB info after the signature check
-    #[cfg(feature = "danger_allow_tcb_override")]
+    #[cfg(feature = "danger-allow-tcb-override")]
     pub fn verify_with_tcb_override(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
@@ -842,7 +842,7 @@ pub mod rustcrypto {
 
     /// Verify a quote using Intel's trusted root CA and RustCrypto backend,
     /// passing a function to override TCB info after the signature check
-    #[cfg(feature = "danger_allow_tcb_override")]
+    #[cfg(feature = "danger-allow-tcb-override")]
     pub fn verify_with_tcb_override(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
@@ -893,7 +893,7 @@ pub use self::default_crypto::verify;
 ///
 /// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
-#[cfg(all(feature = "_anycrypto", feature = "danger_allow_tcb_override"))]
+#[cfg(all(feature = "_anycrypto", feature = "danger-allow-tcb-override"))]
 pub use self::default_crypto::verify_with_tcb_override;
 
 // =============================================================================
