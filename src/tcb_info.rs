@@ -91,15 +91,7 @@ impl TcbStatus {
     ///
     /// Currently, `Revoked` status is considered invalid and will cause the verification to fail.
     pub(crate) fn is_valid(&self) -> bool {
-        match self {
-            Self::UpToDate => true,
-            Self::SWHardeningNeeded => true,
-            Self::ConfigurationNeeded => true,
-            Self::ConfigurationAndSWHardeningNeeded => true,
-            Self::OutOfDate => true,
-            Self::OutOfDateConfigurationNeeded => true,
-            Self::Revoked => false,
-        }
+        !matches!(self, Self::Revoked)
     }
 }
 
