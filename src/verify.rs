@@ -133,7 +133,6 @@ impl QuoteVerifier {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
         verify_impl(
             raw_quote,
@@ -141,7 +140,35 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
-            override_tcb_info,
+            None::<fn(_) -> _>,
+        )
+    }
+
+    /// Verify a quote with the configured root certificate, passing a TCB info override
+    ///
+    /// # Arguments
+    /// * `raw_quote` - The raw quote bytes
+    /// * `collateral` - The quote collateral
+    /// * `now_secs` - Current time in seconds since UNIX epoch
+    /// * `override_tcb_info` - a function which modifies TCB info after the signature check
+    ///
+    /// # Returns
+    /// * `Ok(VerifiedReport)` - The verified report
+    /// * `Err(Error)` - The error
+    pub fn verify_with_tcb_override(
+        &self,
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        verify_impl(
+            raw_quote,
+            collateral,
+            now_secs,
+            &self.root_ca_der,
+            &self.backend,
+            Some(override_tcb_info),
         )
     }
 }
@@ -157,13 +184,7 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
     let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
 
-    let verified_report = verify(
-        &raw_quote,
-        &quote_collateral,
-        now,
-        None::<fn(TcbInfo) -> TcbInfo>,
-    )
-    .map_err(|e| {
+    let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
         let error_msg = format_error_chain(&e);
         serde_wasm_bindgen::to_value(&error_msg)
             .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
@@ -189,12 +210,7 @@ pub fn js_verify_with_root_ca(
 
     let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
     let verified_report = verifier
-        .verify(
-            &raw_quote,
-            &quote_collateral,
-            now,
-            None::<fn(TcbInfo) -> TcbInfo>,
-        )
+        .verify(&raw_quote, &quote_collateral, now)
         .map_err(|e| {
             let error_msg = format_error_chain(&e);
             serde_wasm_bindgen::to_value(&error_msg)
@@ -765,9 +781,20 @@ pub mod ring {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+
+    /// Verify a quote using Intel's trusted root CA and ring backend,
+    /// passing a function to override TCB info after the signature check
+    pub fn verify_with_tcb_override(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
@@ -801,9 +828,20 @@ pub mod rustcrypto {
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
-        override_tcb_info: Option<impl FnOnce(TcbInfo) -> TcbInfo>,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify(
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+
+    /// Verify a quote using Intel's trusted root CA and RustCrypto backend,
+    /// passing a function to override TCB info after the signature check
+    pub fn verify_with_tcb_override(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend()).verify_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
