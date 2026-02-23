@@ -866,7 +866,7 @@ pub mod rustcrypto {
 /// * `Ok(VerifiedReport)` - The verified report
 /// * `Err(Error)` - The error
 #[cfg(feature = "_anycrypto")]
-pub use self::default_crypto::verify;
+pub use self::default_crypto::{verify, verify_with_tcb_override};
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB
