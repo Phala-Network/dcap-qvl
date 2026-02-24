@@ -254,9 +254,9 @@ export class VerifiedReport {
   status: TcbStatus;
   advisory_ids: string[];
   report: Report;
-  ppid: Buffer;
+  ppid: Buffer | Uint8Array;
 
-  constructor(status: TcbStatus, advisoryIds: string[], report: Report, ppid: Buffer);
+  constructor(status: TcbStatus, advisoryIds: string[], report: Report, ppid: Buffer | Uint8Array);
 }
 
 export class QuoteVerifier {
