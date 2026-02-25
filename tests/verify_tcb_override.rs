@@ -39,8 +39,12 @@ mod tests {
         use dcap_qvl::verify::{ring, rustcrypto};
         let ring_result =
             ring::verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info);
-        let rustcrypto_result =
-            rustcrypto::verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info);
+        let rustcrypto_result = rustcrypto::verify_with_tcb_override(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        );
         assert_eq!(
             ring_result.map_err(|e| e.to_string()),
             rustcrypto_result.map_err(|e| e.to_string())
