@@ -1,5 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::ffi::c_void;
 use core::slice;
 
 use scale::Decode;
@@ -234,21 +235,32 @@ struct FfiPckExtension {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Write a JSON string into a Rust-allocated buffer and return it through FFI pointers.
-/// Returns 0 on success.
-unsafe fn write_output(json: String, out_json: *mut *mut u8, out_len: *mut usize) {
-    let bytes = json.into_bytes();
-    let len = bytes.len();
-    let ptr = bytes.as_ptr();
-    let leaked = alloc::boxed::Box::leak(bytes.into_boxed_slice());
-    *out_json = leaked.as_mut_ptr();
-    *out_len = len;
-    let _ = ptr; // suppress unused
+type OutputCallback = Option<unsafe extern "C" fn(*const u8, usize, *mut c_void) -> i32>;
+
+const ERR_GENERIC: i32 = 1;
+const ERR_CALLBACK: i32 = 2;
+
+unsafe fn emit_output(json: String, cb: OutputCallback, user_data: *mut c_void) -> i32 {
+    let Some(callback) = cb else {
+        return ERR_CALLBACK;
+    };
+
+    let bytes = json.as_bytes();
+    let rc = callback(bytes.as_ptr(), bytes.len(), user_data);
+    if rc == 0 {
+        0
+    } else {
+        ERR_CALLBACK
+    }
 }
 
-unsafe fn write_error(msg: String, out_json: *mut *mut u8, out_len: *mut usize) -> i32 {
-    write_output(msg, out_json, out_len);
-    1
+unsafe fn emit_error(msg: String, cb: OutputCallback, user_data: *mut c_void) -> i32 {
+    let rc = emit_output(msg, cb, user_data);
+    if rc == 0 {
+        ERR_GENERIC
+    } else {
+        rc
+    }
 }
 
 fn format_error(e: &anyhow::Error) -> String {
@@ -267,16 +279,16 @@ fn format_error(e: &anyhow::Error) -> String {
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
-pub unsafe extern "C" fn dcap_parse_quote(
+pub unsafe extern "C" fn dcap_parse_quote_cb(
     quote: *const u8,
     quote_len: usize,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let quote_slice = slice::from_raw_parts(quote, quote_len);
     let parsed = match Quote::decode(&mut &quote_slice[..]) {
         Ok(q) => q,
-        Err(e) => return write_error(format!("Failed to parse quote: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Failed to parse quote: {e}"), cb, user_data),
     };
 
     let cert_type = parsed.inner_cert_type();
@@ -295,11 +307,11 @@ pub unsafe extern "C" fn dcap_parse_quote(
     let (fmspc, ca) = if cert_chain_pem.is_some() {
         let fmspc = match parsed.fmspc() {
             Ok(f) => Some(hex::encode_upper(f)),
-            Err(e) => return write_error(format_error(&e), out_json, out_len),
+            Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
         let ca = match parsed.ca() {
             Ok(c) => Some(c.to_string()),
-            Err(e) => return write_error(format_error(&e), out_json, out_len),
+            Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
         (fmspc, ca)
     } else {
@@ -337,22 +349,21 @@ pub unsafe extern "C" fn dcap_parse_quote(
 
     let json = match serde_json::to_string(&ffi_quote) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
+    emit_output(json, cb, user_data)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dcap_verify(
+pub unsafe extern "C" fn dcap_verify_cb(
     quote: *const u8,
     quote_len: usize,
     collateral_json: *const u8,
     coll_len: usize,
     now_secs: u64,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let quote_slice = slice::from_raw_parts(quote, quote_len);
     let coll_slice = slice::from_raw_parts(collateral_json, coll_len);
@@ -360,31 +371,30 @@ pub unsafe extern "C" fn dcap_verify(
     let collateral: QuoteCollateralV3 = match serde_json::from_slice(coll_slice) {
         Ok(c) => c,
         Err(e) => {
-            return write_error(
+            return emit_error(
                 format!("Failed to parse collateral JSON: {e}"),
-                out_json,
-                out_len,
+                cb,
+                user_data,
             )
         }
     };
 
     let report = match verify::verify(quote_slice, &collateral, now_secs) {
         Ok(r) => r,
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
+        Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
     let ffi_report = FfiVerifiedReport::from(report);
     let json = match serde_json::to_string(&ffi_report) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
+    emit_output(json, cb, user_data)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dcap_verify_with_root_ca(
+pub unsafe extern "C" fn dcap_verify_with_root_ca_cb(
     quote: *const u8,
     quote_len: usize,
     collateral_json: *const u8,
@@ -392,8 +402,8 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca(
     root_ca_der: *const u8,
     root_ca_len: usize,
     now_secs: u64,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let quote_slice = slice::from_raw_parts(quote, quote_len);
     let coll_slice = slice::from_raw_parts(collateral_json, coll_len);
@@ -402,10 +412,10 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca(
     let collateral: QuoteCollateralV3 = match serde_json::from_slice(coll_slice) {
         Ok(c) => c,
         Err(e) => {
-            return write_error(
+            return emit_error(
                 format!("Failed to parse collateral JSON: {e}"),
-                out_json,
-                out_len,
+                cb,
+                user_data,
             )
         }
     };
@@ -414,58 +424,56 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca(
 
     let report = match verifier.verify(quote_slice, &collateral, now_secs) {
         Ok(r) => r,
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
+        Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
     let ffi_report = FfiVerifiedReport::from(report);
     let json = match serde_json::to_string(&ffi_report) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
+    emit_output(json, cb, user_data)
 }
 
 #[cfg(all(feature = "report", feature = "tokio"))]
 #[no_mangle]
-pub unsafe extern "C" fn dcap_get_collateral(
+pub unsafe extern "C" fn dcap_get_collateral_cb(
     pccs_url: *const u8,
     url_len: usize,
     quote: *const u8,
     quote_len: usize,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let url_slice = slice::from_raw_parts(pccs_url, url_len);
     let url = match core::str::from_utf8(url_slice) {
         Ok(s) => s,
-        Err(e) => return write_error(format!("Invalid URL: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Invalid URL: {e}"), cb, user_data),
     };
     let quote_slice = slice::from_raw_parts(quote, quote_len);
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
-        Err(e) => return write_error(format!("Failed to create runtime: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Failed to create runtime: {e}"), cb, user_data),
     };
 
     let collateral = match rt.block_on(crate::collateral::get_collateral(url, quote_slice)) {
         Ok(c) => c,
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
+        Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
     let json = match serde_json::to_string(&collateral) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
+    emit_output(json, cb, user_data)
 }
 
 #[cfg(all(feature = "report", feature = "tokio"))]
 #[no_mangle]
-pub unsafe extern "C" fn dcap_get_collateral_for_fmspc(
+pub unsafe extern "C" fn dcap_get_collateral_for_fmspc_cb(
     pccs_url: *const u8,
     url_len: usize,
     fmspc: *const u8,
@@ -473,25 +481,25 @@ pub unsafe extern "C" fn dcap_get_collateral_for_fmspc(
     ca: *const u8,
     ca_len: usize,
     is_sgx: i32,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let url_str = match core::str::from_utf8(slice::from_raw_parts(pccs_url, url_len)) {
         Ok(s) => s,
-        Err(e) => return write_error(format!("Invalid URL: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Invalid URL: {e}"), cb, user_data),
     };
     let fmspc_str = match core::str::from_utf8(slice::from_raw_parts(fmspc, fmspc_len)) {
         Ok(s) => s,
-        Err(e) => return write_error(format!("Invalid FMSPC: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Invalid FMSPC: {e}"), cb, user_data),
     };
     let ca_str = match core::str::from_utf8(slice::from_raw_parts(ca, ca_len)) {
         Ok(s) => s,
-        Err(e) => return write_error(format!("Invalid CA: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Invalid CA: {e}"), cb, user_data),
     };
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
-        Err(e) => return write_error(format!("Failed to create runtime: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("Failed to create runtime: {e}"), cb, user_data),
     };
 
     let collateral = match rt.block_on(crate::collateral::get_collateral_for_fmspc(
@@ -501,36 +509,29 @@ pub unsafe extern "C" fn dcap_get_collateral_for_fmspc(
         is_sgx != 0,
     )) {
         Ok(c) => c,
-        Err(e) => return write_error(format_error(&e), out_json, out_len),
+        Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
     let json = match serde_json::to_string(&collateral) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
+    emit_output(json, cb, user_data)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem(
+pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem_cb(
     pem: *const u8,
     pem_len: usize,
-    out_json: *mut *mut u8,
-    out_len: *mut usize,
+    cb: OutputCallback,
+    user_data: *mut c_void,
 ) -> i32 {
     let pem_slice = slice::from_raw_parts(pem, pem_len);
 
     let ext = match intel::parse_pck_extension_from_pem(pem_slice) {
         Ok(e) => e,
-        Err(e) => {
-            return write_error(
-                format!("Failed to parse PCK extension: {e}"),
-                out_json,
-                out_len,
-            )
-        }
+        Err(e) => return emit_error(format!("Failed to parse PCK extension: {e}"), cb, user_data),
     };
 
     let ffi_ext = FfiPckExtension {
@@ -548,18 +549,8 @@ pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem(
 
     let json = match serde_json::to_string(&ffi_ext) {
         Ok(j) => j,
-        Err(e) => return write_error(format!("JSON serialization failed: {e}"), out_json, out_len),
+        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
     };
 
-    write_output(json, out_json, out_len);
-    0
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn dcap_free(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() && len > 0 {
-        drop(alloc::boxed::Box::from_raw(slice::from_raw_parts_mut(
-            ptr, len,
-        )));
-    }
+    emit_output(json, cb, user_data)
 }

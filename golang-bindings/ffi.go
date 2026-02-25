@@ -6,31 +6,53 @@ package dcap
 #cgo darwin,amd64 LDFLAGS: -ldcap_qvl
 #cgo darwin,arm64 LDFLAGS: -ldcap_qvl
 #include "dcap_qvl.h"
-#include <stdlib.h>
+
+extern int goDcapOutputCallback(uint8_t* data, size_t len, void* user_data);
 */
 import "C"
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime/cgo"
 	"time"
 	"unsafe"
 )
 
-// ffiCall invokes an FFI function and returns the JSON output string.
-// It handles memory management: the returned JSON is copied to Go memory
-// and the Rust-allocated buffer is freed.
-func ffiResult(rc C.int, outJSON *C.char, outLen C.size_t) ([]byte, error) {
-	if outJSON == nil {
-		return nil, fmt.Errorf("dcap ffi: nil output")
-	}
-	goBytes := C.GoBytes(unsafe.Pointer(outJSON), C.int(outLen))
-	C.dcap_free((*C.char)(unsafe.Pointer(outJSON)), outLen)
+type ffiCallbackCtx struct {
+	data   []byte
+	called bool
+}
 
-	if rc != 0 {
-		return nil, fmt.Errorf("dcap ffi: %s", string(goBytes))
+//export goDcapOutputCallback
+func goDcapOutputCallback(data *C.uint8_t, length C.size_t, userData unsafe.Pointer) C.int {
+	h := cgo.Handle(uintptr(userData))
+	ctx, ok := h.Value().(*ffiCallbackCtx)
+	if !ok {
+		return 1
 	}
-	return goBytes, nil
+	ctx.called = true
+	if data == nil {
+		ctx.data = nil
+		return 0
+	}
+	ctx.data = C.GoBytes(unsafe.Pointer(data), C.int(length))
+	return 0
+}
+
+func ffiCall(invoke func(C.dcap_output_cb, unsafe.Pointer) C.int) ([]byte, error) {
+	ctx := &ffiCallbackCtx{}
+	h := cgo.NewHandle(ctx)
+	defer h.Delete()
+
+	rc := invoke((C.dcap_output_cb)(C.goDcapOutputCallback), unsafe.Pointer(uintptr(h)))
+	if !ctx.called {
+		return nil, fmt.Errorf("dcap ffi: callback not invoked")
+	}
+	if rc != 0 {
+		return nil, fmt.Errorf("dcap ffi: %s", string(ctx.data))
+	}
+	return ctx.data, nil
 }
 
 // ParseQuote parses a raw SGX/TDX quote binary.
@@ -39,17 +61,14 @@ func ParseQuote(rawQuote []byte) (*Quote, error) {
 		return nil, fmt.Errorf("dcap: empty quote input")
 	}
 
-	var outJSON *C.char
-	var outLen C.size_t
-
-	rc := C.dcap_parse_quote(
-		(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
-		C.size_t(len(rawQuote)),
-		&outJSON,
-		&outLen,
-	)
-
-	data, err := ffiResult(rc, outJSON, outLen)
+	data, err := ffiCall(func(cb C.dcap_output_cb, userData unsafe.Pointer) C.int {
+		return C.dcap_parse_quote_cb(
+			(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
+			C.size_t(len(rawQuote)),
+			cb,
+			userData,
+		)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -72,20 +91,17 @@ func Verify(rawQuote []byte, collateral *QuoteCollateralV3, nowSecs uint64) (*Ve
 		return nil, fmt.Errorf("dcap: failed to marshal collateral: %w", err)
 	}
 
-	var outJSON *C.char
-	var outLen C.size_t
-
-	rc := C.dcap_verify(
-		(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
-		C.size_t(len(rawQuote)),
-		(*C.char)(unsafe.Pointer(&collJSON[0])),
-		C.size_t(len(collJSON)),
-		C.uint64_t(nowSecs),
-		&outJSON,
-		&outLen,
-	)
-
-	data, err := ffiResult(rc, outJSON, outLen)
+	data, err := ffiCall(func(cb C.dcap_output_cb, userData unsafe.Pointer) C.int {
+		return C.dcap_verify_cb(
+			(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
+			C.size_t(len(rawQuote)),
+			(*C.uint8_t)(unsafe.Pointer(&collJSON[0])),
+			C.size_t(len(collJSON)),
+			C.uint64_t(nowSecs),
+			cb,
+			userData,
+		)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -111,22 +127,19 @@ func VerifyWithRootCA(rawQuote []byte, collateral *QuoteCollateralV3, rootCADer 
 		return nil, fmt.Errorf("dcap: failed to marshal collateral: %w", err)
 	}
 
-	var outJSON *C.char
-	var outLen C.size_t
-
-	rc := C.dcap_verify_with_root_ca(
-		(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
-		C.size_t(len(rawQuote)),
-		(*C.char)(unsafe.Pointer(&collJSON[0])),
-		C.size_t(len(collJSON)),
-		(*C.uint8_t)(unsafe.Pointer(&rootCADer[0])),
-		C.size_t(len(rootCADer)),
-		C.uint64_t(nowSecs),
-		&outJSON,
-		&outLen,
-	)
-
-	data, err := ffiResult(rc, outJSON, outLen)
+	data, err := ffiCall(func(cb C.dcap_output_cb, userData unsafe.Pointer) C.int {
+		return C.dcap_verify_with_root_ca_cb(
+			(*C.uint8_t)(unsafe.Pointer(&rawQuote[0])),
+			C.size_t(len(rawQuote)),
+			(*C.uint8_t)(unsafe.Pointer(&collJSON[0])),
+			C.size_t(len(collJSON)),
+			(*C.uint8_t)(unsafe.Pointer(&rootCADer[0])),
+			C.size_t(len(rootCADer)),
+			C.uint64_t(nowSecs),
+			cb,
+			userData,
+		)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -234,17 +247,14 @@ func ParsePCKExtensionFromPEM(pemBytes []byte) (*PCKExtension, error) {
 		return nil, fmt.Errorf("dcap: empty PEM input")
 	}
 
-	var outJSON *C.char
-	var outLen C.size_t
-
-	rc := C.dcap_parse_pck_extension_from_pem(
-		(*C.uint8_t)(unsafe.Pointer(&pemBytes[0])),
-		C.size_t(len(pemBytes)),
-		&outJSON,
-		&outLen,
-	)
-
-	data, err := ffiResult(rc, outJSON, outLen)
+	data, err := ffiCall(func(cb C.dcap_output_cb, userData unsafe.Pointer) C.int {
+		return C.dcap_parse_pck_extension_from_pem_cb(
+			(*C.uint8_t)(unsafe.Pointer(&pemBytes[0])),
+			C.size_t(len(pemBytes)),
+			cb,
+			userData,
+		)
+	})
 	if err != nil {
 		return nil, err
 	}
