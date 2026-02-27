@@ -90,6 +90,9 @@ mod utils;
 pub mod quote;
 pub mod verify;
 
+#[cfg(feature = "cosmwasm")]
+mod cosmwasm_backend;
+
 #[cfg(feature = "python")]
 pub mod python;
 

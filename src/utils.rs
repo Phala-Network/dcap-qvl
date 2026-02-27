@@ -159,8 +159,8 @@ pub fn verify_certificate_chain(
     time: UnixTime,
     crls: &[CertRevocationList<'_>],
     trust_anchor: TrustAnchor<'_>,
+    sig_algs: &[&dyn rustls_pki_types::SignatureVerificationAlgorithm],
 ) -> Result<()> {
-    let sig_algs = webpki::ALL_VERIFICATION_ALGS;
 
     let crl_slice = crls.iter().collect::<Vec<_>>();
 

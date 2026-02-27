@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) use self::ring as default_crypto;
 #[cfg(all(not(feature = "ring"), feature = "rustcrypto"))]
 pub(crate) use self::rustcrypto as default_crypto;
+#[cfg(all(not(feature = "ring"), not(feature = "rustcrypto"), feature = "cosmwasm"))]
+pub(crate) use self::cosmwasm as default_crypto;
 
 /// Crypto backend configuration for quote verification.
 ///
@@ -244,7 +246,7 @@ fn verify_tcb_info_signature(
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
         .context("Failed to parse TCB Info leaf certificate")?;
-    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor, &[backend.sig_algo])?;
 
     // Verify signature
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
@@ -299,7 +301,7 @@ fn verify_qe_identity_signature(
     };
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
         .context("Failed to parse QE Identity leaf certificate")?;
-    verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor, &[backend.sig_algo])?;
 
     // Verify signature
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
@@ -331,6 +333,7 @@ fn verify_pck_cert_chain(
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    sig_algs: &[&dyn rustls_pki_types::SignatureVerificationAlgorithm],
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
     let certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
@@ -351,7 +354,7 @@ fn verify_pck_cert_chain(
     // Verify PCK certificate chain
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
-    verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor, sig_algs)?;
 
     // Extract Intel extension data from PCK cert (parsed once)
     let pck_ext = intel::parse_pck_extension(pck_leaf)?;
@@ -636,6 +639,7 @@ fn verify_impl(
         now,
         &crls,
         trust_anchor,
+        &[backend.sig_algo],
     )?;
     let pck_leaf = CertificateDer::from(pck_result.pck_leaf_der.as_slice());
 
@@ -773,6 +777,38 @@ pub mod rustcrypto {
     }
 
     /// Verify a quote using Intel's trusted root CA and RustCrypto backend.
+    pub fn verify(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+}
+
+/// CosmWasm native crypto backend module.
+///
+/// Uses the CosmWasm host's native `secp256r1_verify` for ECDSA P-256 verification.
+/// Requires wasmd v0.51+ / CosmWasm 2.1+.
+#[cfg(feature = "cosmwasm")]
+pub mod cosmwasm {
+    use super::*;
+
+    fn cosmwasm_sha256(data: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(data).into()
+    }
+
+    /// Returns a [`CryptoBackend`] using the CosmWasm native host function.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: crate::cosmwasm_backend::ECDSA_P256_SHA256,
+            sha256: cosmwasm_sha256,
+        }
+    }
+
+    /// Verify a quote using Intel's trusted root CA and CosmWasm native backend.
     pub fn verify(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
