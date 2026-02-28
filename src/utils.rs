@@ -96,7 +96,7 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     }
 }
 
-pub(crate) fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
+pub fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
     Ok(pem::parse_many(cert_chain)
         .context("Failed to parse certs")?
         .iter()
