@@ -545,7 +545,7 @@ fn py_verify(
 ) -> PyResult<PyVerifiedReport> {
     let quote_bytes = raw_quote.as_bytes();
     let verifier = QuoteVerifier::new_prod(crate::verify::ring::backend());
-    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
+    match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
         Ok(supplemental) => Ok(PyVerifiedReport {
             inner: supplemental.into_report(),
         }),
@@ -564,7 +564,7 @@ fn py_verify_with_root_ca(
     let root_ca = root_ca_der.as_bytes();
 
     let verifier = QuoteVerifier::new(root_ca.to_vec(), crate::verify::ring::backend());
-    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
+    match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
         Ok(supplemental) => Ok(PyVerifiedReport {
             inner: supplemental.into_report(),
         }),

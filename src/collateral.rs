@@ -446,7 +446,7 @@ pub async fn get_collateral_and_verify(
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
         .as_secs();
-    QuoteVerifier::new_prod_default_crypto().verify(quote, &collateral, now)
+    QuoteVerifier::new_prod_default_crypto().verify(quote, collateral, now)
 }
 
 #[cfg(test)]

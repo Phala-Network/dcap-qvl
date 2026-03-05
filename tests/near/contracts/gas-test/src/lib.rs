@@ -59,7 +59,7 @@ impl Contract {
 
         // Call dcap-qvl verify
         let verifier = QuoteVerifier::new_prod(ring::backend());
-        match verifier.verify(&quote_bytes, &collateral_data, timestamp_s) {
+        match verifier.verify(&quote_bytes, collateral_data, timestamp_s) {
             Ok(_supplemental) => {
                 log!("Verification result: Success");
                 true

@@ -32,7 +32,7 @@
 //!
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 //!     let verifier = QuoteVerifier::new_prod(ring::backend());
-//!     let result = verifier.verify(&quote, &collateral, now).expect("verification failed");
+//!     let result = verifier.verify(&quote, collateral, now).expect("verification failed");
 //!     let report = result.validate(&QuotePolicy::strict(now)).expect("policy validation failed");
 //!     println!("{:?}", report);
 //! }
@@ -96,7 +96,10 @@ pub use constants::{CpuSvn, Fmspc, MrEnclave, MrSigner, Svn};
 // Re-export commonly used types
 pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
 pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
-pub use policy::{PckCertFlag, Policy, QuotePolicy, SupplementalData};
+pub use policy::{
+    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, QuotePolicy, SupplementalData,
+    TcbVerdict,
+};
 pub use verify::QuoteVerificationResult;
 
 #[cfg(feature = "rego")]

@@ -7,9 +7,9 @@ use scale::Decode;
 use {
     crate::constants::*,
     crate::intel,
-    crate::policy::{PckCertFlag, Policy, SupplementalData},
+    crate::policy::{PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SupplementalData, TcbVerdict},
     crate::qe_identity::{QeIdentity, QeTcbLevel},
-    crate::tcb_info::{TcbInfo, TcbLevel, TcbStatusWithAdvisory},
+    crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory},
     alloc::string::String,
     alloc::vec::Vec,
 };
@@ -90,25 +90,106 @@ use borsh::{BorshDeserialize, BorshSerialize};
 ///
 /// The enclave report is private — it can only be obtained by passing a [`Policy`]
 /// via [`validate()`](Self::validate).
-/// The [`supplemental`](Self::supplemental) field is public for inspection.
+///
+/// [`SupplementalData`] is built lazily via [`supplemental()`](Self::supplemental) —
+/// the `verify()` call itself does the minimum work (crypto only).
 ///
 /// ```ignore
-/// let result = verifier.verify(&quote, &collateral, now)?;
-/// // Inspect supplemental data before committing
-/// println!("TCB status: {:?}", result.supplemental.tcb_status);
-/// // Apply policy to get the report
+/// let result = verifier.verify(&quote, collateral, now)?;
+/// // Inspect supplemental data (lazy — built on first call)
+/// let sup = result.supplemental()?;
+/// println!("TCB status: {:?}", sup.tcb.status);
+/// // Or apply policy directly
 /// let report = result.validate(&QuotePolicy::strict(now))?;
 /// ```
 pub struct QuoteVerificationResult {
     report: Report,
-    /// Supplemental data for policy decisions (publicly accessible).
-    pub supplemental: SupplementalData,
+    collateral: QuoteCollateralV3,
+    // -- core verification results (always computed) --
+    tee_type: u32,
+    tcb_status: TcbStatus,
+    advisory_ids: Vec<String>,
+    platform_tcb_level: TcbLevel,
+    qe_tcb_level: QeTcbLevel,
+    pck_ext: PckCertChainResult,
+    qe_report: EnclaveReport,
+    tcb_eval_data_number: u32,
+    qe_tcb_eval_data_number: u32,
+    root_ca_der: Vec<u8>,
+    sha384: fn(&[u8]) -> [u8; 48],
 }
 
 impl QuoteVerificationResult {
+    /// Build the full [`SupplementalData`] from verification intermediates.
+    ///
+    /// This is lazy — the expensive parts (root_key_id SHA-384, CRL number extraction,
+    /// earliest_expiration from 4 sources, tcb_date_tag parsing) are only done here.
+    pub fn supplemental(&self) -> Result<SupplementalData> {
+        // root_key_id: SHA-384 of root CA's raw public key bytes
+        let root_key_id = {
+            let root_cert: x509_cert::Certificate =
+                der::Decode::from_der(&self.root_ca_der).context("Failed to parse root CA for SPKI")?;
+            let raw_key = root_cert
+                .tbs_certificate
+                .subject_public_key_info
+                .subject_public_key
+                .raw_bytes();
+            (self.sha384)(raw_key)
+        };
+
+        // CRL numbers
+        let root_ca_crl_num = crate::utils::extract_crl_number(&self.collateral.root_ca_crl).unwrap_or(0);
+        let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl).unwrap_or(0);
+
+        // tcb_date_tag
+        let tcb_date_tag = chrono::DateTime::parse_from_rfc3339(&self.platform_tcb_level.tcb_date)
+            .ok()
+            .map(|dt| dt.timestamp() as u64)
+            .unwrap_or(0);
+
+        // earliest_expiration from 4 lightweight sources
+        let earliest_expiration = self.compute_earliest_expiration()?;
+
+        Ok(SupplementalData {
+            tee_type: self.tee_type,
+            tcb: TcbVerdict {
+                status: self.tcb_status.clone(),
+                advisory_ids: self.advisory_ids.clone(),
+                eval_data_number: self.tcb_eval_data_number,
+                earliest_expiration,
+            },
+            platform: PlatformInfo {
+                tcb_level: self.platform_tcb_level.clone(),
+                tcb_date_tag,
+                pck: PckIdentity {
+                    ppid: self.pck_ext.ppid.clone(),
+                    cpu_svn: self.pck_ext.cpu_svn,
+                    pce_svn: self.pck_ext.pce_svn,
+                    pce_id: self.pck_ext.pce_id,
+                    fmspc: self.pck_ext.fmspc,
+                    sgx_type: self.pck_ext.sgx_type,
+                    platform_instance_id: self.pck_ext.platform_instance_id,
+                    dynamic_platform: self.pck_ext.dynamic_platform,
+                    cached_keys: self.pck_ext.cached_keys,
+                    smt_enabled: self.pck_ext.smt_enabled,
+                    platform_provider_id: None,
+                },
+                root_key_id,
+                pck_crl_num,
+                root_ca_crl_num,
+            },
+            qe: QeInfo {
+                tcb_level: self.qe_tcb_level.clone(),
+                report: self.qe_report.clone(),
+                tcb_eval_data_number: self.qe_tcb_eval_data_number,
+            },
+        })
+    }
+
     /// Validate against a policy, consuming self into [`VerifiedReport`] on success.
     pub fn validate<P: Policy + ?Sized>(self, policy: &P) -> Result<VerifiedReport> {
-        policy.validate(&self.supplemental)?;
+        let supplemental = self.supplemental()?;
+        policy.validate(&supplemental)?;
         Ok(self.into_verified_report())
     }
 
@@ -120,41 +201,113 @@ impl QuoteVerificationResult {
         self.into_verified_report()
     }
 
+    /// Compute earliest_expiration from 4 lightweight sources:
+    /// TCBInfo nextUpdate, QEIdentity nextUpdate, Root CA CRL nextUpdate, PCK CRL nextUpdate.
+    fn compute_earliest_expiration(&self) -> Result<u64> {
+        fn parse_rfc3339_ts(s: &str) -> Option<u64> {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp() as u64)
+        }
+
+        fn parse_crl_next_update(crl_der: &[u8]) -> Option<u64> {
+            use der::Decode as _;
+            let crl = x509_cert::crl::CertificateList::from_der(crl_der).ok()?;
+            crl.tbs_cert_list
+                .next_update
+                .map(|t| t.to_unix_duration().as_secs())
+        }
+
+        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
+            .context("Failed to parse TcbInfo for earliest_expiration")?;
+        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
+            .context("Failed to parse QeIdentity for earliest_expiration")?;
+
+        let tcb_next =
+            parse_rfc3339_ts(&tcb_info.next_update).context("TCBInfo nextUpdate parse")?;
+        let qe_next =
+            parse_rfc3339_ts(&qe_identity.next_update).context("QEIdentity nextUpdate parse")?;
+
+        let mut earliest = tcb_next.min(qe_next);
+        if let Some(next) = parse_crl_next_update(&self.collateral.root_ca_crl) {
+            earliest = earliest.min(next);
+        }
+        if let Some(next) = parse_crl_next_update(&self.collateral.pck_crl) {
+            earliest = earliest.min(next);
+        }
+        Ok(earliest)
+    }
+
     fn into_verified_report(self) -> VerifiedReport {
         VerifiedReport {
-            status: self.supplemental.tcb_status.to_string(),
-            advisory_ids: self.supplemental.advisory_ids,
+            status: self.tcb_status.to_string(),
+            advisory_ids: self.advisory_ids,
             report: self.report,
-            ppid: self.supplemental.ppid,
-            platform_tcb_level: self.supplemental.platform_tcb_level,
-            qe_tcb_level: self.supplemental.qe_tcb_level,
+            ppid: self.pck_ext.ppid,
+            platform_tcb_level: self.platform_tcb_level,
+            qe_tcb_level: self.qe_tcb_level,
         }
     }
 }
 
 #[cfg(feature = "rego")]
 impl QuoteVerificationResult {
+    /// Compute the full collateral time window (expensive: ~14 DER parses).
+    ///
+    /// Only needed for Rego evaluation. Called lazily, not during `verify()`.
+    fn compute_time_window(&self) -> Result<crate::policy::rego_policy::CollateralTimeWindow> {
+        // Re-extract PCK cert chain from owned collateral
+        let pck_certs = if let Some(pem_chain) = &self.collateral.pck_certificate_chain {
+            extract_certs(pem_chain.as_bytes()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        // We need TcbInfo and QeIdentity dates — re-parse from JSON in collateral.
+        // This is acceptable since Rego is already expensive.
+        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
+            .context("Failed to re-parse TcbInfo for time window")?;
+        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
+            .context("Failed to re-parse QeIdentity for time window")?;
+
+        let (earliest_issue, latest_issue, earliest_expiration) =
+            compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
+
+        Ok(crate::policy::rego_policy::CollateralTimeWindow {
+            earliest_issue_date: earliest_issue,
+            latest_issue_date: latest_issue,
+            earliest_expiration_date: earliest_expiration,
+        })
+    }
+
     /// Generate Intel-format `qvl_result` array for Rego appraisal.
     ///
     /// SGX quotes produce 2 entries (platform + enclave).
     /// TDX quotes produce 3 entries (platform + QE identity + TD).
-    pub fn to_rego_qvl_result(&self) -> Vec<serde_json::Value> {
-        use crate::policy::rego_policy::{platform_class_id, tenant_class_id, tenant_measurement};
+    pub(crate) fn to_rego_qvl_result(
+        &self,
+        supplemental: &SupplementalData,
+        tw: &crate::policy::rego_policy::CollateralTimeWindow,
+    ) -> Vec<serde_json::Value> {
+        use crate::policy::rego_policy::{
+            build_platform_measurement, build_qe_measurement, platform_class_id, tenant_class_id,
+            tenant_measurement,
+        };
 
         let mut result = Vec::new();
 
         // 1. Platform TCB measurement
-        let platform_cid = platform_class_id(&self.report, self.supplemental.tee_type);
+        let platform_cid = platform_class_id(&self.report, supplemental.tee_type);
         result.push(serde_json::json!({
             "environment": { "class_id": platform_cid },
-            "measurement": self.supplemental.to_platform_rego_measurement(),
+            "measurement": build_platform_measurement(supplemental, tw),
         }));
 
         // 2. QE Identity measurement (TDX only)
         if matches!(self.report, Report::TD10(_) | Report::TD15(_)) {
             result.push(serde_json::json!({
                 "environment": { "class_id": "3769258c-75e6-4bc7-8d72-d2b0e224cad2" },
-                "measurement": self.supplemental.to_qe_rego_measurement(),
+                "measurement": build_qe_measurement(supplemental, tw),
             }));
         }
 
@@ -166,7 +319,7 @@ impl QuoteVerificationResult {
             if let Some(obj) = tenant_m.as_object_mut() {
                 obj.insert(
                     "sgx_ce_attributes".into(),
-                    serde_json::json!(hex::encode_upper(self.supplemental.qe_report.attributes)),
+                    serde_json::json!(hex::encode_upper(supplemental.qe.report.attributes)),
                 );
             }
         }
@@ -178,11 +331,22 @@ impl QuoteVerificationResult {
         result
     }
 
-    /// Validate against a [`RegoPolicySet`], consuming self into [`VerifiedReport`] on success.
-    ///
-    /// This is the multi-measurement equivalent of [`validate()`](Self::validate).
+    /// Validate against a [`RegoPolicy`] (single-measurement), consuming self on success.
+    pub fn validate_rego_single(
+        self,
+        policy: &crate::policy::RegoPolicy,
+    ) -> Result<VerifiedReport> {
+        let supplemental = self.supplemental()?;
+        let tw = self.compute_time_window()?;
+        policy.eval(&supplemental, &tw)?;
+        Ok(self.into_verified_report())
+    }
+
+    /// Validate against a [`RegoPolicySet`] (multi-measurement), consuming self on success.
     pub fn validate_rego(self, policies: &crate::policy::RegoPolicySet) -> Result<VerifiedReport> {
-        let qvl_result = self.to_rego_qvl_result();
+        let supplemental = self.supplemental()?;
+        let tw = self.compute_time_window()?;
+        let qvl_result = self.to_rego_qvl_result(&supplemental, &tw);
         policies.eval_rego(qvl_result)?;
         Ok(self.into_verified_report())
     }
@@ -231,12 +395,14 @@ impl QuoteVerifier {
 
     /// Perform cryptographic verification, returning [`QuoteVerificationResult`].
     ///
-    /// This does NOT apply any policy. Use [`QuoteVerificationResult::validate()`]
-    /// to apply a policy and obtain a [`VerifiedReport`].
+    /// Takes ownership of `collateral` so it can be used for lazy Rego time-window
+    /// computation. This does NOT apply any policy. Use
+    /// [`QuoteVerificationResult::validate()`] to apply a policy and obtain a
+    /// [`VerifiedReport`].
     pub fn verify(
         &self,
         raw_quote: &[u8],
-        collateral: &QuoteCollateralV3,
+        collateral: QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<QuoteVerificationResult> {
         verify_impl(
@@ -646,7 +812,7 @@ fn match_platform_tcb(
 /// 10. Merge TCB statuses
 fn verify_impl(
     raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
+    collateral: QuoteCollateralV3,
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
@@ -658,26 +824,8 @@ fn verify_impl(
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
     let raw_crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
 
-    // Compute root_key_id: SHA-384 of root CA's raw public key bytes
-    // (the BIT STRING content from SubjectPublicKeyInfo, excluding algorithm OID).
-    // Matches Intel QVL's use of X509_get0_pubkey_bitstr().
-    let root_key_id = {
-        let root_cert: x509_cert::Certificate =
-            der::Decode::from_der(root_ca_der).context("Failed to parse root CA for SPKI")?;
-        let raw_key = root_cert
-            .tbs_certificate
-            .subject_public_key_info
-            .subject_public_key
-            .raw_bytes();
-        (backend.sha384)(raw_key)
-    };
-
     // Check root CA against CRL
     webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
-
-    // Extract CRL numbers before parsing into webpki types
-    let root_ca_crl_num = crate::utils::extract_crl_number(&collateral.root_ca_crl).unwrap_or(0);
-    let pck_crl_num = crate::utils::extract_crl_number(&collateral.pck_crl).unwrap_or(0);
 
     // Parse CRLs once for reuse across all certificate chain verifications
     let crls = parse_crls(&raw_crls)?;
@@ -708,11 +856,11 @@ fn verify_impl(
 
     // Step 1: Verify TCB Info signature
     let tcb_info =
-        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+        verify_tcb_info_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
-        verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+        verify_qe_identity_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -729,7 +877,7 @@ fn verify_impl(
 
     // Step 3: Verify PCK certificate chain
     let pck_result = verify_pck_cert_chain(
-        collateral,
+        &collateral,
         &auth_data.certification_data,
         now,
         &crls,
@@ -771,59 +919,22 @@ fn verify_impl(
     // Validate report attributes (debug mode check, etc.)
     validate_attrs(&quote.report)?;
 
-    // Compute collateral time window fields
-    // Re-extract PCK cert chain for date computation (already verified in step 3)
-    let pck_certs_for_dates = if let Some(pem_chain) = &collateral.pck_certificate_chain {
-        extract_certs(pem_chain.as_bytes()).unwrap_or_default()
-    } else if auth_data.certification_data.cert_type == PCK_CERT_CHAIN {
-        extract_certs(&auth_data.certification_data.body.data).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let (earliest_issue_date, latest_issue_date, earliest_expiration_date) =
-        compute_collateral_time_window(collateral, &pck_certs_for_dates, &tcb_info, &qe_identity)?;
-
-    // tcb_level_date_tag: parse the matched platform TCB level's tcb_date
-    let tcb_level_date_tag = chrono::DateTime::parse_from_rfc3339(&platform_tcb_level.tcb_date)
-        .ok()
-        .map(|dt| dt.timestamp() as u64)
-        .unwrap_or(0);
-
-    // tcb_eval_data_number: lower of TCBInfo and QEIdentity values
-    let tcb_eval_data_number = tcb_info
-        .tcb_evaluation_data_number
-        .min(qe_identity.tcb_evaluation_data_number);
-
     Ok(QuoteVerificationResult {
         report: quote.report,
-        supplemental: SupplementalData {
-            tcb_status: final_status.status,
-            advisory_ids: final_status.advisory_ids,
-            earliest_issue_date,
-            latest_issue_date,
-            earliest_expiration_date,
-            tcb_level_date_tag,
-            pck_crl_num,
-            root_ca_crl_num,
-            tcb_eval_data_number,
-            root_key_id,
-            ppid: pck_result.ppid,
-            cpu_svn: pck_result.cpu_svn,
-            pce_svn: pck_result.pce_svn,
-            pce_id: pck_result.pce_id,
-            fmspc: pck_result.fmspc,
-            tee_type: quote.header.tee_type,
-            sgx_type: pck_result.sgx_type,
-            platform_instance_id: pck_result.platform_instance_id,
-            dynamic_platform: pck_result.dynamic_platform,
-            cached_keys: pck_result.cached_keys,
-            smt_enabled: pck_result.smt_enabled,
-            platform_provider_id: None, // not yet extracted from PCK cert
-            platform_tcb_level,
-            qe_tcb_level,
-            qe_report,
-            qe_tcb_eval_data_number: qe_identity.tcb_evaluation_data_number,
-        },
+        collateral,
+        tee_type: quote.header.tee_type,
+        tcb_status: final_status.status,
+        advisory_ids: final_status.advisory_ids,
+        platform_tcb_level,
+        qe_tcb_level,
+        pck_ext: pck_result,
+        qe_report,
+        tcb_eval_data_number: tcb_info
+            .tcb_evaluation_data_number
+            .min(qe_identity.tcb_evaluation_data_number),
+        qe_tcb_eval_data_number: qe_identity.tcb_evaluation_data_number,
+        root_ca_der: root_ca_der.to_vec(),
+        sha384: backend.sha384,
     })
 }
 

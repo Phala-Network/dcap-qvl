@@ -9,7 +9,8 @@ use clap::{Args, Parser, Subcommand};
 use dcap_qvl::collateral::{get_collateral, PHALA_PCCS_URL};
 use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
-use dcap_qvl::verify::verify;
+use dcap_qvl::verify::{ring, QuoteVerifier};
+use dcap_qvl::QuotePolicy;
 use der::Decode;
 use serde::Serialize;
 use x509_cert::Certificate;
@@ -103,7 +104,12 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let report = verify(&quote, &collateral, now).context("Failed to verify quote")?;
+    let verifier = QuoteVerifier::new_prod(ring::backend());
+    let result = verifier
+        .verify(&quote, collateral, now)
+        .context("Failed to verify quote")?;
+    let report = result
+        .into_report();
     println!(
         "{}",
         serde_json::to_string(&report).context("Failed to serialize report")?
