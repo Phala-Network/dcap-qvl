@@ -47,11 +47,11 @@ struct PcsEndpoints {
     base_url: String,
     tee: &'static str,
     fmspc: String,
-    ca: &'static str,
+    ca: String,
 }
 
 impl PcsEndpoints {
-    fn new(base_url: &str, for_sgx: bool, fmspc: String, ca: &'static str) -> Self {
+    fn new(base_url: &str, for_sgx: bool, fmspc: String, ca: &str) -> Self {
         let tee = if for_sgx { "sgx" } else { "tdx" };
         let base_url = base_url
             .trim_end_matches('/')
@@ -62,7 +62,7 @@ impl PcsEndpoints {
             base_url,
             tee,
             fmspc,
-            ca,
+            ca: ca.to_owned(),
         }
     }
 
@@ -302,7 +302,7 @@ pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCol
 pub async fn get_collateral_for_fmspc(
     pccs_url: &str,
     fmspc: String,
-    ca: &'static str,
+    ca: &str,
     for_sgx: bool,
 ) -> Result<QuoteCollateralV3> {
     let client = build_http_client()?;
@@ -314,7 +314,7 @@ async fn get_collateral_for_fmspc_impl(
     client: &reqwest::Client,
     pccs_url: &str,
     fmspc: String,
-    ca: &'static str,
+    ca: &str,
     for_sgx: bool,
 ) -> Result<QuoteCollateralV3> {
     let endpoints = PcsEndpoints::new(pccs_url, for_sgx, fmspc, ca);

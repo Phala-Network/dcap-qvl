@@ -1,0 +1,8 @@
+{
+  "mode": "parse",
+  "iterations": 200000,
+  "duration_ms": 38408,
+  "rss_start_kb": 11088,
+  "rss_end_kb": 19408,
+  "rss_delta_kb": 8320
+}
