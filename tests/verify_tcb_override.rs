@@ -27,7 +27,7 @@ mod tests {
         ring::verify(raw_quote, collateral, now_secs)
     }
 
-    fn verify_with_tcb_override<F>(
+    fn dangerous_verify_with_tcb_override<F>(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
@@ -37,9 +37,13 @@ mod tests {
         F: FnOnce(TcbInfo) -> TcbInfo + Copy,
     {
         use dcap_qvl::verify::{ring, rustcrypto};
-        let ring_result =
-            ring::verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info);
-        let rustcrypto_result = rustcrypto::verify_with_tcb_override(
+        let ring_result = ring::dangerous_verify_with_tcb_override(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        );
+        let rustcrypto_result = rustcrypto::dangerous_verify_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
@@ -49,7 +53,7 @@ mod tests {
             ring_result.map_err(|e| e.to_string()),
             rustcrypto_result.map_err(|e| e.to_string())
         );
-        ring::verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+        ring::dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
     }
 
     fn force_out_of_date(mut tcb_info: TcbInfo) -> TcbInfo {
@@ -144,21 +148,29 @@ mod tests {
 
         static OVERRIDE_CALLS: AtomicUsize = AtomicUsize::new(0);
         OVERRIDE_CALLS.store(0, Ordering::SeqCst);
-        let ring_overridden =
-            ring::verify_with_tcb_override(raw_quote, &quote_collateral, now, |mut tcb_info| {
+        let ring_overridden = ring::dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            |mut tcb_info| {
                 OVERRIDE_CALLS.fetch_add(1, Ordering::SeqCst);
                 for level in &mut tcb_info.tcb_levels {
                     level.tcb_status = TcbStatus::OutOfDate;
                 }
                 tcb_info
-            })
-            .expect("verify with override");
+            },
+        )
+        .expect("verify with override");
         assert_eq!(OVERRIDE_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(ring_overridden.status, "OutOfDate");
 
-        let parity_overridden =
-            verify_with_tcb_override(raw_quote, &quote_collateral, now, force_out_of_date)
-                .expect("verify parity with override");
+        let parity_overridden = dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            force_out_of_date,
+        )
+        .expect("verify parity with override");
         assert_eq!(parity_overridden.status, "OutOfDate");
     }
 
@@ -170,7 +182,7 @@ mod tests {
             serde_json::from_slice(raw_quote_collateral).unwrap();
         let now = now_from_collateral(&quote_collateral);
 
-        let overridden = verify_with_tcb_override(
+        let overridden = dangerous_verify_with_tcb_override(
             raw_quote,
             &quote_collateral,
             now,
