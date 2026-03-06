@@ -29,6 +29,15 @@ use serde::{Deserialize, Serialize};
 pub(crate) use self::ring as default_crypto;
 #[cfg(all(not(feature = "ring"), feature = "rustcrypto"))]
 pub(crate) use self::rustcrypto as default_crypto;
+#[cfg(all(not(feature = "ring"), not(feature = "rustcrypto"), feature = "sp1"))]
+pub(crate) use self::sp1 as default_crypto;
+#[cfg(all(
+    not(feature = "ring"),
+    not(feature = "rustcrypto"),
+    not(feature = "sp1"),
+    feature = "cosmwasm"
+))]
+pub(crate) use self::cosmwasm as default_crypto;
 
 /// Crypto backend configuration for quote verification.
 ///
@@ -244,7 +253,7 @@ fn verify_tcb_info_signature(
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
         .context("Failed to parse TCB Info leaf certificate")?;
-    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor, &[backend.sig_algo])?;
 
     // Verify signature
     let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
@@ -299,7 +308,7 @@ fn verify_qe_identity_signature(
     };
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
         .context("Failed to parse QE Identity leaf certificate")?;
-    verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor, &[backend.sig_algo])?;
 
     // Verify signature
     let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
@@ -331,6 +340,7 @@ fn verify_pck_cert_chain(
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    sig_algs: &[&dyn rustls_pki_types::SignatureVerificationAlgorithm],
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
     let certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
@@ -351,7 +361,7 @@ fn verify_pck_cert_chain(
     // Verify PCK certificate chain
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
-    verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor, sig_algs)?;
 
     // Extract Intel extension data from PCK cert (parsed once)
     let pck_ext = intel::parse_pck_extension(pck_leaf)?;
@@ -372,6 +382,443 @@ struct PckCertChainResult {
     cpu_svn: [u8; 16],
     pce_svn: u16,
     fmspc: [u8; 6],
+}
+
+/// Pre-verified outputs from certificate chain validation (steps 1-3).
+///
+/// Extracted on the host (where cert chain validation is cheap) and passed to
+/// the zkVM guest, which only runs steps 4-10.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreVerifiedInputs {
+    pub tcb_info: TcbInfo,
+    pub qe_identity: QeIdentity,
+    #[serde(with = "serde_bytes")]
+    pub pck_leaf_der: Vec<u8>,
+    pub cpu_svn: [u8; 16],
+    pub pce_svn: u16,
+    pub fmspc: [u8; 6],
+    #[serde(with = "serde_bytes")]
+    pub ppid: Vec<u8>,
+}
+
+/// Pre-parsed collateral for efficient full verification in zkVM.
+///
+/// Replaces `QuoteCollateralV3` for the full guest path. All PEM cert chains are
+/// pre-extracted to DER bytes (skipping base64/PEM parsing in guest), and TCB Info /
+/// QE Identity JSON are pre-parsed to structs (skipping serde_json in guest).
+/// Raw JSON bytes are retained for signature verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreparedCollateral {
+    // CRL bytes (DER, unchanged)
+    #[serde(with = "serde_bytes")]
+    pub root_ca_crl: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub pck_crl: Vec<u8>,
+
+    // TCB Info: pre-parsed struct + raw JSON bytes for sig verification
+    pub tcb_info: TcbInfo,
+    #[serde(with = "serde_bytes")]
+    pub tcb_info_raw: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub tcb_info_signature: Vec<u8>,
+    /// TCB Info issuer chain as DER cert bytes (leaf first)
+    pub tcb_info_certs_der: Vec<Vec<u8>>,
+
+    // QE Identity: pre-parsed struct + raw JSON bytes for sig verification
+    pub qe_identity: QeIdentity,
+    #[serde(with = "serde_bytes")]
+    pub qe_identity_raw: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub qe_identity_signature: Vec<u8>,
+    /// QE Identity issuer chain as DER cert bytes (leaf first)
+    pub qe_identity_certs_der: Vec<Vec<u8>>,
+
+    /// PCK certificate chain as DER cert bytes (leaf first)
+    pub pck_certs_der: Vec<Vec<u8>>,
+}
+
+/// Run certificate chain validation (steps 1-3) and return pre-verified inputs.
+///
+/// Call this on the host, then pass the result to [`verify_quote_lite()`] in the zkVM guest.
+pub fn extract_pre_verified_inputs(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+    backend: &CryptoBackend,
+) -> Result<PreVerifiedInputs> {
+    let root_ca_der = TRUSTED_ROOT_CA_DER;
+    let root_ca = CertificateDer::from_slice(root_ca_der);
+    let trust_anchor =
+        webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
+    let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
+    let raw_crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+
+    webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
+    let crls = parse_crls(&raw_crls)?;
+
+    // Parse quote to get certification_data for step 3
+    let mut quote_slice = raw_quote;
+    let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
+    let auth_data = quote.auth_data.clone().into_v3();
+
+    // Step 1: Verify TCB Info signature
+    let tcb_info =
+        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+
+    // Step 2: Verify QE Identity signature
+    let qe_identity =
+        verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+
+    // Step 3: Verify PCK certificate chain
+    let pck_result = verify_pck_cert_chain(
+        collateral,
+        &auth_data.certification_data,
+        now,
+        &crls,
+        trust_anchor,
+        &[backend.sig_algo],
+    )?;
+
+    Ok(PreVerifiedInputs {
+        tcb_info,
+        qe_identity,
+        pck_leaf_der: pck_result.pck_leaf_der,
+        cpu_svn: pck_result.cpu_svn,
+        pce_svn: pck_result.pce_svn,
+        fmspc: pck_result.fmspc,
+        ppid: pck_result.ppid,
+    })
+}
+
+/// Prepare collateral for efficient zkVM full verification.
+///
+/// Pre-extracts PEM cert chains to DER bytes and pre-parses TCB Info / QE Identity
+/// JSON to structs. The result can be serialized with bincode for SP1 stdin, avoiding
+/// PEM/base64 and JSON parsing overhead inside the zkVM guest.
+pub fn prepare_collateral(
+    collateral: &QuoteCollateralV3,
+    raw_quote: &[u8],
+) -> Result<PreparedCollateral> {
+    use crate::utils::extract_raw_certs;
+
+    // Pre-parse JSON
+    let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
+        .context("Failed to decode TcbInfo")?;
+    let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
+        .context("Failed to decode QeIdentity")?;
+
+    // Pre-extract PEM to DER
+    let tcb_info_certs_der = extract_raw_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
+    let qe_identity_certs_der =
+        extract_raw_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
+
+    // PCK certs: prefer collateral, fall back to quote cert data
+    let pck_certs_der = if let Some(ref pem_chain) = collateral.pck_certificate_chain {
+        extract_raw_certs(pem_chain.as_bytes())?
+    } else {
+        let mut slice = raw_quote;
+        let quote = Quote::decode(&mut slice).context("Failed to decode quote")?;
+        let auth_data = quote.auth_data.clone().into_v3();
+        extract_raw_certs(&auth_data.certification_data.body.data)?
+    };
+
+    Ok(PreparedCollateral {
+        root_ca_crl: collateral.root_ca_crl.clone(),
+        pck_crl: collateral.pck_crl.clone(),
+        tcb_info,
+        tcb_info_raw: collateral.tcb_info.as_bytes().to_vec(),
+        tcb_info_signature: collateral.tcb_info_signature.clone(),
+        tcb_info_certs_der,
+        qe_identity,
+        qe_identity_raw: collateral.qe_identity.as_bytes().to_vec(),
+        qe_identity_signature: collateral.qe_identity_signature.clone(),
+        qe_identity_certs_der,
+        pck_certs_der,
+    })
+}
+
+/// Full DCAP verification using pre-parsed collateral (steps 1-10).
+///
+/// Like [`verify_impl`] but skips PEM parsing and JSON deserialization by using
+/// pre-extracted DER certs and pre-parsed structs from [`PreparedCollateral`].
+pub fn verify_with_prepared(
+    raw_quote: &[u8],
+    prepared: &PreparedCollateral,
+    now_secs: u64,
+    root_ca_der: &[u8],
+    backend: &CryptoBackend,
+) -> Result<VerifiedReport> {
+    let root_ca = CertificateDer::from_slice(root_ca_der);
+    let trust_anchor =
+        webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
+    let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
+    let raw_crls = [&prepared.root_ca_crl[..], &prepared.pck_crl];
+
+    webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
+    let crls = parse_crls(&raw_crls)?;
+
+    // Parse quote
+    let mut quote_slice = raw_quote;
+    let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
+    if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
+        bail!("Unsupported DCAP quote version");
+    }
+    let tee_type = TeeType::from_u32(quote.header.tee_type)?;
+    match tee_type {
+        TeeType::Sgx => {
+            if quote.header.version != 3 {
+                bail!("SGX TEE quote must have version 3");
+            }
+        }
+        TeeType::Tdx => {
+            if ![4, 5].contains(&quote.header.version) {
+                bail!("TDX TEE quote must have version 4 or 5");
+            }
+        }
+    }
+    if quote.header.attestation_key_type != ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE {
+        bail!("Unsupported DCAP attestation key type");
+    }
+    let auth_data = quote.auth_data.clone().into_v3();
+
+    // Step 1: Verify TCB Info signature (using pre-parsed struct + pre-extracted DER certs)
+    {
+        let issue_date = chrono::DateTime::parse_from_rfc3339(&prepared.tcb_info.issue_date)
+            .ok()
+            .context("Failed to parse TCB Info issue date")?;
+        let next_update = chrono::DateTime::parse_from_rfc3339(&prepared.tcb_info.next_update)
+            .ok()
+            .context("Failed to parse TCB Info next update")?;
+        if now.as_secs() < issue_date.timestamp() as u64 {
+            bail!("TCBInfo issue date is in the future");
+        }
+        if now.as_secs() > next_update.timestamp() as u64 {
+            bail!("TCBInfo expired");
+        }
+
+        let tcb_certs: Vec<CertificateDer> = prepared
+            .tcb_info_certs_der
+            .iter()
+            .map(|d| CertificateDer::from(d.as_slice()))
+            .collect();
+        let [tcb_leaf, tcb_chain @ ..] = &tcb_certs[..] else {
+            bail!("Certificate chain is too short for TCB Info");
+        };
+        let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
+            .context("Failed to parse TCB Info leaf certificate")?;
+        verify_certificate_chain(
+            &tcb_leaf_cert,
+            tcb_chain,
+            now,
+            &crls,
+            trust_anchor.clone(),
+            &[backend.sig_algo],
+        )?;
+
+        let asn1_signature = encode_as_der(&prepared.tcb_info_signature)?;
+        if tcb_leaf_cert
+            .verify_signature(backend.sig_algo, &prepared.tcb_info_raw, &asn1_signature)
+            .is_err()
+        {
+            bail!("Signature is invalid for tcb_info");
+        }
+    }
+
+    // Step 2: Verify QE Identity signature (using pre-parsed struct + pre-extracted DER certs)
+    {
+        let issue_date = chrono::DateTime::parse_from_rfc3339(&prepared.qe_identity.issue_date)
+            .ok()
+            .context("Failed to parse QE Identity issue date")?;
+        let next_update = chrono::DateTime::parse_from_rfc3339(&prepared.qe_identity.next_update)
+            .ok()
+            .context("Failed to parse QE Identity next update")?;
+        if now.as_secs() < issue_date.timestamp() as u64 {
+            bail!("QE Identity issue date is in the future");
+        }
+        if now.as_secs() > next_update.timestamp() as u64 {
+            bail!("QE Identity expired");
+        }
+
+        let qe_certs: Vec<CertificateDer> = prepared
+            .qe_identity_certs_der
+            .iter()
+            .map(|d| CertificateDer::from(d.as_slice()))
+            .collect();
+        let [qe_leaf, qe_chain @ ..] = &qe_certs[..] else {
+            bail!("Certificate chain is too short for QE Identity");
+        };
+        let qe_leaf_cert = webpki::EndEntityCert::try_from(qe_leaf)
+            .context("Failed to parse QE Identity leaf certificate")?;
+        verify_certificate_chain(
+            &qe_leaf_cert,
+            qe_chain,
+            now,
+            &crls,
+            trust_anchor.clone(),
+            &[backend.sig_algo],
+        )?;
+
+        let asn1_signature = encode_as_der(&prepared.qe_identity_signature)?;
+        if qe_leaf_cert
+            .verify_signature(
+                backend.sig_algo,
+                &prepared.qe_identity_raw,
+                &asn1_signature,
+            )
+            .is_err()
+        {
+            bail!("Signature is invalid for qe_identity");
+        }
+    }
+
+    let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
+        TeeType::Sgx => ("QE", &[2]),
+        TeeType::Tdx => ("TD_QE", &[2, 3]),
+    };
+    if prepared.qe_identity.id != expected_qe_id
+        || !allowed_qe_versions.contains(&prepared.qe_identity.version)
+    {
+        bail!("Unsupported QE Identity id/version");
+    }
+
+    // Step 3: Verify PCK certificate chain (using pre-extracted DER certs)
+    let pck_certs: Vec<CertificateDer> = prepared
+        .pck_certs_der
+        .iter()
+        .map(|d| CertificateDer::from(d.as_slice()))
+        .collect();
+    let [pck_leaf, pck_chain @ ..] = &pck_certs[..] else {
+        bail!("Certificate chain is too short for PCK");
+    };
+    let pck_leaf_cert =
+        webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
+    verify_certificate_chain(
+        &pck_leaf_cert,
+        pck_chain,
+        now,
+        &crls,
+        trust_anchor,
+        &[backend.sig_algo],
+    )?;
+    let pck_ext = intel::parse_pck_extension(pck_leaf)?;
+
+    // Steps 4-10: same as verify_impl
+    let qe_report = verify_qe_report_signature(pck_leaf, &auth_data, backend)?;
+    verify_qe_report_data(&qe_report, &auth_data, backend)?;
+    let qe_status = verify_qe_identity_policy(&qe_report, &prepared.qe_identity)?;
+    verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
+
+    let platform_status = match_platform_tcb(
+        &prepared.tcb_info,
+        &quote,
+        tee_type,
+        &pck_ext.cpu_svn,
+        pck_ext.pce_svn,
+        &pck_ext.fmspc,
+    )?;
+
+    let final_status = platform_status.clone().merge(&qe_status);
+    if !final_status.status.is_valid() {
+        bail!("TCB status is invalid: {:?}", final_status.status);
+    }
+
+    validate_attrs(&quote.report)?;
+
+    Ok(VerifiedReport {
+        status: final_status.status.to_string(),
+        advisory_ids: final_status.advisory_ids,
+        report: quote.report,
+        ppid: pck_ext.ppid,
+        qe_status,
+        platform_status,
+    })
+}
+
+/// Verify a quote using pre-verified certificate chain results (steps 4-10 only).
+///
+/// Skips certificate chain validation (steps 1-3), which must have been done
+/// previously via [`extract_pre_verified_inputs()`]. Use this in zkVM guests where
+/// cert chain validation is prohibitively expensive.
+pub fn verify_quote_lite(
+    raw_quote: &[u8],
+    pre: &PreVerifiedInputs,
+    backend: &CryptoBackend,
+) -> Result<VerifiedReport> {
+    // Parse quote and validate header
+    let mut quote_slice = raw_quote;
+    let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
+    if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
+        bail!("Unsupported DCAP quote version");
+    }
+    let tee_type = TeeType::from_u32(quote.header.tee_type)?;
+    match tee_type {
+        TeeType::Sgx => {
+            if quote.header.version != 3 {
+                bail!("SGX TEE quote must have version 3");
+            }
+        }
+        TeeType::Tdx => {
+            if ![4, 5].contains(&quote.header.version) {
+                bail!("TDX TEE quote must have version 4 or 5");
+            }
+        }
+    }
+    if quote.header.attestation_key_type != ATTESTATION_KEY_TYPE_ECDSA256_WITH_P256_CURVE {
+        bail!("Unsupported DCAP attestation key type");
+    }
+    let auth_data = quote.auth_data.clone().into_v3();
+
+    // Validate QE Identity id/version
+    let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
+        TeeType::Sgx => ("QE", &[2]),
+        TeeType::Tdx => ("TD_QE", &[2, 3]),
+    };
+    if pre.qe_identity.id != expected_qe_id
+        || !allowed_qe_versions.contains(&pre.qe_identity.version)
+    {
+        bail!("Unsupported QE Identity id/version");
+    }
+
+    let pck_leaf = CertificateDer::from(pre.pck_leaf_der.as_slice());
+
+    // Step 4: Verify QE Report signature
+    let qe_report = verify_qe_report_signature(&pck_leaf, &auth_data, backend)?;
+
+    // Step 5: Verify QE Report content (hash check)
+    verify_qe_report_data(&qe_report, &auth_data, backend)?;
+
+    // Step 6: Verify QE Report policy
+    let qe_status = verify_qe_identity_policy(&qe_report, &pre.qe_identity)?;
+
+    // Step 7: Verify ISV Report signature
+    verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
+
+    // Step 8: Match Platform TCB
+    let platform_status = match_platform_tcb(
+        &pre.tcb_info,
+        &quote,
+        tee_type,
+        &pre.cpu_svn,
+        pre.pce_svn,
+        &pre.fmspc,
+    )?;
+
+    // Step 9 & 10: Merge TCB statuses
+    let final_status = platform_status.clone().merge(&qe_status);
+    if !final_status.status.is_valid() {
+        bail!("TCB status is invalid: {:?}", final_status.status);
+    }
+
+    validate_attrs(&quote.report)?;
+
+    Ok(VerifiedReport {
+        status: final_status.status.to_string(),
+        advisory_ids: final_status.advisory_ids,
+        report: quote.report,
+        ppid: pre.ppid.clone(),
+        qe_status,
+        platform_status,
+    })
 }
 
 // =============================================================================
@@ -636,6 +1083,7 @@ fn verify_impl(
         now,
         &crls,
         trust_anchor,
+        &[backend.sig_algo],
     )?;
     let pck_leaf = CertificateDer::from(pck_result.pck_leaf_der.as_slice());
 
@@ -750,6 +1198,23 @@ pub mod ring {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
             .verify(raw_quote, collateral, now_secs)
     }
+
+    /// Extract pre-verified inputs (steps 1-3) using ring backend.
+    pub fn extract_pre_verified(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<PreVerifiedInputs> {
+        extract_pre_verified_inputs(raw_quote, collateral, now_secs, &backend())
+    }
+
+    /// Verify a quote using pre-verified inputs (steps 4-10 only, ring backend).
+    pub fn verify_lite(
+        raw_quote: &[u8],
+        pre: &PreVerifiedInputs,
+    ) -> Result<VerifiedReport> {
+        verify_quote_lite(raw_quote, pre, &backend())
+    }
 }
 
 /// RustCrypto backend module.
@@ -780,6 +1245,138 @@ pub mod rustcrypto {
     ) -> Result<VerifiedReport> {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
             .verify(raw_quote, collateral, now_secs)
+    }
+
+    /// Extract pre-verified inputs (steps 1-3) using RustCrypto backend.
+    pub fn extract_pre_verified(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<PreVerifiedInputs> {
+        extract_pre_verified_inputs(raw_quote, collateral, now_secs, &backend())
+    }
+
+    /// Verify a quote using pre-verified inputs (steps 4-10 only, RustCrypto backend).
+    pub fn verify_lite(
+        raw_quote: &[u8],
+        pre: &PreVerifiedInputs,
+    ) -> Result<VerifiedReport> {
+        verify_quote_lite(raw_quote, pre, &backend())
+    }
+
+    /// Prepare collateral for efficient full verification (pre-parse JSON, pre-extract PEM→DER).
+    pub fn prepare(
+        collateral: &QuoteCollateralV3,
+        raw_quote: &[u8],
+    ) -> Result<PreparedCollateral> {
+        prepare_collateral(collateral, raw_quote)
+    }
+
+    /// Full verification using pre-parsed collateral (steps 1-10, RustCrypto backend).
+    pub fn verify_prepared(
+        raw_quote: &[u8],
+        prepared: &PreparedCollateral,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        verify_with_prepared(raw_quote, prepared, now_secs, TRUSTED_ROOT_CA_DER, &backend())
+    }
+}
+
+/// CosmWasm native crypto backend module.
+///
+/// Uses the CosmWasm host's native `secp256r1_verify` for ECDSA P-256 verification.
+/// Requires wasmd v0.51+ / CosmWasm 2.1+.
+#[cfg(feature = "cosmwasm")]
+pub mod cosmwasm {
+    use super::*;
+
+    fn cosmwasm_sha256(data: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(data).into()
+    }
+
+    /// Returns a [`CryptoBackend`] using the CosmWasm native host function.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: crate::cosmwasm_backend::ECDSA_P256_SHA256,
+            sha256: cosmwasm_sha256,
+        }
+    }
+
+    /// Verify a quote using Intel's trusted root CA and CosmWasm native backend.
+    pub fn verify(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+}
+
+/// SP1 zkVM crypto backend module.
+///
+/// Uses SP1's native secp256r1 precompiles for accelerated ECDSA P-256 verification.
+/// Falls back to software implementation when not running inside SP1 zkVM.
+#[cfg(feature = "sp1")]
+pub mod sp1 {
+    use super::*;
+
+    fn sp1_sha256(data: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(data).into()
+    }
+
+    /// Returns a [`CryptoBackend`] using SP1's secp256r1 precompiles.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: crate::sp1_backend::ECDSA_P256_SHA256,
+            sha256: sp1_sha256,
+        }
+    }
+
+    /// Verify a quote using Intel's trusted root CA and SP1 backend.
+    pub fn verify(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .verify(raw_quote, collateral, now_secs)
+    }
+
+    /// Extract pre-verified inputs (steps 1-3) using SP1 backend.
+    pub fn extract_pre_verified(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<PreVerifiedInputs> {
+        extract_pre_verified_inputs(raw_quote, collateral, now_secs, &backend())
+    }
+
+    /// Verify a quote using pre-verified inputs (steps 4-10 only, SP1 backend).
+    pub fn verify_lite(
+        raw_quote: &[u8],
+        pre: &PreVerifiedInputs,
+    ) -> Result<VerifiedReport> {
+        verify_quote_lite(raw_quote, pre, &backend())
+    }
+
+    /// Prepare collateral for efficient full verification (pre-parse JSON, pre-extract PEM→DER).
+    pub fn prepare(
+        collateral: &QuoteCollateralV3,
+        raw_quote: &[u8],
+    ) -> Result<PreparedCollateral> {
+        prepare_collateral(collateral, raw_quote)
+    }
+
+    /// Full verification using pre-parsed collateral (steps 1-10, SP1 backend).
+    pub fn verify_prepared(
+        raw_quote: &[u8],
+        prepared: &PreparedCollateral,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        verify_with_prepared(raw_quote, prepared, now_secs, TRUSTED_ROOT_CA_DER, &backend())
     }
 }
 

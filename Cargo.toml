@@ -51,7 +51,7 @@ futures = { version = "0.3", optional = true }
 getrandom = { version = "0.2", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 wasm-bindgen = { version = "0.2.95", optional = true }
-wasm-bindgen-futures = { version = "0.4.56" }
+wasm-bindgen-futures = { version = "0.4.56", optional = true }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
 
 # Python bindings
@@ -76,6 +76,9 @@ signature = { version = "2.2", default-features = false, optional = true }
 
 dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 
+# SP1 zkVM backend
+sp1-lib = { version = "6.0", optional = true }
+
 
 [dev-dependencies]
 hex-literal = "1.1.0"
@@ -83,6 +86,8 @@ insta = "1.46.3"
 reqwest = "0.12.24"
 serde_json = "1.0.148"
 tokio = { version = "1.49.0", features = ["full"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+signature = "2.2"
 
 [lib]
 name = "dcap_qvl"
@@ -106,11 +111,13 @@ std = [
 borsh = ["dep:borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
 report = ["std", "tracing", "futures", "reqwest"]
-js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
+js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen", "wasm-bindgen-futures"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
 go = ["std", "ring", "serde_json"]
 ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
+cosmwasm = ["dep:sha2", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
+sp1 = ["dep:sp1-lib", "dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
 _anycrypto = []
 contract = ["getrandom"]
 
