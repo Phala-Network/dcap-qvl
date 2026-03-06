@@ -32,15 +32,17 @@ def test_get_collateral_for_fmspc_exported() -> None:
 @pytest.mark.asyncio
 async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
     # Requires a running event loop for some PyO3 async exports.
+    # Use an invalid URL and await to completion so no pending task survives
+    # interpreter teardown.
     ret = dcap_qvl.get_collateral_for_fmspc(
-        pccs_url="https://api.trustedservices.intel.com",
+        pccs_url="://invalid-url",
         fmspc="000000000000",
         ca="processor",
         for_sgx=True,
     )
     assert inspect.isawaitable(ret)
-    if inspect.iscoroutine(ret):
-        ret.close()
+    with pytest.raises(ValueError):
+        await ret
 
 
 @pytest.mark.asyncio

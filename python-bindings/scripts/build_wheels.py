@@ -9,7 +9,7 @@ import sys
 import os
 import shutil
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Optional
 
 # Ensure UTF-8 encoding on Windows
 if sys.platform == "win32":
