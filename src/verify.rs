@@ -125,10 +125,20 @@ impl QuoteVerificationResult {
     /// This is lazy — the expensive parts (root_key_id SHA-384, CRL number extraction,
     /// earliest_expiration from 4 sources, tcb_date_tag parsing) are only done here.
     pub fn supplemental(&self) -> Result<SupplementalData> {
+        let earliest_expiration = self.compute_earliest_expiration()?;
+        Ok(self.build_supplemental(earliest_expiration))
+    }
+
+    /// Build `SupplementalData` with a pre-computed earliest_expiration value.
+    ///
+    /// Avoids redundant JSON/CRL parsing when the caller already has the value
+    /// (e.g., from `compute_time_window()` which produces a superset).
+    fn build_supplemental(&self, earliest_expiration: u64) -> SupplementalData {
         // root_key_id: SHA-384 of root CA's raw public key bytes
         let root_key_id = {
+            // root_ca_der was already validated during verify(), so unwrap is safe
             let root_cert: x509_cert::Certificate =
-                der::Decode::from_der(&self.root_ca_der).context("Failed to parse root CA for SPKI")?;
+                der::Decode::from_der(&self.root_ca_der).expect("root CA already validated");
             let raw_key = root_cert
                 .tbs_certificate
                 .subject_public_key_info
@@ -147,10 +157,7 @@ impl QuoteVerificationResult {
             .map(|dt| dt.timestamp() as u64)
             .unwrap_or(0);
 
-        // earliest_expiration from 4 lightweight sources
-        let earliest_expiration = self.compute_earliest_expiration()?;
-
-        Ok(SupplementalData {
+        SupplementalData {
             tee_type: self.tee_type,
             tcb: TcbVerdict {
                 status: self.tcb_status.clone(),
@@ -183,7 +190,7 @@ impl QuoteVerificationResult {
                 report: self.qe_report.clone(),
                 tcb_eval_data_number: self.qe_tcb_eval_data_number,
             },
-        })
+        }
     }
 
     /// Validate against a policy, consuming self into [`VerifiedReport`] on success.
@@ -336,16 +343,16 @@ impl QuoteVerificationResult {
         self,
         policy: &crate::policy::RegoPolicy,
     ) -> Result<VerifiedReport> {
-        let supplemental = self.supplemental()?;
         let tw = self.compute_time_window()?;
+        let supplemental = self.build_supplemental(tw.earliest_expiration_date);
         policy.eval(&supplemental, &tw)?;
         Ok(self.into_verified_report())
     }
 
     /// Validate against a [`RegoPolicySet`] (multi-measurement), consuming self on success.
     pub fn validate_rego(self, policies: &crate::policy::RegoPolicySet) -> Result<VerifiedReport> {
-        let supplemental = self.supplemental()?;
         let tw = self.compute_time_window()?;
+        let supplemental = self.build_supplemental(tw.earliest_expiration_date);
         let qvl_result = self.to_rego_qvl_result(&supplemental, &tw);
         policies.eval_rego(qvl_result)?;
         Ok(self.into_verified_report())
