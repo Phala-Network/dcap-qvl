@@ -140,6 +140,37 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
+            #[cfg(feature = "danger-allow-tcb-override")]
+            None::<fn(_) -> _>,
+        )
+    }
+
+    /// Verify a quote with the configured root certificate, passing a TCB info override
+    ///
+    /// # Arguments
+    /// * `raw_quote` - The raw quote bytes
+    /// * `collateral` - The quote collateral
+    /// * `now_secs` - Current time in seconds since UNIX epoch
+    /// * `override_tcb_info` - a function which modifies TCB info after the signature check
+    ///
+    /// # Returns
+    /// * `Ok(VerifiedReport)` - The verified report
+    /// * `Err(Error)` - The error
+    #[cfg(feature = "danger-allow-tcb-override")]
+    pub fn dangerous_verify_with_tcb_override(
+        &self,
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        verify_impl(
+            raw_quote,
+            collateral,
+            now_secs,
+            &self.root_ca_der,
+            &self.backend,
+            Some(override_tcb_info),
         )
     }
 }
@@ -510,6 +541,7 @@ fn match_platform_tcb(
         if sgx_components.is_empty() {
             bail!("No SGX components in the TCB info");
         }
+
         // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
         if cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b) {
             continue;
@@ -570,6 +602,9 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
+    #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
+        impl FnOnce(TcbInfo) -> TcbInfo,
+    >,
 ) -> Result<VerifiedReport> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
@@ -611,6 +646,12 @@ fn verify_impl(
     // Step 1: Verify TCB Info signature
     let tcb_info =
         verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+
+    #[cfg(feature = "danger-allow-tcb-override")]
+    let tcb_info = match override_tcb_info {
+        Some(override_tcb_info) => override_tcb_info(tcb_info),
+        None => tcb_info,
+    };
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
@@ -750,6 +791,19 @@ pub mod ring {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
             .verify(raw_quote, collateral, now_secs)
     }
+
+    /// Verify a quote using Intel's trusted root CA and ring backend,
+    /// passing a function to override TCB info after the signature check
+    #[cfg(feature = "danger-allow-tcb-override")]
+    pub fn dangerous_verify_with_tcb_override(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+    }
 }
 
 /// RustCrypto backend module.
@@ -781,6 +835,19 @@ pub mod rustcrypto {
         QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
             .verify(raw_quote, collateral, now_secs)
     }
+
+    /// Verify a quote using Intel's trusted root CA and RustCrypto backend,
+    /// passing a function to override TCB info after the signature check
+    #[cfg(feature = "danger-allow-tcb-override")]
+    pub fn dangerous_verify_with_tcb_override(
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<VerifiedReport> {
+        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
+            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+    }
 }
 
 /// Verify a quote using Intel's trusted root CA (ring backend).
@@ -800,6 +867,26 @@ pub mod rustcrypto {
 /// * `Err(Error)` - The error
 #[cfg(feature = "_anycrypto")]
 pub use self::default_crypto::verify;
+
+/// Verify a quote using Intel's trusted root CA (ring backend), passing a function which modifies
+/// TCB info after the signature check.
+///
+/// This is a backwards-compatible convenience function that uses the ring backend.
+/// For rustcrypto, use [`rustcrypto::dangerous_verify_with_tcb_override()`].
+///
+/// # Arguments
+///
+/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
+/// * `now` - The current time in seconds since the Unix epoch
+/// * `override_tcb_info` - a function which modifies TCB info after the signature check
+///
+/// # Returns
+///
+/// * `Ok(VerifiedReport)` - The verified report
+/// * `Err(Error)` - The error
+#[cfg(all(feature = "_anycrypto", feature = "danger-allow-tcb-override"))]
+pub use self::default_crypto::dangerous_verify_with_tcb_override;
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB

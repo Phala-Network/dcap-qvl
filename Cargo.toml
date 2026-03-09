@@ -114,6 +114,10 @@ rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcryp
 _anycrypto = []
 contract = ["getrandom"]
 
+# Enables the dangerous_verify_with_tcb_override() function, allowing TCB checks to be overridden
+# with custom collateral. Normal verify() is not affected.
+danger-allow-tcb-override = []
+
 [profile.release]
 codegen-units = 1
 opt-level = "z"
