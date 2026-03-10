@@ -425,6 +425,30 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             &self.backend,
+            #[cfg(feature = "danger-allow-tcb-override")]
+            None::<fn(_) -> _>,
+        )
+    }
+
+    /// Verify a quote with the configured root certificate, passing a TCB info override.
+    ///
+    /// The override function receives `TcbInfo` after signature verification and can
+    /// modify it before TCB level matching. Use with extreme caution.
+    #[cfg(feature = "danger-allow-tcb-override")]
+    pub fn dangerous_verify_with_tcb_override(
+        &self,
+        raw_quote: &[u8],
+        collateral: QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<QuoteVerificationResult> {
+        verify_impl(
+            raw_quote,
+            collateral,
+            now_secs,
+            &self.root_ca_der,
+            &self.backend,
+            Some(override_tcb_info),
         )
     }
 }
@@ -772,6 +796,7 @@ fn match_platform_tcb(
         if sgx_components.is_empty() {
             bail!("No SGX components in the TCB info");
         }
+
         // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
         if cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b) {
             continue;
@@ -830,6 +855,9 @@ fn verify_impl(
     now_secs: u64,
     root_ca_der: &[u8],
     backend: &CryptoBackend,
+    #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
+        impl FnOnce(TcbInfo) -> TcbInfo,
+    >,
 ) -> Result<QuoteVerificationResult> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
@@ -871,6 +899,12 @@ fn verify_impl(
     // Step 1: Verify TCB Info signature
     let tcb_info =
         verify_tcb_info_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
+
+    #[cfg(feature = "danger-allow-tcb-override")]
+    let tcb_info = match override_tcb_info {
+        Some(override_tcb_info) => override_tcb_info(tcb_info),
+        None => tcb_info,
+    };
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
@@ -1178,6 +1212,7 @@ pub mod rustcrypto {
         }
     }
 }
+
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB
