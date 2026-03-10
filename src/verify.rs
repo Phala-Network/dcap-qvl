@@ -825,7 +825,7 @@ fn verify_impl(
     // Revoked means the platform's keys are compromised — reject unconditionally,
     // regardless of policy. This is a security invariant, not a policy decision.
     if final_status.status == TcbStatus::Revoked {
-        bail!("TCB status is Revoked: platform keys are compromised");
+        bail!("TCB status is invalid: Revoked");
     }
 
     // Validate report attributes (debug mode check, etc.)
