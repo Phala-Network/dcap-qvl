@@ -447,6 +447,9 @@ mod tests {
             earliest_issue_date: 1_690_000_000,
             latest_issue_date: 1_690_100_000,
             earliest_expiration_date: 1_703_000_000, // ~2023-12-19
+            qe_iden_earliest_issue_date: 1_690_000_000,
+            qe_iden_latest_issue_date: 1_690_100_000,
+            qe_iden_earliest_expiration_date: 1_703_000_000,
         }
     }
 

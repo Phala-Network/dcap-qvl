@@ -118,7 +118,7 @@ ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
 _anycrypto = []
 contract = ["getrandom"]
-rego = ["dep:regorus", "std", "serde_json"]
+rego = ["dep:regorus", "std", "serde_json", "getrandom"]
 
 # Enables the dangerous_verify_with_tcb_override() function, allowing TCB checks to be overridden
 # with custom collateral. Normal verify() is not affected.

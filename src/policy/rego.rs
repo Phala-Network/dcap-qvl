@@ -143,15 +143,15 @@ fn build_qe_measurement(data: &SupplementalData) -> serde_json::Value {
         m.insert("tcb_level_date_tag".into(), json!(qe_date_str));
     }
 
-    let earliest_issue = unix_to_rfc3339(data.earliest_issue_date);
+    let earliest_issue = unix_to_rfc3339(data.qe_iden_earliest_issue_date);
     if !earliest_issue.is_empty() {
         m.insert("earliest_issue_date".into(), json!(earliest_issue));
     }
-    let latest_issue = unix_to_rfc3339(data.latest_issue_date);
+    let latest_issue = unix_to_rfc3339(data.qe_iden_latest_issue_date);
     if !latest_issue.is_empty() {
         m.insert("latest_issue_date".into(), json!(latest_issue));
     }
-    let earliest_exp = unix_to_rfc3339(data.earliest_expiration_date);
+    let earliest_exp = unix_to_rfc3339(data.qe_iden_earliest_expiration_date);
     if !earliest_exp.is_empty() {
         m.insert("earliest_expiration_date".into(), json!(earliest_exp));
     }
@@ -344,6 +344,7 @@ impl RegoPolicySet {
     /// Create a `RegoPolicySet` with a custom Rego script.
     pub fn with_rego(policy_jsons: &[&str], rego_source: &str) -> Result<Self> {
         let mut engine = regorus::Engine::new();
+        register_rand_intn(&mut engine)?;
         engine
             .add_policy("qal_script.rego".into(), rego_source.into())
             .map_err(|e| anyhow::anyhow!("Failed to load Rego policy: {e}"))?;
@@ -363,6 +364,64 @@ impl RegoPolicySet {
 
         Ok(Self { engine, policies })
     }
+}
+
+/// Register `rand.intn` extension on a regorus engine.
+///
+/// OPA's `rand.intn(str, n)` returns a random integer in `[0, n)`.
+/// The `str` parameter is a **memoization key** (not a PRNG seed): same `(str, n)` pair
+/// within one query evaluation always returns the same result. The actual random number
+/// comes from a separate RNG, not derived from the string.
+///
+/// Cache key is `"{str}-{n}"` matching OPA's implementation.
+///
+/// Ref: OPA docs — "For any given argument pair (str, n), the output will be consistent
+/// throughout a query evaluation."
+/// <https://www.openpolicyagent.org/docs/latest/policy-reference/#rand>
+///
+/// Ref: OPA source — `key := randIntCachingKey(fmt.Sprintf("%s-%d", strOp, n))`
+/// <https://github.com/open-policy-agent/opa/blob/0265c7cc/v1/topdown/numbers.go#L180>
+fn register_rand_intn(engine: &mut regorus::Engine) -> Result<()> {
+    let mut cache = std::collections::HashMap::<String, i64>::new();
+    engine
+        .add_extension(
+            "rand.intn".to_string(),
+            2,
+            Box::new(move |params: Vec<regorus::Value>| {
+                let seed = params
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!("rand.intn: missing first argument"))?
+                    .as_string()
+                    .map_err(|_| anyhow::anyhow!("rand.intn: first argument must be string"))?
+                    .to_string();
+
+                let n = params
+                    .get(1)
+                    .ok_or_else(|| anyhow::anyhow!("rand.intn: missing second argument"))?
+                    .as_i64()
+                    .map_err(|_| anyhow::anyhow!("rand.intn: second argument must be integer"))?;
+
+                if n <= 0 {
+                    return Ok(regorus::Value::from(0i64));
+                }
+
+                // Cache key = "{seed}-{n}", matching OPA's `fmt.Sprintf("%s-%d", strOp, n)`
+                let key = alloc::format!("{seed}-{n}");
+
+                if let Some(&cached) = cache.get(&key) {
+                    return Ok(regorus::Value::from(cached));
+                }
+
+                let mut buf = [0u8; 8];
+                getrandom::getrandom(&mut buf)
+                    .map_err(|e| anyhow::anyhow!("rand.intn: RNG failed: {e}"))?;
+                let random_val =
+                    (u64::from_le_bytes(buf).checked_rem(n as u64).unwrap_or(0)) as i64;
+                cache.insert(key, random_val);
+                Ok(regorus::Value::from(random_val))
+            }),
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to register rand.intn: {e}"))
 }
 
 /// Shared Rego evaluation logic used by both `RegoPolicy` and `RegoPolicySet`.
@@ -387,26 +446,42 @@ fn eval_rego_engine(
         .map_err(|e| anyhow::anyhow!("Failed to set Rego input: {e}"))?;
 
     let result = engine
-        .eval_rule("data.dcap.quote.appraisal.final_ret".into())
+        .eval_rule("data.dcap.quote.appraisal.final_appraisal_result".into())
         .map_err(|e| anyhow::anyhow!("Rego evaluation failed: {e}"))?;
 
     let result_json = result
         .to_json_str()
         .map_err(|e| anyhow::anyhow!("Failed to convert Rego result: {e}"))?;
 
-    match result_json.trim() {
-        "1" => Ok(()),
-        "0" => {
-            let detail = engine
-                .eval_rule("data.dcap.quote.appraisal.appraisal_result".into())
-                .ok()
-                .and_then(|v| v.to_json_str().ok());
+    // final_appraisal_result is a Rego set → JSON array of objects
+    let result_value: serde_json::Value = serde_json::from_str(&result_json)
+        .map_err(|e| anyhow::anyhow!("Failed to parse final_appraisal_result JSON: {e}"))?;
+
+    let arr = result_value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("final_appraisal_result is not an array"))?;
+
+    let entry = arr
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("final_appraisal_result is empty"))?;
+
+    let overall = entry
+        .get("overall_appraisal_result")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            anyhow::anyhow!("final_appraisal_result missing overall_appraisal_result")
+        })?;
+
+    match overall {
+        1 => Ok(()),
+        0 => {
+            let detail = entry.get("appraised_reports");
             if let Some(detail) = detail {
                 bail!("Rego appraisal failed: {detail}");
             }
             bail!("Rego appraisal failed (result = 0)");
         }
-        "-1" => bail!("No policy matched the report class_id"),
+        -1 => bail!("No policy matched the report class_id"),
         other => bail!("Unexpected Rego appraisal result: {other}"),
     }
 }
@@ -456,6 +531,7 @@ impl RegoPolicy {
     /// Use this to provide an updated or modified version of `qal_script.rego`.
     pub fn with_rego(policy_json: &str, rego_source: &str) -> Result<Self> {
         let mut engine = regorus::Engine::new();
+        register_rand_intn(&mut engine)?;
         engine
             .add_policy("qal_script.rego".into(), rego_source.into())
             .map_err(|e| anyhow::anyhow!("Failed to load Rego policy: {e}"))?;
@@ -630,6 +706,9 @@ mod tests {
             earliest_issue_date: 1_690_000_000,
             latest_issue_date: 1_690_100_000,
             earliest_expiration_date: 1_703_000_000,
+            qe_iden_earliest_issue_date: 1_690_000_000,
+            qe_iden_latest_issue_date: 1_690_100_000,
+            qe_iden_earliest_expiration_date: 1_703_000_000,
         }
     }
 
@@ -639,6 +718,9 @@ mod tests {
         data.earliest_issue_date = 1_900_000_000;
         data.latest_issue_date = 1_900_100_000;
         data.earliest_expiration_date = 2_000_000_000;
+        data.qe_iden_earliest_issue_date = 1_900_000_000;
+        data.qe_iden_latest_issue_date = 1_900_100_000;
+        data.qe_iden_earliest_expiration_date = 2_000_000_000;
         data
     }
 
@@ -883,6 +965,112 @@ mod tests {
             result.is_ok(),
             "expected Ok, got: {:?}",
             result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn rego_final_appraisal_result_has_expected_fields() {
+        // Verify that eval uses final_appraisal_result (not final_ret) by checking
+        // the Rego engine can produce the full appraisal output with nonce/timestamp.
+        let data = make_rego_supplemental(UpToDate);
+        let json =
+            policy_json(r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#);
+
+        let mut engine = regorus::Engine::new();
+        register_rand_intn(&mut engine).unwrap();
+        engine
+            .add_policy(
+                "qal_script.rego".into(),
+                include_str!("../../rego/qal_script.rego").into(),
+            )
+            .unwrap();
+
+        let policy_value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let measurement = build_merged_measurement(&data);
+        let class_id = policy_value["environment"]["class_id"].as_str().unwrap();
+        let qvl_result = vec![json!({
+            "environment": { "class_id": class_id },
+            "measurement": measurement,
+        })];
+        let input = json!({
+            "qvl_result": qvl_result,
+            "policies": { "policy_array": [&policy_value] },
+        });
+        engine
+            .set_input_json(&serde_json::to_string(&input).unwrap())
+            .unwrap();
+
+        let result = engine
+            .eval_rule("data.dcap.quote.appraisal.final_appraisal_result".into())
+            .unwrap();
+        let result_json: serde_json::Value =
+            serde_json::from_str(&result.to_json_str().unwrap()).unwrap();
+        let arr = result_json.as_array().unwrap();
+        assert_eq!(arr.len(), 1, "expected exactly one appraisal result");
+        let entry = &arr[0];
+        assert_eq!(entry["overall_appraisal_result"], 1);
+        assert!(entry.get("nonce").is_some(), "missing nonce from rand.intn");
+        assert!(
+            entry.get("appraisal_check_date").is_some(),
+            "missing appraisal_check_date from time.now_ns"
+        );
+        assert!(
+            entry.get("appraised_reports").is_some(),
+            "missing appraised_reports"
+        );
+        // nonce should be a non-negative integer < 10^15
+        let nonce = entry["nonce"].as_i64().unwrap();
+        assert!(
+            nonce >= 0 && nonce < 1_000_000_000_000_000,
+            "nonce out of range: {nonce}"
+        );
+    }
+
+    #[test]
+    fn rego_rand_intn_memoization() {
+        // Same (seed, n) pair within one engine evaluation → same result.
+        let mut engine = regorus::Engine::new();
+        register_rand_intn(&mut engine).unwrap();
+        engine
+            .add_policy(
+                "test.rego".into(),
+                r#"package test
+                   import future.keywords.if
+                   a := rand.intn("memo_test", 1000000000)
+                   b := rand.intn("memo_test", 1000000000)
+                   same if { a == b }
+                "#
+                .into(),
+            )
+            .unwrap();
+        engine.set_input_json("{}").unwrap();
+
+        let same = engine
+            .eval_rule("data.test.same".into())
+            .unwrap()
+            .to_json_str()
+            .unwrap();
+        assert_eq!(
+            same.trim(),
+            "true",
+            "rand.intn memoization failed: same seed should return same value"
+        );
+    }
+
+    #[test]
+    fn rego_qe_measurement_uses_qe_iden_dates() {
+        let mut data = make_rego_supplemental(UpToDate);
+        // Set QE-specific dates different from global dates
+        data.qe_iden_earliest_issue_date = 1_850_000_000;
+        data.qe_iden_latest_issue_date = 1_850_100_000;
+        data.qe_iden_earliest_expiration_date = 1_950_000_000;
+        let m = build_qe_measurement(&data);
+        // QE measurement should use qe_iden_* dates, not the global ones
+        let earliest = m.get("earliest_issue_date").unwrap().as_str().unwrap();
+        let expected = "2028-08-16T"; // 1_850_000_000 = 2028-08-16T00:53:20Z
+        assert!(
+            earliest.starts_with(expected),
+            "QE measurement should use qe_iden_earliest_issue_date, got: {earliest}"
         );
     }
 

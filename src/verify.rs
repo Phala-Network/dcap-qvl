@@ -140,13 +140,14 @@ impl QuoteVerificationResult {
             Vec::new()
         };
 
-        let (earliest_issue_date, latest_issue_date, earliest_expiration_date) =
+        let collateral_dates =
             compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
 
         // root_key_id: SHA-384 of root CA's raw public key bytes
         let root_key_id = {
             let root_cert: x509_cert::Certificate =
-                der::Decode::from_der(&self.root_ca_der).expect("root CA already validated");
+                der::Decode::from_der(&self.root_ca_der)
+                    .context("root CA already validated but failed to re-parse")?;
             let raw_key = root_cert
                 .tbs_certificate
                 .subject_public_key_info
@@ -169,7 +170,7 @@ impl QuoteVerificationResult {
         Ok(SupplementalData {
             tee_type: self.tee_type,
             tcb: TcbVerdict {
-                status: self.tcb_status.clone(),
+                status: self.tcb_status,
                 advisory_ids: self.advisory_ids.clone(),
                 eval_data_number: self.tcb_eval_data_number,
             },
@@ -195,13 +196,16 @@ impl QuoteVerificationResult {
             },
             qe: QeInfo {
                 tcb_level: self.qe_tcb_level.clone(),
-                report: self.qe_report.clone(),
+                report: self.qe_report,
                 tcb_eval_data_number: self.qe_tcb_eval_data_number,
             },
             report: self.report.clone(),
-            earliest_issue_date,
-            latest_issue_date,
-            earliest_expiration_date,
+            earliest_issue_date: collateral_dates.earliest_issue,
+            latest_issue_date: collateral_dates.latest_issue,
+            earliest_expiration_date: collateral_dates.earliest_expiration,
+            qe_iden_earliest_issue_date: collateral_dates.qe_iden_earliest_issue,
+            qe_iden_latest_issue_date: collateral_dates.qe_iden_latest_issue,
+            qe_iden_earliest_expiration_date: collateral_dates.qe_iden_earliest_expiration,
         })
     }
 
@@ -850,9 +854,21 @@ fn verify_impl(
     })
 }
 
+/// Collateral time window dates (8 sources + QE Identity subset).
+struct CollateralDates {
+    earliest_issue: u64,
+    latest_issue: u64,
+    earliest_expiration: u64,
+    /// QE Identity-specific dates (sources \[5\] + \[7\] only).
+    qe_iden_earliest_issue: u64,
+    qe_iden_latest_issue: u64,
+    qe_iden_earliest_expiration: u64,
+}
+
 /// Compute the collateral time window: earliest issue, latest issue, earliest expiration.
 ///
 /// Matches Intel QVL's `qve_get_collateral_dates()` which considers **8 date sources**:
+///
 /// 1. Root CA CRL thisUpdate/nextUpdate
 /// 2. PCK CRL thisUpdate/nextUpdate
 /// 3. PCK CRL issuer certificate chain notBefore/notAfter
@@ -866,7 +882,7 @@ fn compute_collateral_time_window(
     pck_cert_chain: &[CertificateDer<'_>],
     tcb_info: &TcbInfo,
     qe_identity: &QeIdentity,
-) -> Result<(u64, u64, u64)> {
+) -> Result<CollateralDates> {
     fn parse_rfc3339_ts(s: &str) -> Option<u64> {
         chrono::DateTime::parse_from_rfc3339(s)
             .ok()
@@ -969,15 +985,34 @@ fn compute_collateral_time_window(
         &mut latest_issue,
         &mut earliest_expiration,
     )?;
-    // QEIdentity issuer chain
+    // QEIdentity issuer chain (source [5]) — also track QE-specific dates
+    let mut qe_chain_earliest_issue = u64::MAX;
+    let mut qe_chain_latest_issue = 0u64;
+    let mut qe_chain_earliest_expiration = u64::MAX;
     fold_cert_chain_dates(
         collateral.qe_identity_issuer_chain.as_bytes(),
-        &mut earliest_issue,
-        &mut latest_issue,
-        &mut earliest_expiration,
+        &mut qe_chain_earliest_issue,
+        &mut qe_chain_latest_issue,
+        &mut qe_chain_earliest_expiration,
     )?;
+    // Fold into global window
+    earliest_issue = earliest_issue.min(qe_chain_earliest_issue);
+    latest_issue = latest_issue.max(qe_chain_latest_issue);
+    earliest_expiration = earliest_expiration.min(qe_chain_earliest_expiration);
 
-    Ok((earliest_issue, latest_issue, earliest_expiration))
+    // QE Identity-specific window: min/max of source [5] (issuer chain) + source [7] (JSON)
+    let qe_iden_earliest_issue = qe_chain_earliest_issue.min(qe_issue);
+    let qe_iden_latest_issue = qe_chain_latest_issue.max(qe_issue);
+    let qe_iden_earliest_expiration = qe_chain_earliest_expiration.min(qe_next);
+
+    Ok(CollateralDates {
+        earliest_issue,
+        latest_issue,
+        earliest_expiration,
+        qe_iden_earliest_issue,
+        qe_iden_latest_issue,
+        qe_iden_earliest_expiration,
+    })
 }
 
 fn validate_sgx_attrs(report: &EnclaveReport) -> Result<()> {

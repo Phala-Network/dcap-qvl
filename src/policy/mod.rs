@@ -94,6 +94,12 @@ pub struct SupplementalData {
     pub latest_issue_date: u64,
     /// `min(nextUpdate / notAfter)` across all 8 collateral sources (the "weakest link").
     pub earliest_expiration_date: u64,
+    /// `min(issueDate / notBefore)` across QE Identity sources (issuer chain + JSON).
+    pub qe_iden_earliest_issue_date: u64,
+    /// `max(issueDate / notBefore)` across QE Identity sources (issuer chain + JSON).
+    pub qe_iden_latest_issue_date: u64,
+    /// `min(nextUpdate / notAfter)` across QE Identity sources (issuer chain + JSON).
+    pub qe_iden_earliest_expiration_date: u64,
     /// Quote report body (SGX enclave report, TDX TD10/TD15).
     pub report: Report,
 }
