@@ -113,10 +113,12 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
     };
 
     let ring_result = ring_verifier
-        .verify(&quote_bytes, &collateral, now)
+        .verify(&quote_bytes, collateral.clone(), now)
+        .map(|r| r.into_report_unchecked())
         .map_err(|e| format!("{e:#}"));
     let rustcrypto_result = rustcrypto_verifier
-        .verify(&quote_bytes, &collateral, now)
+        .verify(&quote_bytes, collateral, now)
+        .map(|r| r.into_report_unchecked())
         .map_err(|e| format!("{e:#}"));
     if ring_result != rustcrypto_result {
         eprintln!("Verification results differ between ring and rustcrypto");
@@ -125,20 +127,14 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
         return 1;
     }
 
-    let ring_result1 = ring_verifier.verify(&quote_bytes, &collateral, now);
-    match ring_result1 {
-        Ok(verified_report) => {
+    match ring_result {
+        Ok(report) => {
             println!("Verification successful");
-            println!("Status: {:?}", verified_report.status);
+            println!("Status: {}", report.status);
             0
         }
         Err(e) => {
-            eprintln!("Verification failed: {}", e);
-            let mut source = e.source();
-            while let Some(err) = source {
-                eprintln!("  Caused by: {}", err);
-                source = err.source();
-            }
+            eprintln!("Verification failed: {e}");
             1
         }
     }

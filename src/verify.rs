@@ -136,9 +136,8 @@ impl QuoteVerificationResult {
 
         // root_key_id: SHA-384 of root CA's raw public key bytes
         let root_key_id = {
-            let root_cert: x509_cert::Certificate =
-                der::Decode::from_der(&self.root_ca_der)
-                    .context("root CA already validated but failed to re-parse")?;
+            let root_cert: x509_cert::Certificate = der::Decode::from_der(&self.root_ca_der)
+                .context("root CA already validated but failed to re-parse")?;
             let raw_key = root_cert
                 .tbs_certificate
                 .subject_public_key_info
@@ -822,6 +821,12 @@ fn verify_impl(
     let qe_status =
         TcbStatusWithAdvisory::new(qe_tcb_level.tcb_status, qe_tcb_level.advisory_ids.clone());
     let final_status = platform_status.merge(&qe_status);
+
+    // Revoked means the platform's keys are compromised — reject unconditionally,
+    // regardless of policy. This is a security invariant, not a policy decision.
+    if final_status.status == TcbStatus::Revoked {
+        bail!("TCB status is Revoked: platform keys are compromised");
+    }
 
     // Validate report attributes (debug mode check, etc.)
     validate_attrs(&quote.report)?;
