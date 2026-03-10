@@ -100,7 +100,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// let sup = result.supplemental()?;
 /// println!("TCB status: {:?}", sup.tcb.status);
 /// // Or apply policy directly
-/// let report = result.validate(&QuotePolicy::strict(now))?;
+/// let report = result.validate(&SimplePolicy::strict(now))?;
 /// ```
 pub struct QuoteVerificationResult {
     report: Report,
@@ -262,7 +262,7 @@ impl QuoteVerificationResult {
     /// Compute the full collateral time window (expensive: ~14 DER parses).
     ///
     /// Only needed for Rego evaluation. Called lazily, not during `verify()`.
-    fn compute_time_window(&self) -> Result<crate::policy::rego_policy::CollateralTimeWindow> {
+    fn compute_time_window(&self) -> Result<crate::policy::rego::CollateralTimeWindow> {
         // Re-extract PCK cert chain from owned collateral
         let pck_certs = if let Some(pem_chain) = &self.collateral.pck_certificate_chain {
             extract_certs(pem_chain.as_bytes()).unwrap_or_default()
@@ -280,7 +280,7 @@ impl QuoteVerificationResult {
         let (earliest_issue, latest_issue, earliest_expiration) =
             compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
 
-        Ok(crate::policy::rego_policy::CollateralTimeWindow {
+        Ok(crate::policy::rego::CollateralTimeWindow {
             earliest_issue_date: earliest_issue,
             latest_issue_date: latest_issue,
             earliest_expiration_date: earliest_expiration,
@@ -294,9 +294,9 @@ impl QuoteVerificationResult {
     pub(crate) fn to_rego_qvl_result(
         &self,
         supplemental: &SupplementalData,
-        tw: &crate::policy::rego_policy::CollateralTimeWindow,
+        tw: &crate::policy::rego::CollateralTimeWindow,
     ) -> Vec<serde_json::Value> {
-        use crate::policy::rego_policy::{
+        use crate::policy::rego::{
             build_platform_measurement, build_qe_measurement, platform_class_id, tenant_class_id,
             tenant_measurement,
         };

@@ -19,7 +19,7 @@
 //! ```no_run
 //! use dcap_qvl::collateral::get_collateral;
 //! use dcap_qvl::verify::{QuoteVerifier, ring};
-//! use dcap_qvl::QuotePolicy;
+//! use dcap_qvl::SimplePolicy;
 //! use dcap_qvl::PHALA_PCCS_URL;
 //!
 //! #[tokio::main]
@@ -33,7 +33,7 @@
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 //!     let verifier = QuoteVerifier::new_prod(ring::backend());
 //!     let result = verifier.verify(&quote, collateral, now).expect("verification failed");
-//!     let report = result.validate(&QuotePolicy::strict(now)).expect("policy validation failed");
+//!     let report = result.validate(&SimplePolicy::strict(now)).expect("policy validation failed");
 //!     println!("{:?}", report);
 //! }
 //! ```
@@ -97,7 +97,7 @@ pub use constants::{CpuSvn, Fmspc, MrEnclave, MrSigner, Svn};
 pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
 pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
 pub use policy::{
-    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, QuotePolicy, SupplementalData,
+    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SimplePolicy, SupplementalData,
     TcbVerdict,
 };
 pub use verify::QuoteVerificationResult;

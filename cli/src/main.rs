@@ -10,7 +10,7 @@ use dcap_qvl::collateral::{get_collateral, PHALA_PCCS_URL};
 use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
 use dcap_qvl::verify::{ring, QuoteVerifier};
-use dcap_qvl::QuotePolicy;
+use dcap_qvl::SimplePolicy;
 use der::Decode;
 use serde::Serialize;
 use x509_cert::Certificate;
