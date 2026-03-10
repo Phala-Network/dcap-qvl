@@ -30,41 +30,21 @@ fn tcb_status_to_rego_array(status: TcbStatus) -> serde_json::Value {
     }
 }
 
-/// Full collateral time window, aggregated from 8 sources (matching Intel QVL):
-/// TcbInfo, QeIdentity, Root CA CRL, PCK CRL, and 4 certificate chains.
-///
-/// `SimplePolicy` only needs `earliest_expiration_date` (computed separately
-/// from 4 lightweight sources without certificate chain parsing).
-pub(crate) struct CollateralTimeWindow {
-    /// `min(issueDate / thisUpdate / notBefore)` across all 8 sources.
-    /// Rego uses this as `collateral_earliest_issue_date` in measurements.
-    pub earliest_issue_date: u64,
-    /// `max(issueDate / thisUpdate / notBefore)` across all 8 sources.
-    /// Rego uses this as `collateral_latest_issue_date` in measurements.
-    pub latest_issue_date: u64,
-    /// `min(nextUpdate / notAfter)` across all 8 sources (the "weakest link").
-    /// Determines when the overall collateral expires. Rego uses this as
-    /// `collateral_earliest_expiration_date`; also reused by `build_supplemental()`
-    /// to avoid redundant parsing.
-    pub earliest_expiration_date: u64,
-}
-
 /// Build common platform fields into a Rego measurement JSON map.
 fn insert_platform_fields(
     m: &mut serde_json::Map<String, serde_json::Value>,
     data: &SupplementalData,
-    tw: &CollateralTimeWindow,
 ) {
-    // Time fields as RFC3339 strings
-    let earliest_issue = unix_to_rfc3339(tw.earliest_issue_date);
+    // Time fields as RFC3339 strings (from SupplementalData's collateral time window)
+    let earliest_issue = unix_to_rfc3339(data.earliest_issue_date);
     if !earliest_issue.is_empty() {
         m.insert("earliest_issue_date".into(), json!(earliest_issue));
     }
-    let latest_issue = unix_to_rfc3339(tw.latest_issue_date);
+    let latest_issue = unix_to_rfc3339(data.latest_issue_date);
     if !latest_issue.is_empty() {
         m.insert("latest_issue_date".into(), json!(latest_issue));
     }
-    let earliest_exp = unix_to_rfc3339(tw.earliest_expiration_date);
+    let earliest_exp = unix_to_rfc3339(data.earliest_expiration_date);
     if !earliest_exp.is_empty() {
         m.insert("earliest_expiration_date".into(), json!(earliest_exp));
     }
@@ -74,7 +54,10 @@ fn insert_platform_fields(
     }
 
     m.insert("pck_crl_num".into(), json!(data.platform.pck_crl_num));
-    m.insert("root_ca_crl_num".into(), json!(data.platform.root_ca_crl_num));
+    m.insert(
+        "root_ca_crl_num".into(),
+        json!(data.platform.root_ca_crl_num),
+    );
     m.insert("tcb_eval_num".into(), json!(data.tcb.eval_data_number));
     m.insert("sgx_type".into(), json!(data.platform.pck.sgx_type));
 
@@ -101,7 +84,10 @@ fn insert_platform_fields(
         m.insert("platform_provider_id".into(), json!(provider_id));
     }
 
-    m.insert("fmspc".into(), json!(hex::encode_upper(data.platform.pck.fmspc)));
+    m.insert(
+        "fmspc".into(),
+        json!(hex::encode_upper(data.platform.pck.fmspc)),
+    );
     m.insert(
         "root_key_id".into(),
         json!(hex::encode_upper(data.platform.root_key_id)),
@@ -109,16 +95,13 @@ fn insert_platform_fields(
 }
 
 /// Build merged Rego measurement (single-measurement path).
-pub(crate) fn build_merged_measurement(
-    data: &SupplementalData,
-    tw: &CollateralTimeWindow,
-) -> serde_json::Value {
+fn build_merged_measurement(data: &SupplementalData) -> serde_json::Value {
     let mut m = serde_json::Map::new();
     m.insert(
         "tcb_status".into(),
         tcb_status_to_rego_array(data.tcb.status),
     );
-    insert_platform_fields(&mut m, data, tw);
+    insert_platform_fields(&mut m, data);
     if !data.tcb.advisory_ids.is_empty() {
         m.insert("advisory_ids".into(), json!(data.tcb.advisory_ids));
     }
@@ -126,16 +109,13 @@ pub(crate) fn build_merged_measurement(
 }
 
 /// Build platform TCB measurement using **unmerged** platform status.
-pub(crate) fn build_platform_measurement(
-    data: &SupplementalData,
-    tw: &CollateralTimeWindow,
-) -> serde_json::Value {
+fn build_platform_measurement(data: &SupplementalData) -> serde_json::Value {
     let mut m = serde_json::Map::new();
     m.insert(
         "tcb_status".into(),
         tcb_status_to_rego_array(data.platform.tcb_level.tcb_status),
     );
-    insert_platform_fields(&mut m, data, tw);
+    insert_platform_fields(&mut m, data);
     if !data.platform.tcb_level.advisory_ids.is_empty() {
         m.insert(
             "advisory_ids".into(),
@@ -146,10 +126,7 @@ pub(crate) fn build_platform_measurement(
 }
 
 /// Build QE Identity measurement for Rego appraisal (TDX).
-pub(crate) fn build_qe_measurement(
-    data: &SupplementalData,
-    tw: &CollateralTimeWindow,
-) -> serde_json::Value {
+fn build_qe_measurement(data: &SupplementalData) -> serde_json::Value {
     let mut m = serde_json::Map::new();
 
     m.insert(
@@ -166,15 +143,15 @@ pub(crate) fn build_qe_measurement(
         m.insert("tcb_level_date_tag".into(), json!(qe_date_str));
     }
 
-    let earliest_issue = unix_to_rfc3339(tw.earliest_issue_date);
+    let earliest_issue = unix_to_rfc3339(data.earliest_issue_date);
     if !earliest_issue.is_empty() {
         m.insert("earliest_issue_date".into(), json!(earliest_issue));
     }
-    let latest_issue = unix_to_rfc3339(tw.latest_issue_date);
+    let latest_issue = unix_to_rfc3339(data.latest_issue_date);
     if !latest_issue.is_empty() {
         m.insert("latest_issue_date".into(), json!(latest_issue));
     }
-    let earliest_exp = unix_to_rfc3339(tw.earliest_expiration_date);
+    let earliest_exp = unix_to_rfc3339(data.earliest_expiration_date);
     if !earliest_exp.is_empty() {
         m.insert("earliest_expiration_date".into(), json!(earliest_exp));
     }
@@ -233,12 +210,13 @@ pub(crate) fn sgx_enclave_measurement(report: &EnclaveReport) -> serde_json::Val
         );
     }
     if let Some(config_id) = report.reserved3.get(32..96) {
-        m.insert(
-            "sgx_configid".into(),
-            json!(hex::encode_upper(config_id)),
-        );
+        m.insert("sgx_configid".into(), json!(hex::encode_upper(config_id)));
     }
-    if let Some(config_svn_bytes) = report.reserved4.get(0..2).and_then(|s| <[u8; 2]>::try_from(s).ok()) {
+    if let Some(config_svn_bytes) = report
+        .reserved4
+        .get(0..2)
+        .and_then(|s| <[u8; 2]>::try_from(s).ok())
+    {
         let config_svn = u16::from_le_bytes(config_svn_bytes);
         m.insert("sgx_configsvn".into(), json!(config_svn));
     }
@@ -260,14 +238,8 @@ fn td10_measurement(report: &TDReport10) -> serde_json::Value {
         "tdx_attributes".into(),
         json!(hex::encode_upper(report.td_attributes)),
     );
-    m.insert(
-        "tdx_xfam".into(),
-        json!(hex::encode_upper(report.xfam)),
-    );
-    m.insert(
-        "tdx_mrtd".into(),
-        json!(hex::encode_upper(report.mr_td)),
-    );
+    m.insert("tdx_xfam".into(), json!(hex::encode_upper(report.xfam)));
+    m.insert("tdx_mrtd".into(), json!(hex::encode_upper(report.mr_td)));
     m.insert(
         "tdx_mrconfigid".into(),
         json!(hex::encode_upper(report.mr_config_id)),
@@ -280,22 +252,10 @@ fn td10_measurement(report: &TDReport10) -> serde_json::Value {
         "tdx_mrownerconfig".into(),
         json!(hex::encode_upper(report.mr_owner_config)),
     );
-    m.insert(
-        "tdx_rtmr0".into(),
-        json!(hex::encode_upper(report.rt_mr0)),
-    );
-    m.insert(
-        "tdx_rtmr1".into(),
-        json!(hex::encode_upper(report.rt_mr1)),
-    );
-    m.insert(
-        "tdx_rtmr2".into(),
-        json!(hex::encode_upper(report.rt_mr2)),
-    );
-    m.insert(
-        "tdx_rtmr3".into(),
-        json!(hex::encode_upper(report.rt_mr3)),
-    );
+    m.insert("tdx_rtmr0".into(), json!(hex::encode_upper(report.rt_mr0)));
+    m.insert("tdx_rtmr1".into(), json!(hex::encode_upper(report.rt_mr1)));
+    m.insert("tdx_rtmr2".into(), json!(hex::encode_upper(report.rt_mr2)));
+    m.insert("tdx_rtmr3".into(), json!(hex::encode_upper(report.rt_mr3)));
     m.insert(
         "tdx_reportdata".into(),
         json!(hex::encode_upper(report.report_data)),
@@ -402,12 +362,6 @@ impl RegoPolicySet {
         }
 
         Ok(Self { engine, policies })
-    }
-
-    /// Evaluate the Rego engine with the given qvl_result entries.
-    pub(crate) fn eval_rego(&self, qvl_result: Vec<serde_json::Value>) -> Result<()> {
-        let policy_refs: Vec<&serde_json::Value> = self.policies.iter().collect();
-        eval_rego_engine(&self.engine, &policy_refs, qvl_result)
     }
 }
 
@@ -524,20 +478,67 @@ impl RegoPolicy {
     }
 }
 
-impl RegoPolicy {
-    /// Evaluate this single-measurement Rego policy against supplemental data + time window.
-    pub(crate) fn eval(
-        &self,
-        data: &SupplementalData,
-        tw: &CollateralTimeWindow,
-    ) -> Result<()> {
-        let measurement = build_merged_measurement(data, tw);
+impl Policy for RegoPolicy {
+    fn validate(&self, data: &SupplementalData) -> Result<()> {
+        let measurement = build_merged_measurement(data);
         let qvl_result = vec![json!({
             "environment": { "class_id": &self.class_id },
             "measurement": measurement,
         })];
         eval_rego_engine(&self.engine, &[&self.policy_json], qvl_result)
     }
+}
+
+impl Policy for RegoPolicySet {
+    fn validate(&self, data: &SupplementalData) -> Result<()> {
+        let qvl_result = to_rego_qvl_result(data);
+        let policy_refs: Vec<&serde_json::Value> = self.policies.iter().collect();
+        eval_rego_engine(&self.engine, &policy_refs, qvl_result)
+    }
+}
+
+/// Generate Intel-format `qvl_result` array for Rego appraisal from [`SupplementalData`].
+///
+/// SGX quotes produce 2 entries (platform + enclave).
+/// TDX quotes produce 3 entries (platform + QE identity + TD).
+fn to_rego_qvl_result(data: &SupplementalData) -> Vec<serde_json::Value> {
+    use crate::quote::Report;
+
+    let mut result = Vec::new();
+
+    // 1. Platform TCB measurement
+    let platform_cid = platform_class_id(&data.report, data.tee_type);
+    result.push(json!({
+        "environment": { "class_id": platform_cid },
+        "measurement": build_platform_measurement(data),
+    }));
+
+    // 2. QE Identity measurement (TDX only)
+    if matches!(data.report, Report::TD10(_) | Report::TD15(_)) {
+        result.push(json!({
+            "environment": { "class_id": "3769258c-75e6-4bc7-8d72-d2b0e224cad2" },
+            "measurement": build_qe_measurement(data),
+        }));
+    }
+
+    // 3. Tenant measurement (enclave or TD report)
+    let tenant_cid = tenant_class_id(&data.report);
+    let mut tenant_m = tenant_measurement(&data.report);
+    // For SGX enclave, add sgx_ce_attributes from the QE report
+    if let Report::SgxEnclave(_) = &data.report {
+        if let Some(obj) = tenant_m.as_object_mut() {
+            obj.insert(
+                "sgx_ce_attributes".into(),
+                json!(hex::encode_upper(data.qe.report.attributes)),
+            );
+        }
+    }
+    result.push(json!({
+        "environment": { "class_id": tenant_cid },
+        "measurement": tenant_m,
+    }));
+
+    result
 }
 
 #[cfg(test)]
@@ -559,7 +560,6 @@ mod tests {
                 status: tcb_status,
                 advisory_ids: vec![],
                 eval_data_number: 17,
-                earliest_expiration: 1_703_000_000,
             },
             platform: PlatformInfo {
                 tcb_level: TcbLevel {
@@ -613,22 +613,32 @@ mod tests {
                 },
                 tcb_eval_data_number: 17,
             },
+            report: crate::quote::Report::SgxEnclave(crate::quote::EnclaveReport {
+                cpu_svn: [0u8; 16],
+                misc_select: 0,
+                reserved1: [0u8; 28],
+                attributes: [0u8; 16],
+                mr_enclave: [0u8; 32],
+                reserved2: [0u8; 32],
+                mr_signer: [0u8; 32],
+                reserved3: [0u8; 96],
+                isv_prod_id: 0,
+                isv_svn: 0,
+                reserved4: [0u8; 60],
+                report_data: [0u8; 64],
+            }),
+            earliest_issue_date: 1_690_000_000,
+            latest_issue_date: 1_690_100_000,
+            earliest_expiration_date: 1_703_000_000,
         }
     }
 
-    /// Create a test time window with future dates (Rego uses real wall clock).
-    fn make_test_time_window() -> CollateralTimeWindow {
-        CollateralTimeWindow {
-            earliest_issue_date: 1_900_000_000,
-            latest_issue_date: 1_900_100_000,
-            earliest_expiration_date: 2_000_000_000,
-        }
-    }
-
-    /// Create test supplemental data with future expiration for Rego.
+    /// Create test supplemental data with future dates for Rego (uses real wall clock).
     fn make_rego_supplemental(status: TcbStatus) -> SupplementalData {
         let mut data = make_test_supplemental(status);
-        data.tcb.earliest_expiration = 2_000_000_000;
+        data.earliest_issue_date = 1_900_000_000;
+        data.latest_issue_date = 1_900_100_000;
+        data.earliest_expiration_date = 2_000_000_000;
         data
     }
 
@@ -647,12 +657,10 @@ mod tests {
     #[test]
     fn rego_strict_accepts_up_to_date() {
         let data = make_rego_supplemental(UpToDate);
-        let tw = make_test_time_window();
-        let json = policy_json(
-            r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#,
-        );
+        let json =
+            policy_json(r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#);
         let policy = RegoPolicy::new(&json).unwrap();
-        let result = policy.eval(&data, &tw);
+        let result = policy.validate(&data);
         assert!(
             result.is_ok(),
             "expected Ok, got: {:?}",
@@ -663,12 +671,10 @@ mod tests {
     #[test]
     fn rego_strict_rejects_out_of_date() {
         let data = make_rego_supplemental(OutOfDate);
-        let tw = make_test_time_window();
-        let json = policy_json(
-            r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#,
-        );
+        let json =
+            policy_json(r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#);
         let policy = RegoPolicy::new(&json).unwrap();
-        let err = policy.eval(&data, &tw).unwrap_err().to_string();
+        let err = policy.validate(&data).unwrap_err().to_string();
         assert!(
             err.contains("appraisal failed"),
             "expected appraisal failure, got: {err}"
@@ -678,12 +684,11 @@ mod tests {
     #[test]
     fn rego_permissive_accepts_out_of_date() {
         let data = make_rego_supplemental(OutOfDate);
-        let tw = make_test_time_window();
         let json = policy_json(
             r#"{"accepted_tcb_status": ["UpToDate", "OutOfDate"], "collateral_grace_period": 0}"#,
         );
         let policy = RegoPolicy::new(&json).unwrap();
-        let result = policy.eval(&data, &tw);
+        let result = policy.validate(&data);
         assert!(
             result.is_ok(),
             "expected Ok, got: {:?}",
@@ -695,7 +700,6 @@ mod tests {
     fn rego_rejects_advisory() {
         let mut data = make_rego_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00334".into()];
-        let tw = make_test_time_window();
         let json = policy_json(
             r#"{
                 "accepted_tcb_status": ["UpToDate"],
@@ -704,7 +708,7 @@ mod tests {
             }"#,
         );
         let policy = RegoPolicy::new(&json).unwrap();
-        let err = policy.eval(&data, &tw).unwrap_err().to_string();
+        let err = policy.validate(&data).unwrap_err().to_string();
         assert!(
             err.contains("appraisal failed"),
             "expected advisory rejection, got: {err}"
@@ -715,7 +719,6 @@ mod tests {
     fn rego_platform_grace_period_accepts() {
         let mut data = make_rego_supplemental(OutOfDate);
         data.platform.tcb_date_tag = 1_690_000_000;
-        let tw = make_test_time_window();
         let json = policy_json(
             r#"{
                 "accepted_tcb_status": ["UpToDate", "OutOfDate"],
@@ -724,7 +727,7 @@ mod tests {
             }"#,
         );
         let policy = RegoPolicy::new(&json).unwrap();
-        let result = policy.eval(&data, &tw);
+        let result = policy.validate(&data);
         assert!(
             result.is_ok(),
             "expected Ok, got: {:?}",
@@ -734,17 +737,15 @@ mod tests {
 
     #[test]
     fn rego_expiration_check_rejects_expired_collateral() {
-        let data = make_rego_supplemental(UpToDate);
-        let tw = CollateralTimeWindow {
-            earliest_issue_date: 1_700_000_000,
-            latest_issue_date: 1_700_100_000,
-            earliest_expiration_date: 1_703_000_000,
-        };
-        let json = policy_json(
-            r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#,
-        );
+        let mut data = make_rego_supplemental(UpToDate);
+        // Override with past dates — collateral expired
+        data.earliest_issue_date = 1_700_000_000;
+        data.latest_issue_date = 1_700_100_000;
+        data.earliest_expiration_date = 1_703_000_000;
+        let json =
+            policy_json(r#"{"accepted_tcb_status": ["UpToDate"], "collateral_grace_period": 0}"#);
         let policy = RegoPolicy::new(&json).unwrap();
-        let err = policy.eval(&data, &tw).unwrap_err().to_string();
+        let err = policy.validate(&data).unwrap_err().to_string();
         assert!(
             err.contains("appraisal failed"),
             "expected expiration failure, got: {err}"
@@ -753,15 +754,14 @@ mod tests {
 
     #[test]
     fn rego_no_collateral_grace_skips_expiration_check() {
-        let data = make_rego_supplemental(UpToDate);
-        let tw = CollateralTimeWindow {
-            earliest_issue_date: 1_700_000_000,
-            latest_issue_date: 1_700_100_000,
-            earliest_expiration_date: 1_703_000_000,
-        };
+        let mut data = make_rego_supplemental(UpToDate);
+        // Override with past dates — but no grace period in policy means no check
+        data.earliest_issue_date = 1_700_000_000;
+        data.latest_issue_date = 1_700_100_000;
+        data.earliest_expiration_date = 1_703_000_000;
         let json = policy_json(r#"{"accepted_tcb_status": ["UpToDate"]}"#);
         let policy = RegoPolicy::new(&json).unwrap();
-        let result = policy.eval(&data, &tw);
+        let result = policy.validate(&data);
         assert!(
             result.is_ok(),
             "expected Ok (no expiration check), got: {:?}",
@@ -778,8 +778,7 @@ mod tests {
     #[test]
     fn rego_to_measurement_tcb_status_mapping() {
         let data = make_test_supplemental(ConfigurationAndSWHardeningNeeded);
-        let tw = make_test_time_window();
-        let m = build_merged_measurement(&data, &tw);
+        let m = build_merged_measurement(&data);
         let statuses = m.get("tcb_status").unwrap().as_array().unwrap();
         assert_eq!(statuses.len(), 3);
         assert_eq!(statuses[0], "UpToDate");
@@ -791,8 +790,7 @@ mod tests {
     fn rego_to_measurement_omits_undefined_flags() {
         let data = make_test_supplemental(UpToDate);
         assert_eq!(data.platform.pck.dynamic_platform, PckCertFlag::Undefined);
-        let tw = make_test_time_window();
-        let m = build_merged_measurement(&data, &tw);
+        let m = build_merged_measurement(&data);
         assert!(m.get("is_dynamic_platform").is_none());
         assert!(m.get("cached_keys").is_none());
         assert!(m.get("smt_enabled").is_none());
@@ -804,8 +802,7 @@ mod tests {
         data.platform.pck.dynamic_platform = PckCertFlag::True;
         data.platform.pck.cached_keys = PckCertFlag::False;
         data.platform.pck.smt_enabled = PckCertFlag::True;
-        let tw = make_test_time_window();
-        let m = build_merged_measurement(&data, &tw);
+        let m = build_merged_measurement(&data);
         assert_eq!(m.get("is_dynamic_platform").unwrap(), true);
         assert_eq!(m.get("cached_keys").unwrap(), false);
         assert_eq!(m.get("smt_enabled").unwrap(), true);
@@ -816,8 +813,7 @@ mod tests {
         let mut data = make_test_supplemental(UpToDate);
         data.platform.tcb_level.tcb_status = OutOfDate;
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00001".into()];
-        let tw = make_test_time_window();
-        let m = build_platform_measurement(&data, &tw);
+        let m = build_platform_measurement(&data);
         let statuses = m.get("tcb_status").unwrap().as_array().unwrap();
         assert!(statuses.contains(&serde_json::json!("OutOfDate")));
         let advisories = m.get("advisory_ids").unwrap().as_array().unwrap();
@@ -827,8 +823,7 @@ mod tests {
     #[test]
     fn rego_qe_measurement_fields() {
         let data = make_rego_supplemental(UpToDate);
-        let tw = make_test_time_window();
-        let m = build_qe_measurement(&data, &tw);
+        let m = build_qe_measurement(&data);
         assert!(m.get("tcb_status").is_some());
         assert_eq!(m.get("tcb_eval_num").unwrap(), 17);
         assert!(m.get("root_key_id").is_some());
@@ -876,7 +871,6 @@ mod tests {
     #[test]
     fn rego_policy_set_sgx_platform_accepts() {
         let data = make_rego_supplemental(UpToDate);
-        let tw = make_test_time_window();
         let platform_json = format!(
             r#"{{
                 "environment": {{ "class_id": "{SGX_PLATFORM_CLASS_ID}" }},
@@ -884,27 +878,17 @@ mod tests {
             }}"#
         );
         let policies = RegoPolicySet::new(&[&platform_json]).unwrap();
-        let qvl_result = vec![serde_json::json!({
-            "environment": { "class_id": SGX_PLATFORM_CLASS_ID },
-            "measurement": build_platform_measurement(&data, &tw),
-        })];
+        let result = policies.validate(&data);
         assert!(
-            policies.eval_rego(qvl_result).is_ok(),
+            result.is_ok(),
             "expected Ok, got: {:?}",
-            {
-                let qvl_result2 = vec![serde_json::json!({
-                    "environment": { "class_id": SGX_PLATFORM_CLASS_ID },
-                    "measurement": build_platform_measurement(&data, &tw),
-                })];
-                policies.eval_rego(qvl_result2).unwrap_err()
-            }
+            result.unwrap_err()
         );
     }
 
     #[test]
     fn rego_policy_set_class_id_mismatch_fails() {
         let data = make_rego_supplemental(UpToDate);
-        let tw = make_test_time_window();
         let tdx_class_id = "9eec018b-7481-4b1c-8e1a-9f7c0c8c777f";
         let policy_json = format!(
             r#"{{
@@ -913,11 +897,7 @@ mod tests {
             }}"#
         );
         let policies = RegoPolicySet::new(&[&policy_json]).unwrap();
-        let qvl_result = vec![serde_json::json!({
-            "environment": { "class_id": SGX_PLATFORM_CLASS_ID },
-            "measurement": build_platform_measurement(&data, &tw),
-        })];
-        let err = policies.eval_rego(qvl_result).unwrap_err().to_string();
+        let err = policies.validate(&data).unwrap_err().to_string();
         assert!(
             err.contains("appraisal failed"),
             "expected appraisal failure on class_id mismatch, got: {err}"

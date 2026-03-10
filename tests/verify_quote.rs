@@ -111,7 +111,9 @@ fn sgx_supplemental_data_cross_validation() {
     let now = now_from_collateral(&collateral);
 
     let verifier = QuoteVerifier::new_prod(ring::backend());
-    let result = verifier.verify(&raw_quote, collateral.clone(), now).unwrap();
+    let result = verifier
+        .verify(&raw_quote, collateral.clone(), now)
+        .unwrap();
     let s = &result.supplemental().unwrap();
 
     // Parse quote for later use
@@ -125,7 +127,7 @@ fn sgx_supplemental_data_cross_validation() {
     assert_eq!(s.tcb.advisory_ids, ["INTEL-SA-00289", "INTEL-SA-00615"]);
 
     // earliest_expiration is computed lazily in supplemental()
-    assert!(s.tcb.earliest_expiration > 0);
+    assert!(s.earliest_expiration_date > 0);
 
     // ── tcb_date_tag ────────────────────────────────────────────────────
     let expected_tcb_date = chrono::DateTime::parse_from_rfc3339(&s.platform.tcb_level.tcb_date)
@@ -153,7 +155,10 @@ fn sgx_supplemental_data_cross_validation() {
         }
         0
     }
-    assert_eq!(s.platform.root_ca_crl_num, extract_crl_num(&collateral.root_ca_crl));
+    assert_eq!(
+        s.platform.root_ca_crl_num,
+        extract_crl_num(&collateral.root_ca_crl)
+    );
     assert_eq!(s.platform.pck_crl_num, extract_crl_num(&collateral.pck_crl));
 
     // ── tcb_eval_data_number ────────────────────────────────────────────
@@ -215,7 +220,7 @@ fn sgx_supplemental_data_cross_validation() {
     let rc = &rc_result.supplemental().unwrap();
     assert_eq!(s.tcb.status, rc.tcb.status);
     assert_eq!(s.tcb.advisory_ids, rc.tcb.advisory_ids);
-    assert_eq!(s.tcb.earliest_expiration, rc.tcb.earliest_expiration);
+    assert_eq!(s.earliest_expiration_date, rc.earliest_expiration_date);
     assert_eq!(s.platform.tcb_date_tag, rc.platform.tcb_date_tag);
     assert_eq!(s.platform.pck_crl_num, rc.platform.pck_crl_num);
     assert_eq!(s.platform.root_ca_crl_num, rc.platform.root_ca_crl_num);
@@ -228,8 +233,14 @@ fn sgx_supplemental_data_cross_validation() {
     assert_eq!(s.platform.pck.fmspc, rc.platform.pck.fmspc);
     assert_eq!(s.tee_type, rc.tee_type);
     assert_eq!(s.platform.pck.sgx_type, rc.platform.pck.sgx_type);
-    assert_eq!(s.platform.pck.platform_instance_id, rc.platform.pck.platform_instance_id);
-    assert_eq!(s.platform.pck.dynamic_platform, rc.platform.pck.dynamic_platform);
+    assert_eq!(
+        s.platform.pck.platform_instance_id,
+        rc.platform.pck.platform_instance_id
+    );
+    assert_eq!(
+        s.platform.pck.dynamic_platform,
+        rc.platform.pck.dynamic_platform
+    );
     assert_eq!(s.platform.pck.cached_keys, rc.platform.pck.cached_keys);
     assert_eq!(s.platform.pck.smt_enabled, rc.platform.pck.smt_enabled);
 }
@@ -273,25 +284,66 @@ fn print_supplemental_data_comparison() {
         serde_json::from_slice(include_bytes!("../sample/sgx_quote_collateral.json")).unwrap();
     let now = now_from_collateral(&collateral);
 
-    let result = verifier.verify(&raw_quote, collateral.clone(), now).unwrap();
+    let result = verifier
+        .verify(&raw_quote, collateral.clone(), now)
+        .unwrap();
     let s = &result.supplemental().unwrap();
 
     println!("{:<40} {:?}", "tcb.status", s.tcb.status);
     println!("{:<40} {:?}", "tcb.advisory_ids", s.tcb.advisory_ids);
-    println!("{:<40} {} ({})", "tcb.earliest_expiration", s.tcb.earliest_expiration, ts_to_utc(s.tcb.earliest_expiration));
+    println!(
+        "{:<40} {} ({})",
+        "tcb.earliest_expiration",
+        s.earliest_expiration_date,
+        ts_to_utc(s.earliest_expiration_date)
+    );
     println!("{:<40} {}", "tcb.eval_data_number", s.tcb.eval_data_number);
-    println!("{:<40} {} ({})", "platform.tcb_date_tag", s.platform.tcb_date_tag, ts_to_utc(s.platform.tcb_date_tag));
+    println!(
+        "{:<40} {} ({})",
+        "platform.tcb_date_tag",
+        s.platform.tcb_date_tag,
+        ts_to_utc(s.platform.tcb_date_tag)
+    );
     println!("{:<40} {}", "platform.pck_crl_num", s.platform.pck_crl_num);
-    println!("{:<40} {}", "platform.root_ca_crl_num", s.platform.root_ca_crl_num);
-    println!("{:<40} {}...", "platform.root_key_id", hex::encode(&s.platform.root_key_id[..24]));
-    println!("{:<40} {}", "platform.pck.fmspc", hex::encode(s.platform.pck.fmspc));
-    println!("{:<40} {}", "platform.pck.sgx_type", s.platform.pck.sgx_type);
-    println!("{:<40} {:?}", "platform.pck.dynamic_platform", s.platform.pck.dynamic_platform);
-    println!("{:<40} {:?}", "platform.pck.cached_keys", s.platform.pck.cached_keys);
-    println!("{:<40} {:?}", "platform.pck.smt_enabled", s.platform.pck.smt_enabled);
+    println!(
+        "{:<40} {}",
+        "platform.root_ca_crl_num", s.platform.root_ca_crl_num
+    );
+    println!(
+        "{:<40} {}...",
+        "platform.root_key_id",
+        hex::encode(&s.platform.root_key_id[..24])
+    );
+    println!(
+        "{:<40} {}",
+        "platform.pck.fmspc",
+        hex::encode(s.platform.pck.fmspc)
+    );
+    println!(
+        "{:<40} {}",
+        "platform.pck.sgx_type", s.platform.pck.sgx_type
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.dynamic_platform", s.platform.pck.dynamic_platform
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.cached_keys", s.platform.pck.cached_keys
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.smt_enabled", s.platform.pck.smt_enabled
+    );
     println!("{:<40} 0x{:08X}", "tee_type", s.tee_type);
-    println!("{:<40} {:?}", "platform.tcb_level.tcb_status", s.platform.tcb_level.tcb_status);
-    println!("{:<40} {:?}", "qe.tcb_level.tcb_status", s.qe.tcb_level.tcb_status);
+    println!(
+        "{:<40} {:?}",
+        "platform.tcb_level.tcb_status", s.platform.tcb_level.tcb_status
+    );
+    println!(
+        "{:<40} {:?}",
+        "qe.tcb_level.tcb_status", s.qe.tcb_level.tcb_status
+    );
 
     // ═══════════════════════════════════════════════════════════════════
     // TDX Quote
@@ -305,25 +357,66 @@ fn print_supplemental_data_comparison() {
         serde_json::from_slice(include_bytes!("../sample/tdx_quote_collateral.json")).unwrap();
     let now_tdx = now_from_collateral(&collateral_tdx);
 
-    let result_tdx = verifier.verify(raw_quote_tdx, collateral_tdx.clone(), now_tdx).unwrap();
+    let result_tdx = verifier
+        .verify(raw_quote_tdx, collateral_tdx.clone(), now_tdx)
+        .unwrap();
     let t = &result_tdx.supplemental().unwrap();
 
     println!("{:<40} {:?}", "tcb.status", t.tcb.status);
     println!("{:<40} {:?}", "tcb.advisory_ids", t.tcb.advisory_ids);
-    println!("{:<40} {} ({})", "tcb.earliest_expiration", t.tcb.earliest_expiration, ts_to_utc(t.tcb.earliest_expiration));
+    println!(
+        "{:<40} {} ({})",
+        "tcb.earliest_expiration",
+        t.earliest_expiration_date,
+        ts_to_utc(t.earliest_expiration_date)
+    );
     println!("{:<40} {}", "tcb.eval_data_number", t.tcb.eval_data_number);
-    println!("{:<40} {} ({})", "platform.tcb_date_tag", t.platform.tcb_date_tag, ts_to_utc(t.platform.tcb_date_tag));
+    println!(
+        "{:<40} {} ({})",
+        "platform.tcb_date_tag",
+        t.platform.tcb_date_tag,
+        ts_to_utc(t.platform.tcb_date_tag)
+    );
     println!("{:<40} {}", "platform.pck_crl_num", t.platform.pck_crl_num);
-    println!("{:<40} {}", "platform.root_ca_crl_num", t.platform.root_ca_crl_num);
-    println!("{:<40} {}...", "platform.root_key_id", hex::encode(&t.platform.root_key_id[..24]));
-    println!("{:<40} {}", "platform.pck.fmspc", hex::encode(t.platform.pck.fmspc));
-    println!("{:<40} {}", "platform.pck.sgx_type", t.platform.pck.sgx_type);
-    println!("{:<40} {:?}", "platform.pck.dynamic_platform", t.platform.pck.dynamic_platform);
-    println!("{:<40} {:?}", "platform.pck.cached_keys", t.platform.pck.cached_keys);
-    println!("{:<40} {:?}", "platform.pck.smt_enabled", t.platform.pck.smt_enabled);
+    println!(
+        "{:<40} {}",
+        "platform.root_ca_crl_num", t.platform.root_ca_crl_num
+    );
+    println!(
+        "{:<40} {}...",
+        "platform.root_key_id",
+        hex::encode(&t.platform.root_key_id[..24])
+    );
+    println!(
+        "{:<40} {}",
+        "platform.pck.fmspc",
+        hex::encode(t.platform.pck.fmspc)
+    );
+    println!(
+        "{:<40} {}",
+        "platform.pck.sgx_type", t.platform.pck.sgx_type
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.dynamic_platform", t.platform.pck.dynamic_platform
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.cached_keys", t.platform.pck.cached_keys
+    );
+    println!(
+        "{:<40} {:?}",
+        "platform.pck.smt_enabled", t.platform.pck.smt_enabled
+    );
     println!("{:<40} 0x{:08X}", "tee_type", t.tee_type);
-    println!("{:<40} {:?}", "platform.tcb_level.tcb_status", t.platform.tcb_level.tcb_status);
-    println!("{:<40} {:?}", "qe.tcb_level.tcb_status", t.qe.tcb_level.tcb_status);
+    println!(
+        "{:<40} {:?}",
+        "platform.tcb_level.tcb_status", t.platform.tcb_level.tcb_status
+    );
+    println!(
+        "{:<40} {:?}",
+        "qe.tcb_level.tcb_status", t.qe.tcb_level.tcb_status
+    );
 }
 
 /// Cross-validate TDX supplemental data fields.
@@ -346,7 +439,7 @@ fn tdx_supplemental_data_cross_validation() {
     assert!(s.tcb.advisory_ids.is_empty());
 
     // Fields should be populated (computed lazily in supplemental())
-    assert!(s.tcb.earliest_expiration > 0);
+    assert!(s.earliest_expiration_date > 0);
     assert!(s.platform.tcb_date_tag > 0);
 
     // root_key_id should match SHA-384 of Intel root CA raw public key bytes
@@ -365,11 +458,13 @@ fn tdx_supplemental_data_cross_validation() {
 
     // Verify ring == rustcrypto for all fields
     let rc_verifier = QuoteVerifier::new_prod(dcap_qvl::verify::rustcrypto::backend());
-    let rc_result = rc_verifier.verify(raw_quote, collateral.clone(), now).unwrap();
+    let rc_result = rc_verifier
+        .verify(raw_quote, collateral.clone(), now)
+        .unwrap();
     let rc = &rc_result.supplemental().unwrap();
     assert_eq!(s.tee_type, rc.tee_type);
     assert_eq!(s.tcb.status, rc.tcb.status);
     assert_eq!(s.platform.root_key_id, rc.platform.root_key_id);
-    assert_eq!(s.tcb.earliest_expiration, rc.tcb.earliest_expiration);
+    assert_eq!(s.earliest_expiration_date, rc.earliest_expiration_date);
     assert_eq!(s.tcb.eval_data_number, rc.tcb.eval_data_number);
 }

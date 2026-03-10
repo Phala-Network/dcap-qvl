@@ -3,14 +3,14 @@ use anyhow::Result;
 use {
     crate::constants::*,
     crate::qe_identity::QeTcbLevel,
-    crate::quote::EnclaveReport,
+    crate::quote::{EnclaveReport, Report},
     crate::tcb_info::{TcbLevel, TcbStatus},
     alloc::string::String,
     alloc::vec::Vec,
 };
 
 mod simple;
-pub use simple::SimplePolicy;
+pub use simple::{SimplePolicy, SimplePolicyConfig};
 
 #[cfg(feature = "rego")]
 pub(crate) mod rego;
@@ -76,6 +76,9 @@ impl From<Option<bool>> for PckCertFlag {
 /// - [`tcb`](Self::tcb): Merged TCB verdict
 /// - [`platform`](Self::platform): Platform-level details from PCK certificate and TCB matching
 /// - [`qe`](Self::qe): QE (Quoting Enclave) verification results
+///
+/// Also includes the collateral time window (8 sources: TCBInfo, QEIdentity, 2 CRLs,
+/// 4 certificate chains) and the quote report body.
 pub struct SupplementalData {
     /// TEE type: `0x00000000` for SGX, `0x00000081` for TDX.
     pub tee_type: u32,
@@ -85,6 +88,14 @@ pub struct SupplementalData {
     pub platform: PlatformInfo,
     /// QE verification details.
     pub qe: QeInfo,
+    /// `min(issueDate / thisUpdate / notBefore)` across all 8 collateral sources.
+    pub earliest_issue_date: u64,
+    /// `max(issueDate / thisUpdate / notBefore)` across all 8 collateral sources.
+    pub latest_issue_date: u64,
+    /// `min(nextUpdate / notAfter)` across all 8 collateral sources (the "weakest link").
+    pub earliest_expiration_date: u64,
+    /// Quote report body (SGX enclave report, TDX TD10/TD15).
+    pub report: Report,
 }
 
 /// Merged TCB verdict from platform and QE status convergence.
@@ -98,10 +109,6 @@ pub struct TcbVerdict {
     pub advisory_ids: Vec<String>,
     /// Lower of TCBInfo and QEIdentity `tcbEvaluationDataNumber` values.
     pub eval_data_number: u32,
-    /// Earliest expiration from TCBInfo nextUpdate, QEIdentity nextUpdate,
-    /// and CRL nextUpdate (4 sources). Does **not** include certificate chain
-    /// notAfter — use full time window via Rego for that.
-    pub earliest_expiration: u64,
 }
 
 /// Platform-level verification results.

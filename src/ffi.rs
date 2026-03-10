@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::intel;
 use crate::quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15};
+use crate::tcb_info::TcbStatusWithAdvisory;
 use crate::verify::{self, VerifiedReport};
 use crate::QuoteCollateralV3;
 
@@ -196,19 +197,25 @@ struct FfiVerifiedReport {
     report: FfiReport,
     #[serde(with = "serde_bytes")]
     ppid: Vec<u8>,
-    qe_status: crate::tcb_info::TcbStatusWithAdvisory,
-    platform_status: crate::tcb_info::TcbStatusWithAdvisory,
+    qe_status: TcbStatusWithAdvisory,
+    platform_status: TcbStatusWithAdvisory,
 }
 
 impl FfiVerifiedReport {
     fn from(vr: VerifiedReport) -> Self {
+        let qe_status =
+            TcbStatusWithAdvisory::new(vr.qe_tcb_level.tcb_status, vr.qe_tcb_level.advisory_ids);
+        let platform_status = TcbStatusWithAdvisory::new(
+            vr.platform_tcb_level.tcb_status,
+            vr.platform_tcb_level.advisory_ids,
+        );
         Self {
             status: vr.status,
             advisory_ids: vr.advisory_ids,
             report: FfiReport::from_report(&vr.report),
             ppid: vr.ppid,
-            qe_status: vr.qe_status,
-            platform_status: vr.platform_status,
+            qe_status,
+            platform_status,
         }
     }
 }
@@ -379,8 +386,9 @@ pub unsafe extern "C" fn dcap_verify_cb(
         }
     };
 
-    let report = match verify::verify(quote_slice, &collateral, now_secs) {
-        Ok(r) => r,
+    let verifier = verify::QuoteVerifier::new_prod(verify::default_crypto::backend());
+    let report = match verifier.verify(quote_slice, collateral, now_secs) {
+        Ok(qvr) => qvr.into_report_unchecked(),
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
@@ -421,9 +429,8 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca_cb(
     };
 
     let verifier = verify::QuoteVerifier::new(root_ca.to_vec(), verify::default_crypto::backend());
-
-    let report = match verifier.verify(quote_slice, &collateral, now_secs) {
-        Ok(r) => r,
+    let report = match verifier.verify(quote_slice, collateral, now_secs) {
+        Ok(qvr) => qvr.into_report_unchecked(),
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 

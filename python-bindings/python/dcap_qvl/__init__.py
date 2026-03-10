@@ -4,12 +4,18 @@ DCAP Quote Verification Library
 This package provides Python bindings for the DCAP (Data Center Attestation Primitives)
 quote verification library implemented in Rust.
 
+Two-phase verification API (matches Rust):
+1. verify(quote, collateral, now_secs) -> QuoteVerificationResult  (crypto only)
+2. result.validate(policy) -> VerifiedReport  (policy checks)
+
 Main classes:
 - QuoteCollateralV3: Represents quote collateral data
-- VerifiedReport: Contains verification results
+- QuoteVerificationResult: Intermediate result from crypto verification
+- VerifiedReport: Contains verification results after policy validation
+- SimplePolicy: Verification policy with builder pattern
 
 Main functions:
-- verify: Verify a quote with collateral data
+- verify: Verify a quote with collateral data (returns QuoteVerificationResult)
 - get_collateral: Get collateral from PCCS URL
 - get_collateral_from_pcs: Get collateral from Intel PCS
 - get_collateral_and_verify: Get collateral and verify quote
@@ -22,11 +28,13 @@ from typing import Optional
 from ._dcap_qvl import (
     PyQuoteCollateralV3 as QuoteCollateralV3,
     PyVerifiedReport as VerifiedReport,
+    PyQuoteVerificationResult as QuoteVerificationResult,
     PyQuoteHeader as QuoteHeader,
     PyTdReport10 as TdReport10,
     PyTdReport15 as TdReport15,
     PySgxEnclaveReport as SgxEnclaveReport,
     PyPckExtension as PckExtension,
+    PySimplePolicy as SimplePolicy,
     PyQuote as Quote,
     py_verify as verify,
     py_verify_with_root_ca as verify_with_root_ca,
@@ -92,16 +100,20 @@ async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
 
 
 async def get_collateral_and_verify(
-    raw_quote: bytes, pccs_url: Optional[str] = None
-) -> VerifiedReport:
-    """Get collateral and verify the quote.
+    raw_quote: bytes,
+    pccs_url: Optional[str] = None,
+) -> QuoteVerificationResult:
+    """Get collateral and verify the quote (crypto only).
+
+    Returns a QuoteVerificationResult that must be validated with a policy
+    via .validate(policy) to get a VerifiedReport.
 
     Args:
         raw_quote: Raw quote bytes
         pccs_url: Optional PCCS URL (defaults to Phala PCCS)
 
     Returns:
-        VerifiedReport: Verification result
+        QuoteVerificationResult: Use .validate(policy) to get VerifiedReport
 
     Raises:
         ValueError: If quote is invalid or verification fails
@@ -112,21 +124,21 @@ async def get_collateral_and_verify(
     # Get collateral
     collateral = await get_collateral(url, raw_quote)
 
-    # Get current time
+    # Verify quote (crypto only)
     now_secs = int(time.time())
-
-    # Verify quote
     return verify(raw_quote, collateral, now_secs)
 
 
 __all__ = [
     "QuoteCollateralV3",
+    "QuoteVerificationResult",
     "VerifiedReport",
     "QuoteHeader",
     "TdReport10",
     "TdReport15",
     "SgxEnclaveReport",
     "PckExtension",
+    "SimplePolicy",
     "AttestationKeyType",
     "TeeType",
     "Quote",

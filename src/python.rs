@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -7,7 +9,9 @@ use serde_json;
 use crate::{
     collateral::get_collateral_for_fmspc,
     intel,
+    policy::SimplePolicy,
     quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
+    tcb_info::TcbStatus,
     verify::{QuoteVerifier, VerifiedReport},
     QuoteCollateralV3,
 };
@@ -427,6 +431,110 @@ impl PyPckExtension {
     }
 }
 
+/// Verification policy with builder pattern.
+///
+/// Mirrors the Rust `SimplePolicy` API. Use `SimplePolicy.strict(now_secs)` to create
+/// a strict policy (only UpToDate), then chain builder methods to relax constraints.
+#[pyclass]
+#[derive(Clone)]
+pub struct PySimplePolicy {
+    inner: SimplePolicy,
+}
+
+fn parse_tcb_status(s: &str) -> PyResult<TcbStatus> {
+    match s {
+        "UpToDate" => Ok(TcbStatus::UpToDate),
+        "SWHardeningNeeded" => Ok(TcbStatus::SWHardeningNeeded),
+        "ConfigurationNeeded" => Ok(TcbStatus::ConfigurationNeeded),
+        "ConfigurationAndSWHardeningNeeded" => Ok(TcbStatus::ConfigurationAndSWHardeningNeeded),
+        "OutOfDate" => Ok(TcbStatus::OutOfDate),
+        "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
+        "Revoked" => Ok(TcbStatus::Revoked),
+        _ => Err(PyValueError::new_err(format!("Unknown TCB status: {s}"))),
+    }
+}
+
+#[pymethods]
+impl PySimplePolicy {
+    /// Create a strict policy: only `UpToDate` status, no grace, no advisory tolerance.
+    #[staticmethod]
+    fn strict(now_secs: u64) -> Self {
+        Self {
+            inner: SimplePolicy::strict(now_secs),
+        }
+    }
+
+    /// Allow an additional TCB status (e.g. "SWHardeningNeeded").
+    fn allow_status(&self, status: &str) -> PyResult<Self> {
+        let s = parse_tcb_status(status)?;
+        Ok(Self {
+            inner: self.inner.clone().allow_status(s),
+        })
+    }
+
+    /// Accept a specific advisory ID (e.g. "INTEL-SA-00334").
+    fn accept_advisory(&self, advisory_id: &str) -> Self {
+        Self {
+            inner: self.inner.clone().accept_advisory(advisory_id),
+        }
+    }
+
+    /// Set collateral grace period in seconds.
+    fn collateral_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .collateral_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set platform grace period in seconds.
+    fn platform_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .platform_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set minimum TCB evaluation data number.
+    fn min_tcb_eval_data_number(&self, min: u32) -> Self {
+        Self {
+            inner: self.inner.clone().min_tcb_eval_data_number(min),
+        }
+    }
+
+    /// Set whether dynamic platforms are allowed.
+    fn allow_dynamic_platform(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_dynamic_platform(allow),
+        }
+    }
+
+    /// Set whether cached keys are allowed.
+    fn allow_cached_keys(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_cached_keys(allow),
+        }
+    }
+
+    /// Set whether SMT (hyperthreading) is allowed.
+    fn allow_smt(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_smt(allow),
+        }
+    }
+
+    /// Set accepted SGX types (e.g. [0, 1, 2]).
+    fn accepted_sgx_types(&self, types: Vec<u8>) -> Self {
+        Self {
+            inner: self.inner.clone().accepted_sgx_types(&types),
+        }
+    }
+}
+
 #[pyclass]
 pub struct PyQuote {
     inner: Quote,
@@ -537,20 +645,57 @@ impl PyQuote {
     }
 }
 
+/// Result of cryptographic quote verification (phase 1).
+///
+/// Use `validate(policy)` to apply a policy and get a `VerifiedReport`.
+/// Use `into_report_unchecked()` to skip policy validation (dangerous).
+#[pyclass]
+pub struct PyQuoteVerificationResult {
+    inner: Option<crate::verify::QuoteVerificationResult>,
+}
+
+#[pymethods]
+impl PyQuoteVerificationResult {
+    /// Validate against a policy, returning a VerifiedReport. Consumes the result.
+    fn validate(&mut self, policy: &PySimplePolicy) -> PyResult<PyVerifiedReport> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;
+        let report = result
+            .validate(&policy.inner)
+            .map_err(|e| PyValueError::new_err(format!("Policy validation failed: {e:?}")))?;
+        Ok(PyVerifiedReport { inner: report })
+    }
+
+    /// Get VerifiedReport without policy validation. Consumes the result.
+    ///
+    /// WARNING: Skips all policy checks. Use only when you handle validation externally.
+    fn into_report_unchecked(&mut self) -> PyResult<PyVerifiedReport> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;
+        Ok(PyVerifiedReport {
+            inner: result.into_report_unchecked(),
+        })
+    }
+}
+
 #[pyfunction]
 fn py_verify(
     raw_quote: &Bound<'_, PyBytes>,
     collateral: &PyQuoteCollateralV3,
     now_secs: u64,
-) -> PyResult<PyVerifiedReport> {
+) -> PyResult<PyQuoteVerificationResult> {
     let quote_bytes = raw_quote.as_bytes();
     let verifier = QuoteVerifier::new_prod(crate::verify::ring::backend());
-    match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
-        Ok(supplemental) => Ok(PyVerifiedReport {
-            inner: supplemental.into_report_unchecked(),
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    let result = verifier
+        .verify(quote_bytes, collateral.inner.clone(), now_secs)
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))?;
+    Ok(PyQuoteVerificationResult {
+        inner: Some(result),
+    })
 }
 
 #[pyfunction]
@@ -559,17 +704,17 @@ fn py_verify_with_root_ca(
     collateral: &PyQuoteCollateralV3,
     root_ca_der: &Bound<'_, PyBytes>,
     now_secs: u64,
-) -> PyResult<PyVerifiedReport> {
+) -> PyResult<PyQuoteVerificationResult> {
     let quote_bytes = raw_quote.as_bytes();
     let root_ca = root_ca_der.as_bytes();
 
     let verifier = QuoteVerifier::new(root_ca.to_vec(), crate::verify::ring::backend());
-    match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
-        Ok(supplemental) => Ok(PyVerifiedReport {
-            inner: supplemental.into_report_unchecked(),
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    let result = verifier
+        .verify(quote_bytes, collateral.inner.clone(), now_secs)
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))?;
+    Ok(PyQuoteVerificationResult {
+        inner: Some(result),
+    })
 }
 
 #[pyfunction]
@@ -616,6 +761,8 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTdReport15>()?;
     m.add_class::<PySgxEnclaveReport>()?;
     m.add_class::<PyPckExtension>()?;
+    m.add_class::<PySimplePolicy>()?;
+    m.add_class::<PyQuoteVerificationResult>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;

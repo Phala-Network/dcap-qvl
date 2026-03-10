@@ -94,20 +94,20 @@ mod utils;
 pub use constants::{CpuSvn, Fmspc, MrEnclave, MrSigner, Svn};
 
 // Re-export commonly used types
+pub use policy::{
+    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SimplePolicy, SimplePolicyConfig,
+    SupplementalData, TcbVerdict,
+};
 pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
 pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
-pub use policy::{
-    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SimplePolicy, SupplementalData,
-    TcbVerdict,
-};
 pub use verify::QuoteVerificationResult;
 
 #[cfg(feature = "rego")]
 pub use policy::{RegoPolicy, RegoPolicySet};
 
+pub mod policy;
 pub mod quote;
 pub mod verify;
-pub mod policy;
 
 #[cfg(feature = "python")]
 pub mod python;

@@ -7,7 +7,9 @@ use scale::Decode;
 use {
     crate::constants::*,
     crate::intel,
-    crate::policy::{PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SupplementalData, TcbVerdict},
+    crate::policy::{
+        PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SupplementalData, TcbVerdict,
+    },
     crate::qe_identity::{QeIdentity, QeTcbLevel},
     crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory},
     alloc::string::String,
@@ -122,21 +124,27 @@ pub struct QuoteVerificationResult {
 impl QuoteVerificationResult {
     /// Build the full [`SupplementalData`] from verification intermediates.
     ///
-    /// This is lazy — the expensive parts (root_key_id SHA-384, CRL number extraction,
-    /// earliest_expiration from 4 sources, tcb_date_tag parsing) are only done here.
+    /// Computes the collateral time window from all 8 sources (TCBInfo, QEIdentity,
+    /// 2 CRLs, 4 certificate chains), root_key_id SHA-384, CRL numbers, and tcb_date_tag.
     pub fn supplemental(&self) -> Result<SupplementalData> {
-        let earliest_expiration = self.compute_earliest_expiration()?;
-        Ok(self.build_supplemental(earliest_expiration))
-    }
+        // Parse collateral JSON for time window computation
+        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
+            .context("Failed to parse TcbInfo for supplemental")?;
+        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
+            .context("Failed to parse QeIdentity for supplemental")?;
 
-    /// Build `SupplementalData` with a pre-computed earliest_expiration value.
-    ///
-    /// Avoids redundant JSON/CRL parsing when the caller already has the value
-    /// (e.g., from `compute_time_window()` which produces a superset).
-    fn build_supplemental(&self, earliest_expiration: u64) -> SupplementalData {
+        // Extract PCK cert chain from collateral for time window
+        let pck_certs = if let Some(pem_chain) = &self.collateral.pck_certificate_chain {
+            extract_certs(pem_chain.as_bytes()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let (earliest_issue_date, latest_issue_date, earliest_expiration_date) =
+            compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
+
         // root_key_id: SHA-384 of root CA's raw public key bytes
         let root_key_id = {
-            // root_ca_der was already validated during verify(), so unwrap is safe
             let root_cert: x509_cert::Certificate =
                 der::Decode::from_der(&self.root_ca_der).expect("root CA already validated");
             let raw_key = root_cert
@@ -148,7 +156,8 @@ impl QuoteVerificationResult {
         };
 
         // CRL numbers
-        let root_ca_crl_num = crate::utils::extract_crl_number(&self.collateral.root_ca_crl).unwrap_or(0);
+        let root_ca_crl_num =
+            crate::utils::extract_crl_number(&self.collateral.root_ca_crl).unwrap_or(0);
         let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl).unwrap_or(0);
 
         // tcb_date_tag
@@ -157,13 +166,12 @@ impl QuoteVerificationResult {
             .map(|dt| dt.timestamp() as u64)
             .unwrap_or(0);
 
-        SupplementalData {
+        Ok(SupplementalData {
             tee_type: self.tee_type,
             tcb: TcbVerdict {
                 status: self.tcb_status.clone(),
                 advisory_ids: self.advisory_ids.clone(),
                 eval_data_number: self.tcb_eval_data_number,
-                earliest_expiration,
             },
             platform: PlatformInfo {
                 tcb_level: self.platform_tcb_level.clone(),
@@ -190,14 +198,18 @@ impl QuoteVerificationResult {
                 report: self.qe_report.clone(),
                 tcb_eval_data_number: self.qe_tcb_eval_data_number,
             },
-        }
+            report: self.report.clone(),
+            earliest_issue_date,
+            latest_issue_date,
+            earliest_expiration_date,
+        })
     }
 
     /// Validate against a policy, consuming self into [`VerifiedReport`] on success.
     pub fn validate<P: Policy + ?Sized>(self, policy: &P) -> Result<VerifiedReport> {
         let supplemental = self.supplemental()?;
         policy.validate(&supplemental)?;
-        Ok(self.into_verified_report())
+        Ok(self.into_report_unchecked())
     }
 
     /// Convert directly into [`VerifiedReport`] **without applying any policy**.
@@ -207,52 +219,6 @@ impl QuoteVerificationResult {
     /// freshness, platform flags). Use only when you handle validation
     /// externally or intentionally accept any verification result.
     pub fn into_report_unchecked(self) -> VerifiedReport {
-        self.into_verified_report()
-    }
-
-    /// Compute earliest_expiration from 4 lightweight sources:
-    /// TCBInfo nextUpdate, QeIdentity nextUpdate, Root CA CRL nextUpdate, PCK CRL nextUpdate.
-    ///
-    /// Omits certificate chain `notAfter` dates (which the full 8-source Rego path includes),
-    /// but this is safe: certificate validity is already enforced during `verify()`, and
-    /// cert `notAfter` (5–20+ years) never determines the `min()` over CRL/TcbInfo `nextUpdate`
-    /// (~30 days) in practice.
-    fn compute_earliest_expiration(&self) -> Result<u64> {
-        fn parse_rfc3339_ts(s: &str) -> Option<u64> {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .ok()
-                .map(|dt| dt.timestamp() as u64)
-        }
-
-        fn parse_crl_next_update(crl_der: &[u8]) -> Option<u64> {
-            use der::Decode as _;
-            let crl = x509_cert::crl::CertificateList::from_der(crl_der).ok()?;
-            crl.tbs_cert_list
-                .next_update
-                .map(|t| t.to_unix_duration().as_secs())
-        }
-
-        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
-            .context("Failed to parse TcbInfo for earliest_expiration")?;
-        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
-            .context("Failed to parse QeIdentity for earliest_expiration")?;
-
-        let tcb_next =
-            parse_rfc3339_ts(&tcb_info.next_update).context("TCBInfo nextUpdate parse")?;
-        let qe_next =
-            parse_rfc3339_ts(&qe_identity.next_update).context("QEIdentity nextUpdate parse")?;
-
-        let mut earliest = tcb_next.min(qe_next);
-        if let Some(next) = parse_crl_next_update(&self.collateral.root_ca_crl) {
-            earliest = earliest.min(next);
-        }
-        if let Some(next) = parse_crl_next_update(&self.collateral.pck_crl) {
-            earliest = earliest.min(next);
-        }
-        Ok(earliest)
-    }
-
-    fn into_verified_report(self) -> VerifiedReport {
         VerifiedReport {
             status: self.tcb_status.to_string(),
             advisory_ids: self.advisory_ids,
@@ -261,108 +227,6 @@ impl QuoteVerificationResult {
             platform_tcb_level: self.platform_tcb_level,
             qe_tcb_level: self.qe_tcb_level,
         }
-    }
-}
-
-#[cfg(feature = "rego")]
-impl QuoteVerificationResult {
-    /// Compute the full collateral time window (expensive: ~14 DER parses).
-    ///
-    /// Only needed for Rego evaluation. Called lazily, not during `verify()`.
-    fn compute_time_window(&self) -> Result<crate::policy::rego::CollateralTimeWindow> {
-        // Re-extract PCK cert chain from owned collateral
-        let pck_certs = if let Some(pem_chain) = &self.collateral.pck_certificate_chain {
-            extract_certs(pem_chain.as_bytes()).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
-        // We need TcbInfo and QeIdentity dates — re-parse from JSON in collateral.
-        // This is acceptable since Rego is already expensive.
-        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
-            .context("Failed to re-parse TcbInfo for time window")?;
-        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
-            .context("Failed to re-parse QeIdentity for time window")?;
-
-        let (earliest_issue, latest_issue, earliest_expiration) =
-            compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
-
-        Ok(crate::policy::rego::CollateralTimeWindow {
-            earliest_issue_date: earliest_issue,
-            latest_issue_date: latest_issue,
-            earliest_expiration_date: earliest_expiration,
-        })
-    }
-
-    /// Generate Intel-format `qvl_result` array for Rego appraisal.
-    ///
-    /// SGX quotes produce 2 entries (platform + enclave).
-    /// TDX quotes produce 3 entries (platform + QE identity + TD).
-    pub(crate) fn to_rego_qvl_result(
-        &self,
-        supplemental: &SupplementalData,
-        tw: &crate::policy::rego::CollateralTimeWindow,
-    ) -> Vec<serde_json::Value> {
-        use crate::policy::rego::{
-            build_platform_measurement, build_qe_measurement, platform_class_id, tenant_class_id,
-            tenant_measurement,
-        };
-
-        let mut result = Vec::new();
-
-        // 1. Platform TCB measurement
-        let platform_cid = platform_class_id(&self.report, supplemental.tee_type);
-        result.push(serde_json::json!({
-            "environment": { "class_id": platform_cid },
-            "measurement": build_platform_measurement(supplemental, tw),
-        }));
-
-        // 2. QE Identity measurement (TDX only)
-        if matches!(self.report, Report::TD10(_) | Report::TD15(_)) {
-            result.push(serde_json::json!({
-                "environment": { "class_id": "3769258c-75e6-4bc7-8d72-d2b0e224cad2" },
-                "measurement": build_qe_measurement(supplemental, tw),
-            }));
-        }
-
-        // 3. Tenant measurement (enclave or TD report)
-        let tenant_cid = tenant_class_id(&self.report);
-        let mut tenant_m = tenant_measurement(&self.report);
-        // For SGX enclave, add sgx_ce_attributes from the QE report
-        if let Report::SgxEnclave(_) = &self.report {
-            if let Some(obj) = tenant_m.as_object_mut() {
-                obj.insert(
-                    "sgx_ce_attributes".into(),
-                    serde_json::json!(hex::encode_upper(supplemental.qe.report.attributes)),
-                );
-            }
-        }
-        result.push(serde_json::json!({
-            "environment": { "class_id": tenant_cid },
-            "measurement": tenant_m,
-        }));
-
-        result
-    }
-
-    /// Validate against a [`RegoPolicy`] (single-measurement), consuming self on success.
-    pub fn validate_rego_single(
-        self,
-        policy: &crate::policy::RegoPolicy,
-    ) -> Result<VerifiedReport> {
-        let tw = self.compute_time_window()?;
-        let supplemental = self.build_supplemental(tw.earliest_expiration_date);
-        policy.eval(&supplemental, &tw)?;
-        Ok(self.into_verified_report())
-    }
-
-    /// Validate against a [`RegoPolicySet`] (multi-measurement), consuming self on success.
-    pub fn validate_rego(self, policies: &crate::policy::RegoPolicySet) -> Result<VerifiedReport> {
-        let tw = self.compute_time_window()?;
-        let supplemental = self.build_supplemental(tw.earliest_expiration_date);
-        let qvl_result = self.to_rego_qvl_result(&supplemental, &tw);
-        policies.eval_rego(qvl_result)?;
-        Ok(self.into_verified_report())
     }
 }
 
@@ -1212,7 +1076,6 @@ pub mod rustcrypto {
         }
     }
 }
-
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB

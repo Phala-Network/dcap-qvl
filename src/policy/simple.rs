@@ -1,6 +1,7 @@
 use core::time::Duration;
 
 use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
 
 use {
     super::{PckCertFlag, Policy, SupplementalData},
@@ -191,14 +192,13 @@ impl Policy for SimplePolicy {
 
         // 3. Collateral expiration: earliest_expiration + grace >= now
         if data
-            .tcb
-            .earliest_expiration
+            .earliest_expiration_date
             .saturating_add(self.collateral_grace_period)
             < self.now
         {
             bail!(
                 "Collateral expired: earliest_expiration {} + grace {} < now {}",
-                data.tcb.earliest_expiration,
+                data.earliest_expiration_date,
                 self.collateral_grace_period,
                 self.now
             );
@@ -287,6 +287,79 @@ impl Policy for SimplePolicy {
     }
 }
 
+/// JSON-serializable configuration for [`SimplePolicy`].
+///
+/// All fields default to the strict values (zero / empty / false).
+/// Pass as JSON from FFI (Go, Python) to configure verification policy.
+///
+/// ```json
+/// {
+///   "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
+///   "accepted_advisories": ["INTEL-SA-00334"],
+///   "collateral_grace_period_secs": 2592000,
+///   "allow_smt": true
+/// }
+/// ```
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SimplePolicyConfig {
+    #[serde(default)]
+    pub allowed_statuses: Vec<TcbStatus>,
+    #[serde(default)]
+    pub accepted_advisories: Vec<String>,
+    #[serde(default)]
+    pub collateral_grace_period_secs: u64,
+    #[serde(default)]
+    pub platform_grace_period_secs: u64,
+    #[serde(default)]
+    pub min_tcb_eval_data_number: u32,
+    #[serde(default)]
+    pub allow_dynamic_platform: bool,
+    #[serde(default)]
+    pub allow_cached_keys: bool,
+    #[serde(default)]
+    pub allow_smt: bool,
+    #[serde(default)]
+    pub accepted_sgx_types: Option<Vec<u8>>,
+}
+
+impl SimplePolicyConfig {
+    /// Build a [`SimplePolicy`] from this config + current timestamp.
+    ///
+    /// Default config (all fields zero/empty) produces `SimplePolicy::strict(now)`.
+    pub fn into_policy(self, now_secs: u64) -> SimplePolicy {
+        let mut policy = if self.allowed_statuses.is_empty() {
+            SimplePolicy::strict(now_secs)
+        } else {
+            let mut p = SimplePolicy::new_with_statuses(now_secs, 0);
+            for status in self.allowed_statuses {
+                p = p.allow_status(status);
+            }
+            p
+        };
+        for id in self.accepted_advisories {
+            policy = policy.accept_advisory(id);
+        }
+        if self.collateral_grace_period_secs > 0 {
+            policy = policy
+                .collateral_grace_period(Duration::from_secs(self.collateral_grace_period_secs));
+        }
+        if self.platform_grace_period_secs > 0 {
+            policy =
+                policy.platform_grace_period(Duration::from_secs(self.platform_grace_period_secs));
+        }
+        if self.min_tcb_eval_data_number > 0 {
+            policy = policy.min_tcb_eval_data_number(self.min_tcb_eval_data_number);
+        }
+        policy = policy.allow_dynamic_platform(self.allow_dynamic_platform);
+        policy = policy.allow_cached_keys(self.allow_cached_keys);
+        policy = policy.allow_smt(self.allow_smt);
+        if let Some(types) = self.accepted_sgx_types {
+            policy = policy.accepted_sgx_types(&types);
+        }
+        policy
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -304,7 +377,6 @@ mod tests {
                 status: tcb_status,
                 advisory_ids: vec![],
                 eval_data_number: 17,
-                earliest_expiration: 1_703_000_000, // ~2023-12-19
             },
             platform: PlatformInfo {
                 tcb_level: TcbLevel {
@@ -358,6 +430,23 @@ mod tests {
                 },
                 tcb_eval_data_number: 17,
             },
+            report: crate::quote::Report::SgxEnclave(crate::quote::EnclaveReport {
+                cpu_svn: [0u8; 16],
+                misc_select: 0,
+                reserved1: [0u8; 28],
+                attributes: [0u8; 16],
+                mr_enclave: [0u8; 32],
+                reserved2: [0u8; 32],
+                mr_signer: [0u8; 32],
+                reserved3: [0u8; 96],
+                isv_prod_id: 0,
+                isv_svn: 0,
+                reserved4: [0u8; 60],
+                report_data: [0u8; 64],
+            }),
+            earliest_issue_date: 1_690_000_000,
+            latest_issue_date: 1_690_100_000,
+            earliest_expiration_date: 1_703_000_000, // ~2023-12-19
         }
     }
 
