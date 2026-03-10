@@ -95,15 +95,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 ///
 /// [`SupplementalData`] is built lazily via [`supplemental()`](Self::supplemental) —
 /// the `verify()` call itself does the minimum work (crypto only).
-///
-/// ```ignore
-/// let result = verifier.verify(&quote, collateral, now)?;
-/// // Inspect supplemental data (lazy — built on first call)
-/// let sup = result.supplemental()?;
-/// println!("TCB status: {:?}", sup.tcb.status);
-/// // Or apply policy directly
-/// let report = result.validate(&SimplePolicy::strict(now))?;
-/// ```
 pub struct QuoteVerificationResult {
     report: Report,
     collateral: QuoteCollateralV3,

@@ -26,11 +26,12 @@ pub use rego::RegoPolicySet;
 /// that covers all common checks from Intel's Appraisal framework.
 ///
 /// For most use cases, [`SimplePolicy`] with its builder methods is sufficient:
-/// ```ignore
+/// ```no_run
 /// use dcap_qvl::SimplePolicy;
 /// use dcap_qvl::TcbStatus;
-///
 /// use core::time::Duration;
+///
+/// let now_unix_secs = 1_700_000_000u64;
 ///
 /// let policy = SimplePolicy::strict(now_unix_secs)
 ///     .allow_status(TcbStatus::SWHardeningNeeded)

@@ -19,9 +19,11 @@ use {
 /// Strict by default: only `UpToDate`, no grace period, no advisory tolerance.
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
 /// use dcap_qvl::SimplePolicy;
 /// use dcap_qvl::TcbStatus;
+///
+/// let now = 1_700_000_000u64; // unix timestamp
 ///
 /// // Strict: only UpToDate, collateral must not be expired
 /// let policy = SimplePolicy::strict(now);
