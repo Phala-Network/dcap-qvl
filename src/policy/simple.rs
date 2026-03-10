@@ -10,13 +10,11 @@ use {
     alloc::vec::Vec,
 };
 
-/// Status-based verification policy.
+/// Built-in verification policy with builder pattern.
 ///
-/// By default, the policy is strict: only `UpToDate` status is accepted.
-/// Comprehensive verification policy with builder pattern.
-///
-/// Covers all checks from Intel's Appraisal framework (`qal_script.rego`).
-/// Strict by default: only `UpToDate`, no grace period, no advisory tolerance.
+/// Covers the 9 checks from Intel's Appraisal framework (`qal_script.rego`)
+/// without requiring a Rego engine. Strict by default: only `UpToDate`,
+/// no grace period, no advisory tolerance.
 ///
 /// # Example
 /// ```no_run

@@ -145,9 +145,9 @@ let policy_json = r#"{
     }
 }"#;
 let policy = RegoPolicy::new(policy_json)?;
-let report = result.validate_rego(&policy)?;
+let report = result.validate(&policy)?;
 ```
 
-`RegoPolicySet` supports multiple JSON policies for multi-measurement appraisal (one per class_id), matching Intel QAL's full functionality.
+`RegoPolicySet` supports multiple JSON policies for multi-measurement appraisal (one per `class_id`), matching Intel QAL's full functionality. Both `RegoPolicy` and `RegoPolicySet` implement the `Policy` trait, so they work with the standard `validate()` method.
 
 See [Intel's DCAP Appraisal documentation](https://github.com/intel/SGXDataCenterAttestationPrimitives) for the Rego policy JSON format.
