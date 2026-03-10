@@ -547,7 +547,7 @@ fn py_verify(
     let verifier = QuoteVerifier::new_prod(crate::verify::ring::backend());
     match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
         Ok(supplemental) => Ok(PyVerifiedReport {
-            inner: supplemental.into_report(),
+            inner: supplemental.into_report_unchecked(),
         }),
         Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
     }
@@ -566,7 +566,7 @@ fn py_verify_with_root_ca(
     let verifier = QuoteVerifier::new(root_ca.to_vec(), crate::verify::ring::backend());
     match verifier.verify(quote_bytes, collateral.inner.clone(), now_secs) {
         Ok(supplemental) => Ok(PyVerifiedReport {
-            inner: supplemental.into_report(),
+            inner: supplemental.into_report_unchecked(),
         }),
         Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
     }

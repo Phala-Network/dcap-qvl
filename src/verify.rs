@@ -200,16 +200,23 @@ impl QuoteVerificationResult {
         Ok(self.into_verified_report())
     }
 
-    /// Convert directly into [`VerifiedReport`] without applying any policy.
+    /// Convert directly into [`VerifiedReport`] **without applying any policy**.
     ///
-    /// Use this only when you have already performed your own validation
-    /// or intentionally want to skip policy checks.
-    pub fn into_report(self) -> VerifiedReport {
+    /// # Warning
+    /// This skips all policy checks (TCB status, advisory IDs, collateral
+    /// freshness, platform flags). Use only when you handle validation
+    /// externally or intentionally accept any verification result.
+    pub fn into_report_unchecked(self) -> VerifiedReport {
         self.into_verified_report()
     }
 
     /// Compute earliest_expiration from 4 lightweight sources:
-    /// TCBInfo nextUpdate, QEIdentity nextUpdate, Root CA CRL nextUpdate, PCK CRL nextUpdate.
+    /// TCBInfo nextUpdate, QeIdentity nextUpdate, Root CA CRL nextUpdate, PCK CRL nextUpdate.
+    ///
+    /// Omits certificate chain `notAfter` dates (which the full 8-source Rego path includes),
+    /// but this is safe: certificate validity is already enforced during `verify()`, and
+    /// cert `notAfter` (5–20+ years) never determines the `min()` over CRL/TcbInfo `nextUpdate`
+    /// (~30 days) in practice.
     fn compute_earliest_expiration(&self) -> Result<u64> {
         fn parse_rfc3339_ts(s: &str) -> Option<u64> {
             chrono::DateTime::parse_from_rfc3339(s)

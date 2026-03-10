@@ -18,10 +18,10 @@ pub fn verify(
 
     let ring_result = ring_verifier
         .verify(raw_quote, collateral.clone(), now_secs)
-        .map(|s| s.into_report());
+        .map(|s| s.into_report_unchecked());
     let rustcrypto_result = rustcrypto_verifier
         .verify(raw_quote, collateral.clone(), now_secs)
-        .map(|s| s.into_report());
+        .map(|s| s.into_report_unchecked());
 
     assert_eq!(
         ring_result.map_err(|e| e.to_string()),
@@ -29,7 +29,7 @@ pub fn verify(
     );
     ring_verifier
         .verify(raw_quote, collateral.clone(), now_secs)
-        .map(|s| s.into_report())
+        .map(|s| s.into_report_unchecked())
 }
 
 fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {

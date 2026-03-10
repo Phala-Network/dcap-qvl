@@ -30,10 +30,22 @@ fn tcb_status_to_rego_array(status: TcbStatus) -> serde_json::Value {
     }
 }
 
-/// Full collateral time window (expensive to compute, only for Rego).
+/// Full collateral time window, aggregated from 8 sources (matching Intel QVL):
+/// TcbInfo, QeIdentity, Root CA CRL, PCK CRL, and 4 certificate chains.
+///
+/// `SimplePolicy` only needs `earliest_expiration_date` (computed separately
+/// from 4 lightweight sources without certificate chain parsing).
 pub(crate) struct CollateralTimeWindow {
+    /// `min(issueDate / thisUpdate / notBefore)` across all 8 sources.
+    /// Rego uses this as `collateral_earliest_issue_date` in measurements.
     pub earliest_issue_date: u64,
+    /// `max(issueDate / thisUpdate / notBefore)` across all 8 sources.
+    /// Rego uses this as `collateral_latest_issue_date` in measurements.
     pub latest_issue_date: u64,
+    /// `min(nextUpdate / notAfter)` across all 8 sources (the "weakest link").
+    /// Determines when the overall collateral expires. Rego uses this as
+    /// `collateral_earliest_expiration_date`; also reused by `build_supplemental()`
+    /// to avoid redundant parsing.
     pub earliest_expiration_date: u64,
 }
 

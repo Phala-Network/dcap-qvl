@@ -109,7 +109,7 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
         .verify(&quote, collateral, now)
         .context("Failed to verify quote")?;
     let report = result
-        .into_report();
+        .into_report_unchecked();
     println!(
         "{}",
         serde_json::to_string(&report).context("Failed to serialize report")?

@@ -73,8 +73,8 @@ use dcap_qvl::verify::rustcrypto::verify;
 
 ```rust
 use dcap_qvl::collateral::get_collateral;
-// Use explicit backend for predictable behavior
-use dcap_qvl::verify::ring::verify;
+use dcap_qvl::verify::{QuoteVerifier, ring};
+use dcap_qvl::SimplePolicy;
 use dcap_qvl::PHALA_PCCS_URL;
 
 #[tokio::main]
@@ -86,10 +86,38 @@ async fn main() {
     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let report = verify(&quote, &collateral, now).expect("failed to verify quote");
+
+    // Phase 1: Cryptographic verification
+    let verifier = QuoteVerifier::new_prod(ring::backend());
+    let result = verifier.verify(&quote, collateral, now).expect("verification failed");
+
+    // Phase 2: Policy validation
+    let report = result.validate(&SimplePolicy::strict(now)).expect("policy failed");
     println!("{:?}", report);
 }
 ```
+
+# Policy Validation
+
+After cryptographic verification, apply a **policy** to check TCB status, advisory IDs, collateral freshness, and platform flags.
+
+```rust
+use dcap_qvl::{SimplePolicy, TcbStatus};
+use core::time::Duration;
+
+// Strict: only UpToDate (default)
+let policy = SimplePolicy::strict(now);
+
+// Relaxed: accept OutOfDate + 30-day collateral grace
+let policy = SimplePolicy::strict(now)
+    .allow_status(TcbStatus::OutOfDate)
+    .collateral_grace_period(Duration::from_secs(30 * 24 * 3600))
+    .accept_advisory("INTEL-SA-00334");
+```
+
+For custom validation logic, implement the `Policy` trait directly.
+
+See [docs/policy.md](docs/policy.md) for the complete policy guide, including grace period semantics, platform flags, `RegoPolicy`, and custom `Policy` trait examples.
 
 <!-- cargo-rdme end -->
 
