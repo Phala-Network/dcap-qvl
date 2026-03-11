@@ -70,6 +70,7 @@ let policy = SimplePolicy::strict(now)
 | 2 | **Advisory ID whitelist** | Empty set (reject any) | `.accept_advisory(...)` |
 | 3 | **Collateral expiration** | `earliest_expiration >= now` | `.collateral_grace_period(Duration)` |
 | 4 | **Platform TCB freshness** | Only for OutOfDate statuses | `.platform_grace_period(Duration)` |
+| 4b | **QE TCB freshness** | Only for QE `OutOfDate` | `.qe_grace_period(Duration)` |
 | 5 | **Min TCB eval data number** | Skip | `.min_tcb_eval_data_number(n)` |
 | 6 | **Dynamic platform flag** | Reject `True` | `.allow_dynamic_platform(true)` |
 | 7 | **Cached keys flag** | Reject `True` | `.allow_cached_keys(true)` |
@@ -80,9 +81,11 @@ let policy = SimplePolicy::strict(now)
 
 **Collateral grace** (`collateral_grace_period`): Extends the collateral expiration window. If `earliest_expiration + grace >= now`, the quote is accepted. Does **not** skip advisory checks — stale collateral doesn't invalidate advisory data.
 
-**Platform grace** (`platform_grace_period`): For `OutOfDate` / `OutOfDateConfigurationNeeded` statuses, checks `tcb_date_tag + grace >= now`. For pure `OutOfDate`, advisory checks are skipped during the grace window (the advisories are inherent to the out-of-date level). For `OutOfDateConfigurationNeeded`, advisories are still checked (the Configuration advisories are unrelated to the OutOfDate aspect).
+**Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level. For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. For pure `OutOfDate`, only the **platform** advisories are skipped during the grace window. For `OutOfDateConfigurationNeeded`, platform advisories are still checked.
 
-The two grace periods are **mutually exclusive** — setting both to non-zero causes a validation error.
+**QE grace** (`qe_grace_period`): Applies only to the **QE** TCB level. For QE `OutOfDate`, checks `qe.tcb_level.tcb_date + grace >= now`. QE advisories are skipped only while this QE grace is active.
+
+`collateral_grace_period` is **mutually exclusive** with the TCB grace windows — setting it together with `platform_grace_period` or `qe_grace_period` causes a validation error.
 
 ### Platform Flags (Three-State)
 

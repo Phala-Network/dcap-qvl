@@ -41,6 +41,7 @@ pub struct SimplePolicy {
     now: u64,
     collateral_grace_period: u64,
     platform_grace_period: u64,
+    qe_grace_period: u64,
 
     // TCB evaluation
     min_tcb_eval_data_number: Option<u32>,
@@ -85,6 +86,7 @@ impl SimplePolicy {
             now,
             collateral_grace_period: 0,
             platform_grace_period: 0,
+            qe_grace_period: 0,
             min_tcb_eval_data_number: None,
             accepted_advisory_ids: Vec::new(),
             allow_dynamic_platform: false,
@@ -122,6 +124,13 @@ impl SimplePolicy {
     /// Must be zero if [`collateral_grace_period`](Self::collateral_grace_period) is non-zero.
     pub fn platform_grace_period(mut self, duration: Duration) -> Self {
         self.platform_grace_period = duration.as_secs();
+        self
+    }
+
+    /// Set QE grace period (default: zero). When QE TCB status is `OutOfDate`,
+    /// accepts quotes where `qe_tcb_level.tcb_date + grace_period >= now`.
+    pub fn qe_grace_period(mut self, duration: Duration) -> Self {
+        self.qe_grace_period = duration.as_secs();
         self
     }
 
@@ -177,6 +186,16 @@ impl SimplePolicy {
 
 impl Policy for SimplePolicy {
     fn validate(&self, data: &SupplementalData) -> Result<()> {
+        fn within_grace(date_tag: u64, grace_period: u64, now: u64) -> bool {
+            date_tag.saturating_add(grace_period) >= now
+        }
+
+        fn advisory_accepted(accepted_advisory_ids: &[String], id: &str) -> bool {
+            accepted_advisory_ids
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(id))
+        }
+
         // 1. TCB status whitelist
         if !self.is_status_acceptable(data.tcb.status) {
             bail!(
@@ -185,9 +204,13 @@ impl Policy for SimplePolicy {
             );
         }
 
-        // 3 & 4. Grace periods (mutually exclusive)
-        if self.collateral_grace_period > 0 && self.platform_grace_period > 0 {
-            bail!("collateral_grace_period and platform_grace_period are mutually exclusive");
+        // 3 & 4. Grace periods
+        if self.collateral_grace_period > 0
+            && (self.platform_grace_period > 0 || self.qe_grace_period > 0)
+        {
+            bail!(
+                "collateral_grace_period is mutually exclusive with platform_grace_period and qe_grace_period"
+            );
         }
 
         // 3. Collateral expiration: earliest_expiration + grace >= now
@@ -204,19 +227,18 @@ impl Policy for SimplePolicy {
             );
         }
 
-        // 4. Platform TCB freshness: tcb_date_tag + grace >= now
-        // Only checked when TCB status indicates the platform is out-of-date.
-        let is_out_of_date = matches!(
-            data.tcb.status,
+        // 4. Platform TCB freshness: platform tcb_date_tag + grace >= now.
+        let platform_is_out_of_date = matches!(
+            data.platform.tcb_level.tcb_status,
             TcbStatus::OutOfDate | TcbStatus::OutOfDateConfigurationNeeded
         );
-        if is_out_of_date
-            && data
-                .platform
-                .tcb_date_tag
-                .saturating_add(self.platform_grace_period)
-                < self.now
-        {
+        let platform_in_grace = platform_is_out_of_date
+            && within_grace(
+                data.platform.tcb_date_tag,
+                self.platform_grace_period,
+                self.now,
+            );
+        if platform_is_out_of_date && !platform_in_grace {
             bail!(
                 "Platform TCB too old: tcb_date_tag {} + grace {} < now {}",
                 data.platform.tcb_date_tag,
@@ -225,22 +247,40 @@ impl Policy for SimplePolicy {
             );
         }
 
-        // Determine if we're within a platform grace window — advisory checks are skipped
-        // only for pure OutOfDate during platform grace. Collateral grace does NOT skip
-        // advisories (stale collateral doesn't invalidate advisory data).
-        // OutOfDateConfigurationNeeded does NOT skip either (Configuration advisories
-        // are unrelated to the OutOfDate grace window).
-        let in_platform_grace =
-            self.platform_grace_period > 0 && data.tcb.status == TcbStatus::OutOfDate;
+        // 4b. QE TCB freshness: QE tcb_date + grace >= now.
+        let qe_tcb_date_tag = chrono::DateTime::parse_from_rfc3339(&data.qe.tcb_level.tcb_date)
+            .map_err(|e| anyhow::anyhow!("Failed to parse QE TCB date: {e}"))?
+            .timestamp() as u64;
+        let qe_is_out_of_date = data.qe.tcb_level.tcb_status == TcbStatus::OutOfDate;
+        let qe_in_grace =
+            qe_is_out_of_date && within_grace(qe_tcb_date_tag, self.qe_grace_period, self.now);
+        if qe_is_out_of_date && !qe_in_grace {
+            bail!(
+                "QE TCB too old: tcb_date_tag {} + grace {} < now {}",
+                qe_tcb_date_tag,
+                self.qe_grace_period,
+                self.now
+            );
+        }
 
-        // 2. Advisory ID whitelist (skipped only during platform grace for pure OutOfDate)
-        if !in_platform_grace {
-            for id in &data.tcb.advisory_ids {
-                if !self
-                    .accepted_advisory_ids
-                    .iter()
-                    .any(|a| a.eq_ignore_ascii_case(id))
-                {
+        // 2. Advisory ID whitelist.
+        // Platform grace skips only platform advisories for pure OutOfDate.
+        // QE grace skips only QE advisories for pure OutOfDate.
+        let skip_platform_advisories =
+            platform_in_grace && data.platform.tcb_level.tcb_status == TcbStatus::OutOfDate;
+        let skip_qe_advisories =
+            qe_in_grace && data.qe.tcb_level.tcb_status == TcbStatus::OutOfDate;
+
+        if !skip_platform_advisories {
+            for id in &data.platform.tcb_level.advisory_ids {
+                if !advisory_accepted(&self.accepted_advisory_ids, id) {
+                    bail!("Advisory ID {id} is not in the accepted set");
+                }
+            }
+        }
+        if !skip_qe_advisories {
+            for id in &data.qe.tcb_level.advisory_ids {
+                if !advisory_accepted(&self.accepted_advisory_ids, id) {
                     bail!("Advisory ID {id} is not in the accepted set");
                 }
             }
@@ -311,6 +351,8 @@ pub struct SimplePolicyConfig {
     #[serde(default)]
     pub platform_grace_period_secs: u64,
     #[serde(default)]
+    pub qe_grace_period_secs: u64,
+    #[serde(default)]
     pub min_tcb_eval_data_number: u32,
     #[serde(default)]
     pub allow_dynamic_platform: bool,
@@ -346,6 +388,9 @@ impl SimplePolicyConfig {
         if self.platform_grace_period_secs > 0 {
             policy =
                 policy.platform_grace_period(Duration::from_secs(self.platform_grace_period_secs));
+        }
+        if self.qe_grace_period_secs > 0 {
+            policy = policy.qe_grace_period(Duration::from_secs(self.qe_grace_period_secs));
         }
         if self.min_tcb_eval_data_number > 0 {
             policy = policy.min_tcb_eval_data_number(self.min_tcb_eval_data_number);
@@ -491,6 +536,7 @@ mod tests {
     fn policy_rejects_unknown_advisory() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000);
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
@@ -500,6 +546,7 @@ mod tests {
     fn policy_accepts_whitelisted_advisory() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000).accept_advisory("INTEL-SA-00615");
         assert!(policy.validate(&data).is_ok());
     }
@@ -508,6 +555,7 @@ mod tests {
     fn policy_advisory_case_insensitive() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000).accept_advisory("intel-sa-00615");
         assert!(policy.validate(&data).is_ok());
     }
@@ -623,6 +671,16 @@ mod tests {
         assert!(err.contains("mutually exclusive"), "{err}");
     }
 
+    #[test]
+    fn policy_collateral_grace_mutually_exclusive_with_qe_grace() {
+        let data = make_test_supplemental(UpToDate);
+        let policy = SimplePolicy::strict(1_702_000_000)
+            .collateral_grace_period(Duration::from_secs(100))
+            .qe_grace_period(Duration::from_secs(100));
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("mutually exclusive"), "{err}");
+    }
+
     // -- min_tcb_eval_data_number --
 
     #[test]
@@ -720,6 +778,7 @@ mod tests {
     fn policy_advisory_checked_during_collateral_grace() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         // Collateral grace doesn't skip advisory checks — stale collateral
         // doesn't invalidate advisory data.
         let policy = SimplePolicy::strict(1_704_000_000)
@@ -732,6 +791,7 @@ mod tests {
     fn policy_advisory_skipped_during_platform_grace() {
         let mut data = make_test_supplemental(OutOfDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         // now=1_702_000_000, tcb_date_tag=1_690_000_000 (old),
         // grace=13_000_000 → within grace → advisories skipped
         let policy = SimplePolicy::strict(1_702_000_000)
@@ -746,6 +806,7 @@ mod tests {
         // because the Configuration advisories are unrelated to the OutOfDate grace.
         let mut data = make_test_supplemental(OutOfDateConfigurationNeeded);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000)
             .allow_status(OutOfDateConfigurationNeeded)
             .platform_grace_period(Duration::from_secs(13_000_000));
@@ -757,9 +818,44 @@ mod tests {
     fn policy_advisory_checked_without_grace() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         // No grace period → advisories checked normally
         let policy = SimplePolicy::strict(1_702_000_000);
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
+    }
+
+    #[test]
+    fn policy_platform_grace_does_not_cover_qe_out_of_date() {
+        let mut data = make_test_supplemental(OutOfDate);
+        data.platform.tcb_level.tcb_status = UpToDate;
+        data.platform.tcb_level.advisory_ids = vec![];
+        data.platform.tcb_date_tag = 1_702_000_000;
+        data.qe.tcb_level.tcb_status = OutOfDate;
+        data.qe.tcb_level.tcb_date = "2023-07-22T00:00:00Z".to_string();
+        data.qe.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+
+        let policy = SimplePolicy::strict(1_702_000_000)
+            .allow_status(OutOfDate)
+            .platform_grace_period(Duration::from_secs(13_000_000));
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("QE TCB too old"), "{err}");
+    }
+
+    #[test]
+    fn policy_qe_grace_accepts_qe_out_of_date() {
+        let mut data = make_test_supplemental(OutOfDate);
+        data.platform.tcb_level.tcb_status = UpToDate;
+        data.platform.tcb_level.advisory_ids = vec![];
+        data.qe.tcb_level.tcb_status = OutOfDate;
+        data.qe.tcb_level.tcb_date = "2023-07-22T00:00:00Z".to_string();
+        data.qe.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+
+        let policy = SimplePolicy::strict(1_702_000_000)
+            .allow_status(OutOfDate)
+            .qe_grace_period(Duration::from_secs(13_000_000));
+        assert!(policy.validate(&data).is_ok());
     }
 }

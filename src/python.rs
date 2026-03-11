@@ -499,6 +499,16 @@ impl PySimplePolicy {
         }
     }
 
+    /// Set QE grace period in seconds.
+    fn qe_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .qe_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
     /// Set minimum TCB evaluation data number.
     fn min_tcb_eval_data_number(&self, min: u32) -> Self {
         Self {

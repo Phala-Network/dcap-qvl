@@ -324,7 +324,8 @@ class PySimplePolicy:
         policy = SimplePolicy.strict(now_secs) \\
             .allow_status("SWHardeningNeeded") \\
             .accept_advisory("INTEL-SA-00334") \\
-            .collateral_grace_period(90 * 24 * 3600)
+            .collateral_grace_period(90 * 24 * 3600) \\
+            .qe_grace_period(7 * 24 * 3600)
     """
 
     @staticmethod
@@ -346,6 +347,10 @@ class PySimplePolicy:
 
     def platform_grace_period(self, secs: int) -> "PySimplePolicy":
         """Set platform grace period in seconds."""
+        ...
+
+    def qe_grace_period(self, secs: int) -> "PySimplePolicy":
+        """Set QE grace period in seconds."""
         ...
 
     def min_tcb_eval_data_number(self, min: int) -> "PySimplePolicy":
