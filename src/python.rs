@@ -6,6 +6,8 @@ use pyo3::types::{PyBytes, PyDict, PyTuple};
 use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
 
+#[cfg(feature = "rego")]
+use crate::policy::{RegoPolicy, RegoPolicySet};
 use crate::{
     collateral::get_collateral_for_fmspc,
     intel,
@@ -557,6 +559,56 @@ impl PySimplePolicy {
     }
 }
 
+#[cfg(feature = "rego")]
+#[pyclass]
+pub struct PyRegoPolicy {
+    inner: RegoPolicy,
+}
+
+#[cfg(feature = "rego")]
+#[pymethods]
+impl PyRegoPolicy {
+    #[new]
+    fn new(policy_json: &str) -> PyResult<Self> {
+        let inner = RegoPolicy::new(policy_json)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy: {e}")))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn with_rego(policy_json: &str, rego_source: &str) -> PyResult<Self> {
+        let inner = RegoPolicy::with_rego(policy_json, rego_source)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy: {e}")))?;
+        Ok(Self { inner })
+    }
+}
+
+#[cfg(feature = "rego")]
+#[pyclass]
+pub struct PyRegoPolicySet {
+    inner: RegoPolicySet,
+}
+
+#[cfg(feature = "rego")]
+#[pymethods]
+impl PyRegoPolicySet {
+    #[new]
+    fn new(policy_jsons: Vec<String>) -> PyResult<Self> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = RegoPolicySet::new(&policy_refs)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy set: {e}")))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn with_rego(policy_jsons: Vec<String>, rego_source: &str) -> PyResult<Self> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = RegoPolicySet::with_rego(&policy_refs, rego_source)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy set: {e}")))?;
+        Ok(Self { inner })
+    }
+}
+
 #[pyclass]
 pub struct PyQuote {
     inner: Quote,
@@ -680,14 +732,33 @@ pub struct PyQuoteVerificationResult {
 #[pymethods]
 impl PyQuoteVerificationResult {
     /// Validate against a policy, returning a VerifiedReport. Consumes the result.
-    fn validate(&mut self, policy: &PySimplePolicy) -> PyResult<PyVerifiedReport> {
+    fn validate<'py>(&mut self, policy: &Bound<'py, PyAny>) -> PyResult<PyVerifiedReport> {
         let result = self
             .inner
             .take()
             .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;
-        let report = result
-            .validate(&policy.inner)
-            .map_err(|e| PyValueError::new_err(format!("Policy validation failed: {e:?}")))?;
+
+        let report = if let Ok(policy) = policy.extract::<PyRef<'py, PySimplePolicy>>() {
+            result.validate(&policy.inner)
+        } else {
+            #[cfg(feature = "rego")]
+            {
+                if let Ok(policy) = policy.extract::<PyRef<'py, PyRegoPolicy>>() {
+                    result.validate(&policy.inner)
+                } else if let Ok(policy) = policy.extract::<PyRef<'py, PyRegoPolicySet>>() {
+                    result.validate(&policy.inner)
+                } else {
+                    return Err(PyValueError::new_err(
+                        "policy must be SimplePolicy, RegoPolicy, or RegoPolicySet",
+                    ));
+                }
+            }
+            #[cfg(not(feature = "rego"))]
+            {
+                return Err(PyValueError::new_err("policy must be SimplePolicy"));
+            }
+        }
+        .map_err(|e| PyValueError::new_err(format!("Policy validation failed: {e:?}")))?;
         Ok(PyVerifiedReport { inner: report })
     }
 
@@ -785,6 +856,10 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySgxEnclaveReport>()?;
     m.add_class::<PyPckExtension>()?;
     m.add_class::<PySimplePolicy>()?;
+    #[cfg(feature = "rego")]
+    m.add_class::<PyRegoPolicy>()?;
+    #[cfg(feature = "rego")]
+    m.add_class::<PyRegoPolicySet>()?;
     m.add_class::<PyQuoteVerificationResult>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;

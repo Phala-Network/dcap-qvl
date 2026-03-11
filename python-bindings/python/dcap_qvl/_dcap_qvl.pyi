@@ -374,6 +374,34 @@ class PySimplePolicy:
         ...
 
 
+class PyRegoPolicy:
+    """Intel QAL-compatible Rego policy."""
+
+    def __init__(self, policy_json: str) -> None:
+        """Create a Rego policy from Intel-format JSON."""
+        ...
+
+    @staticmethod
+    def with_rego(policy_json: str, rego_source: str) -> "PyRegoPolicy":
+        """Create a Rego policy with a custom Rego script."""
+        ...
+
+
+class PyRegoPolicySet:
+    """Intel QAL-compatible multi-measurement Rego policy set."""
+
+    def __init__(self, policy_jsons: List[str]) -> None:
+        """Create a Rego policy set from multiple Intel-format JSON policies."""
+        ...
+
+    @staticmethod
+    def with_rego(
+        policy_jsons: List[str], rego_source: str
+    ) -> "PyRegoPolicySet":
+        """Create a Rego policy set with a custom Rego script."""
+        ...
+
+
 class PyQuoteVerificationResult:
     """Intermediate result from crypto verification (phase 1).
 
@@ -383,7 +411,9 @@ class PyQuoteVerificationResult:
     The result is consumed on validate/into_report_unchecked — calling twice raises ValueError.
     """
 
-    def validate(self, policy: PySimplePolicy) -> PyVerifiedReport:
+    def validate(
+        self, policy: Union[PySimplePolicy, PyRegoPolicy, PyRegoPolicySet]
+    ) -> PyVerifiedReport:
         """Validate against a policy, returning a VerifiedReport. Consumes the result.
 
         Args:

@@ -13,6 +13,8 @@ Main classes:
 - QuoteVerificationResult: Intermediate result from crypto verification
 - VerifiedReport: Contains verification results after policy validation
 - SimplePolicy: Verification policy with builder pattern
+- RegoPolicy: Intel QAL-compatible Rego policy
+- RegoPolicySet: Intel QAL-compatible multi-policy set
 
 Main functions:
 - verify: Verify a quote with collateral data (returns QuoteVerificationResult)
@@ -35,6 +37,8 @@ from ._dcap_qvl import (
     PySgxEnclaveReport as SgxEnclaveReport,
     PyPckExtension as PckExtension,
     PySimplePolicy as SimplePolicy,
+    PyRegoPolicy as RegoPolicy,
+    PyRegoPolicySet as RegoPolicySet,
     PyQuote as Quote,
     py_verify as verify,
     py_verify_with_root_ca as verify_with_root_ca,
@@ -139,6 +143,8 @@ __all__ = [
     "SgxEnclaveReport",
     "PckExtension",
     "SimplePolicy",
+    "RegoPolicy",
+    "RegoPolicySet",
     "AttestationKeyType",
     "TeeType",
     "Quote",

@@ -430,6 +430,59 @@ impl JsSimplePolicy {
     }
 }
 
+/// Intel QAL-compatible Rego policy for JS/WASM.
+#[cfg(all(feature = "js", feature = "rego"))]
+#[wasm_bindgen(js_name = "RegoPolicy")]
+pub struct JsRegoPolicy {
+    inner: crate::policy::RegoPolicy,
+}
+
+#[cfg(all(feature = "js", feature = "rego"))]
+#[wasm_bindgen(js_class = "RegoPolicy")]
+impl JsRegoPolicy {
+    #[wasm_bindgen(constructor)]
+    pub fn new(policy_json: &str) -> Result<Self, JsValue> {
+        let inner = crate::policy::RegoPolicy::new(policy_json)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        Ok(Self { inner })
+    }
+
+    pub fn with_rego(policy_json: &str, rego_source: &str) -> Result<JsRegoPolicy, JsValue> {
+        let inner = crate::policy::RegoPolicy::with_rego(policy_json, rego_source)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        Ok(JsRegoPolicy { inner })
+    }
+}
+
+/// Multi-measurement Intel QAL-compatible Rego policy set for JS/WASM.
+#[cfg(all(feature = "js", feature = "rego"))]
+#[wasm_bindgen(js_name = "RegoPolicySet")]
+pub struct JsRegoPolicySet {
+    inner: crate::policy::RegoPolicySet,
+}
+
+#[cfg(all(feature = "js", feature = "rego"))]
+#[wasm_bindgen(js_class = "RegoPolicySet")]
+impl JsRegoPolicySet {
+    #[wasm_bindgen(constructor)]
+    pub fn new(policy_jsons: Vec<String>) -> Result<Self, JsValue> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = crate::policy::RegoPolicySet::new(&policy_refs)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        Ok(Self { inner })
+    }
+
+    pub fn with_rego(
+        policy_jsons: Vec<String>,
+        rego_source: &str,
+    ) -> Result<JsRegoPolicySet, JsValue> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = crate::policy::RegoPolicySet::with_rego(&policy_refs, rego_source)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        Ok(JsRegoPolicySet { inner })
+    }
+}
+
 /// Result of cryptographic quote verification (phase 1) for JS/WASM.
 ///
 /// Use `validate(policy)` to apply a [`JsSimplePolicy`] and get a `VerifiedReport`.
@@ -445,6 +498,34 @@ pub struct JsQuoteVerificationResult {
 impl JsQuoteVerificationResult {
     /// Validate against a policy, returning a VerifiedReport. Consumes the result.
     pub fn validate(&mut self, policy: &JsSimplePolicy) -> Result<JsValue, JsValue> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| JsValue::from_str("verification result already consumed"))?;
+        let report = result
+            .validate(&policy.inner)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&report)
+            .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+    }
+
+    /// Validate against a Rego policy, returning a VerifiedReport. Consumes the result.
+    #[cfg(feature = "rego")]
+    pub fn validate_rego(&mut self, policy: &JsRegoPolicy) -> Result<JsValue, JsValue> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| JsValue::from_str("verification result already consumed"))?;
+        let report = result
+            .validate(&policy.inner)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&report)
+            .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+    }
+
+    /// Validate against a Rego policy set, returning a VerifiedReport. Consumes the result.
+    #[cfg(feature = "rego")]
+    pub fn validate_rego_set(&mut self, policy: &JsRegoPolicySet) -> Result<JsValue, JsValue> {
         let result = self
             .inner
             .take()
