@@ -177,6 +177,11 @@ impl QuoteVerificationResult {
                     dynamic_platform: self.pck_ext.dynamic_platform,
                     cached_keys: self.pck_ext.cached_keys,
                     smt_enabled: self.pck_ext.smt_enabled,
+                    // Intel's upstream DCAP Rego policy checks
+                    // `platform_provider_id`, but the upstream QvE producer
+                    // currently leaves it as a TODO when building the platform
+                    // measurement JSON:
+                    // https://github.com/intel/confidential-computing.tee.dcap/blob/main/ae/QvE/qve/qve.cpp
                     platform_provider_id: None,
                 },
                 root_key_id,

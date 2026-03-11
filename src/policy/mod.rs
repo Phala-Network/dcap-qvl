@@ -167,5 +167,15 @@ pub struct PckIdentity {
     /// SMT (hyperthreading) flag.
     pub smt_enabled: PckCertFlag,
     /// Platform Provider ID (Platform CA only, for Rego).
+    ///
+    /// Note: Intel's upstream DCAP Rego policy checks this field, but the
+    /// upstream QvE measurement producer currently leaves it unpopulated
+    /// (`//obj_plat_tcb.AddMember("platform_provider_id", , allocator);`).
+    ///
+    /// Upstream references:
+    /// - Rego check:
+    ///   <https://github.com/intel/confidential-computing.tee.dcap/blob/main/QuoteVerification/appraisal/qal/opa_bin/qal_script.rego>
+    /// - QvE TODO:
+    ///   <https://github.com/intel/confidential-computing.tee.dcap/blob/main/ae/QvE/qve/qve.cpp>
     pub platform_provider_id: Option<String>,
 }
