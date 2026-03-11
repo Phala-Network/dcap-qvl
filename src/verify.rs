@@ -346,7 +346,7 @@ fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
 }
 
 #[cfg(feature = "js")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_class = "SimplePolicy")]
 impl JsSimplePolicy {
     /// Create a strict policy: only `UpToDate`, no grace period, no advisory tolerance.
     #[wasm_bindgen(constructor)]
@@ -441,7 +441,7 @@ pub struct JsQuoteVerificationResult {
 }
 
 #[cfg(feature = "js")]
-#[wasm_bindgen]
+#[wasm_bindgen(js_class = "QuoteVerificationResult")]
 impl JsQuoteVerificationResult {
     /// Validate against a policy, returning a VerifiedReport. Consumes the result.
     pub fn validate(&mut self, policy: &JsSimplePolicy) -> Result<JsValue, JsValue> {
