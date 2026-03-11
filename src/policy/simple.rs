@@ -110,8 +110,6 @@ impl SimplePolicy {
 
     /// Set collateral grace period (default: zero). Accepts quotes where
     /// `earliest_expiration_date + grace_period >= now`.
-    ///
-    /// Must be zero if [`platform_grace_period`](Self::platform_grace_period) is non-zero.
     pub fn collateral_grace_period(mut self, duration: Duration) -> Self {
         self.collateral_grace_period = duration.as_secs();
         self
@@ -120,8 +118,6 @@ impl SimplePolicy {
     /// Set platform grace period (default: zero). When TCB status is
     /// OutOfDate or OutOfDateConfigurationNeeded, accepts quotes where
     /// `tcb_level_date_tag + grace_period >= now`. Skipped for UpToDate/ConfigNeeded/SWHardening.
-    ///
-    /// Must be zero if [`collateral_grace_period`](Self::collateral_grace_period) is non-zero.
     pub fn platform_grace_period(mut self, duration: Duration) -> Self {
         self.platform_grace_period = duration.as_secs();
         self
@@ -194,15 +190,6 @@ impl Policy for SimplePolicy {
             accepted_advisory_ids
                 .iter()
                 .any(|a| a.eq_ignore_ascii_case(id))
-        }
-
-        // 0. Sanity: grace periods are mutually exclusive (policy misconfiguration)
-        if self.collateral_grace_period > 0
-            && (self.platform_grace_period > 0 || self.qe_grace_period > 0)
-        {
-            bail!(
-                "collateral_grace_period is mutually exclusive with platform_grace_period and qe_grace_period"
-            );
         }
 
         // 1. TCB status whitelist
@@ -659,26 +646,6 @@ mod tests {
         let policy = SimplePolicy::strict(1_702_000_000).allow_status(OutOfDateConfigurationNeeded);
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("Platform TCB too old"), "{err}");
-    }
-
-    #[test]
-    fn policy_grace_periods_mutually_exclusive() {
-        let data = make_test_supplemental(UpToDate);
-        let policy = SimplePolicy::strict(1_702_000_000)
-            .collateral_grace_period(Duration::from_secs(100))
-            .platform_grace_period(Duration::from_secs(100));
-        let err = policy.validate(&data).unwrap_err().to_string();
-        assert!(err.contains("mutually exclusive"), "{err}");
-    }
-
-    #[test]
-    fn policy_collateral_grace_mutually_exclusive_with_qe_grace() {
-        let data = make_test_supplemental(UpToDate);
-        let policy = SimplePolicy::strict(1_702_000_000)
-            .collateral_grace_period(Duration::from_secs(100))
-            .qe_grace_period(Duration::from_secs(100));
-        let err = policy.validate(&data).unwrap_err().to_string();
-        assert!(err.contains("mutually exclusive"), "{err}");
     }
 
     // -- min_tcb_eval_data_number --
