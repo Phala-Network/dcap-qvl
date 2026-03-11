@@ -98,6 +98,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 pub struct QuoteVerificationResult {
     report: Report,
     collateral: QuoteCollateralV3,
+    pck_cert_chain_der: Vec<Vec<u8>>,
     // -- core verification results (always computed) --
     tee_type: u32,
     tcb_status: TcbStatus,
@@ -123,13 +124,11 @@ impl QuoteVerificationResult {
             .context("Failed to parse TcbInfo for supplemental")?;
         let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
             .context("Failed to parse QeIdentity for supplemental")?;
-
-        // Extract PCK cert chain from collateral for time window
-        let pck_certs = if let Some(pem_chain) = &self.collateral.pck_certificate_chain {
-            extract_certs(pem_chain.as_bytes()).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        let pck_certs: Vec<CertificateDer<'_>> = self
+            .pck_cert_chain_der
+            .iter()
+            .map(|cert| CertificateDer::from(cert.as_slice()))
+            .collect();
 
         let collateral_dates =
             compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
@@ -542,6 +541,10 @@ fn verify_pck_cert_chain(
     });
 
     Ok(PckCertChainResult {
+        pck_cert_chain_der: certification_certs
+            .iter()
+            .map(|cert| cert.as_ref().to_vec())
+            .collect(),
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
         ppid: pck_ext.ppid,
         cpu_svn: pck_ext.cpu_svn,
@@ -558,6 +561,7 @@ fn verify_pck_cert_chain(
 
 /// Result from PCK certificate chain verification
 struct PckCertChainResult {
+    pck_cert_chain_der: Vec<Vec<u8>>,
     pck_leaf_der: Vec<u8>,
     ppid: Vec<u8>,
     cpu_svn: [u8; 16],
@@ -887,6 +891,7 @@ fn verify_impl(
     Ok(QuoteVerificationResult {
         report: quote.report,
         collateral,
+        pck_cert_chain_der: pck_result.pck_cert_chain_der.clone(),
         tee_type: quote.header.tee_type,
         tcb_status: final_status.status,
         advisory_ids: final_status.advisory_ids,

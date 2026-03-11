@@ -246,6 +246,50 @@ fn sgx_supplemental_data_cross_validation() {
 }
 
 #[test]
+fn supplemental_uses_quote_embedded_pck_chain_when_collateral_omits_it() {
+    use dcap_qvl::verify::{ring, QuoteVerifier};
+
+    let raw_quote = include_bytes!("../sample/sgx_quote").to_vec();
+    let collateral_without_chain: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/sgx_quote_collateral.json")).unwrap();
+    assert!(collateral_without_chain.pck_certificate_chain.is_none());
+    let now = now_from_collateral(&collateral_without_chain);
+
+    let parsed_quote = Quote::decode(&mut &raw_quote[..]).unwrap();
+    let embedded_pem = String::from_utf8_lossy(parsed_quote.raw_cert_chain().unwrap())
+        .trim_end_matches('\0')
+        .to_string();
+
+    let mut collateral_with_chain = collateral_without_chain.clone();
+    collateral_with_chain.pck_certificate_chain = Some(embedded_pem);
+
+    let verifier = QuoteVerifier::new_prod(ring::backend());
+    let without_chain = verifier
+        .verify(&raw_quote, collateral_without_chain, now)
+        .unwrap()
+        .supplemental()
+        .unwrap();
+    let with_chain = verifier
+        .verify(&raw_quote, collateral_with_chain, now)
+        .unwrap()
+        .supplemental()
+        .unwrap();
+
+    assert_eq!(
+        without_chain.earliest_issue_date,
+        with_chain.earliest_issue_date
+    );
+    assert_eq!(
+        without_chain.latest_issue_date,
+        with_chain.latest_issue_date
+    );
+    assert_eq!(
+        without_chain.earliest_expiration_date,
+        with_chain.earliest_expiration_date
+    );
+}
+
+#[test]
 fn could_parse_tdx_quote() {
     let raw_quote = include_bytes!("../sample/tdx_quote");
     let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
