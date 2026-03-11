@@ -196,20 +196,20 @@ impl Policy for SimplePolicy {
                 .any(|a| a.eq_ignore_ascii_case(id))
         }
 
-        // 1. TCB status whitelist
-        if !self.is_status_acceptable(data.tcb.status) {
-            bail!(
-                "TCB status {:?} is not acceptable by policy",
-                data.tcb.status
-            );
-        }
-
-        // 3 & 4. Grace periods
+        // 0. Sanity: grace periods are mutually exclusive (policy misconfiguration)
         if self.collateral_grace_period > 0
             && (self.platform_grace_period > 0 || self.qe_grace_period > 0)
         {
             bail!(
                 "collateral_grace_period is mutually exclusive with platform_grace_period and qe_grace_period"
+            );
+        }
+
+        // 1. TCB status whitelist
+        if !self.is_status_acceptable(data.tcb.status) {
+            bail!(
+                "TCB status {:?} is not acceptable by policy",
+                data.tcb.status
             );
         }
 
