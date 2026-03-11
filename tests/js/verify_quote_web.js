@@ -1,4 +1,4 @@
-import init, { js_verify, js_get_collateral } from "/pkg/web/dcap-qvl-web.js";
+import init, { QuoteVerifier } from "/pkg/web/dcap-qvl-web.js";
 
 // Function to fetch a file as a Uint8Array
 async function fetchFileAsUint8Array(url) {
@@ -26,14 +26,16 @@ async function loadFilesAndVerify() {
 
     // Get the quote collateral
     let pccs_url = "https://pccs.phala.network/tdx/certification/v4";
-    const quoteCollateral = await js_get_collateral(pccs_url, rawQuote);
+    const quoteCollateral = await QuoteVerifier.get_collateral(pccs_url, rawQuote);
 
     // Current timestamp
     const now = BigInt(Math.floor(Date.now() / 1000));
 
-    // Call the js_verify function
-    const result = js_verify(rawQuote, quoteCollateral, now);
-    console.log("Verification Result:", result);
+    // Verify
+    const verifier = new QuoteVerifier();
+    const result = verifier.verify(rawQuote, quoteCollateral, now);
+    const report = result.into_report_unchecked();
+    console.log("Verification Result:", report);
   } catch (error) {
     console.error("Verification failed:", error);
   }

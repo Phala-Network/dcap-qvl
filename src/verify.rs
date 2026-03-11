@@ -315,72 +315,216 @@ impl QuoteVerifier {
     }
 }
 
+/// Verification policy builder for JS/WASM.
+///
+/// ```js
+/// const policy = new SimplePolicy(now)
+///     .allow_status("OutOfDate")
+///     .collateral_grace_period(7n * 86400n)
+///     .allow_smt(true);
+/// ```
 #[cfg(feature = "js")]
-#[wasm_bindgen]
-pub fn js_verify(
-    raw_quote: JsValue,
-    quote_collateral: JsValue,
-    now: u64,
-) -> Result<JsValue, JsValue> {
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+#[wasm_bindgen(js_name = "SimplePolicy")]
+pub struct JsSimplePolicy {
+    inner: crate::policy::SimplePolicy,
+}
 
-    let verifier = QuoteVerifier::new_prod(default_crypto::backend());
-    let verified_report = verifier
-        .verify(&raw_quote, quote_collateral, now)
-        .map(|r| r.into_report_unchecked())
-        .map_err(|e| {
-            let error_msg = format_error_chain(&e);
-            serde_wasm_bindgen::to_value(&error_msg)
-                .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
-        })?;
-
-    serde_wasm_bindgen::to_value(&verified_report)
-        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+#[cfg(feature = "js")]
+fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
+    match s {
+        "UpToDate" => Ok(TcbStatus::UpToDate),
+        "SWHardeningNeeded" => Ok(TcbStatus::SWHardeningNeeded),
+        "ConfigurationNeeded" => Ok(TcbStatus::ConfigurationNeeded),
+        "ConfigurationAndSWHardeningNeeded" => Ok(TcbStatus::ConfigurationAndSWHardeningNeeded),
+        "OutOfDate" => Ok(TcbStatus::OutOfDate),
+        "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
+        "Revoked" => Ok(TcbStatus::Revoked),
+        _ => Err(JsValue::from_str(&alloc::format!("Unknown TCB status: {s}"))),
+    }
 }
 
 #[cfg(feature = "js")]
 #[wasm_bindgen]
-pub fn js_verify_with_root_ca(
-    raw_quote: JsValue,
-    quote_collateral: JsValue,
-    root_ca_der: JsValue,
-    now: u64,
-) -> Result<JsValue, JsValue> {
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
-    let root_ca_der: Vec<u8> = serde_wasm_bindgen::from_value(root_ca_der)
-        .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
+impl JsSimplePolicy {
+    /// Create a strict policy: only `UpToDate`, no grace period, no advisory tolerance.
+    #[wasm_bindgen(constructor)]
+    pub fn strict(now_secs: u64) -> Self {
+        Self {
+            inner: crate::policy::SimplePolicy::strict(now_secs),
+        }
+    }
 
-    let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
-    let verified_report = verifier
-        .verify(&raw_quote, quote_collateral, now)
-        .map(|r| r.into_report_unchecked())
-        .map_err(|e| {
-            let error_msg = format_error_chain(&e);
-            serde_wasm_bindgen::to_value(&error_msg)
-                .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
-        })?;
+    /// Allow an additional TCB status (e.g. "OutOfDate", "SWHardeningNeeded").
+    pub fn allow_status(self, status: &str) -> Result<JsSimplePolicy, JsValue> {
+        let s = js_parse_tcb_status(status)?;
+        Ok(Self {
+            inner: self.inner.allow_status(s),
+        })
+    }
 
-    serde_wasm_bindgen::to_value(&verified_report)
-        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+    /// Accept a specific advisory ID (e.g. "INTEL-SA-00334").
+    pub fn accept_advisory(self, id: &str) -> Self {
+        Self {
+            inner: self.inner.accept_advisory(id),
+        }
+    }
+
+    /// Set collateral grace period in seconds.
+    pub fn collateral_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .collateral_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set platform grace period in seconds.
+    pub fn platform_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self.inner.platform_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set QE grace period in seconds.
+    pub fn qe_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self.inner.qe_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set minimum TCB evaluation data number.
+    pub fn min_tcb_eval_data_number(self, min: u32) -> Self {
+        Self {
+            inner: self.inner.min_tcb_eval_data_number(min),
+        }
+    }
+
+    /// Set whether dynamic platforms are allowed.
+    pub fn allow_dynamic_platform(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_dynamic_platform(allow),
+        }
+    }
+
+    /// Set whether cached keys are allowed.
+    pub fn allow_cached_keys(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_cached_keys(allow),
+        }
+    }
+
+    /// Set whether SMT (hyperthreading) is allowed.
+    pub fn allow_smt(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_smt(allow),
+        }
+    }
+}
+
+/// Result of cryptographic quote verification (phase 1) for JS/WASM.
+///
+/// Use `validate(policy)` to apply a [`JsSimplePolicy`] and get a `VerifiedReport`.
+/// Use `into_report_unchecked()` to skip policy validation.
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_name = "QuoteVerificationResult")]
+pub struct JsQuoteVerificationResult {
+    inner: Option<QuoteVerificationResult>,
 }
 
 #[cfg(feature = "js")]
 #[wasm_bindgen]
-pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<JsValue, JsValue> {
-    let pccs_url: String = serde_wasm_bindgen::from_value(pccs_url)
-        .map_err(|_| JsValue::from_str("Failed to decode pccs_url"))?;
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+impl JsQuoteVerificationResult {
+    /// Validate against a policy, returning a VerifiedReport. Consumes the result.
+    pub fn validate(&mut self, policy: &JsSimplePolicy) -> Result<JsValue, JsValue> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| JsValue::from_str("verification result already consumed"))?;
+        let report = result
+            .validate(&policy.inner)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&report)
+            .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+    }
 
-    let collateral: QuoteCollateralV3 = crate::collateral::get_collateral(&pccs_url, &raw_quote)
-        .await
-        .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
-    serde_wasm_bindgen::to_value(&collateral)
-        .map_err(|_| JsValue::from_str("Failed to encode collateral"))
+    /// Get VerifiedReport without policy validation. Consumes the result.
+    pub fn into_report_unchecked(&mut self) -> Result<JsValue, JsValue> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| JsValue::from_str("verification result already consumed"))?;
+        serde_wasm_bindgen::to_value(&result.into_report_unchecked())
+            .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
+    }
+}
+
+/// Quote verifier for JS/WASM.
+///
+/// ```js
+/// const verifier = new QuoteVerifier();          // Intel production root CA
+/// const verifier = new QuoteVerifier(rootCaDer);  // custom root CA
+/// const result = verifier.verify(quote, collateral, now);
+/// ```
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_name = "QuoteVerifier")]
+pub struct JsQuoteVerifier {
+    inner: QuoteVerifier,
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_class = "QuoteVerifier")]
+impl JsQuoteVerifier {
+    /// Create a verifier. No argument = Intel production root CA; pass `rootCaDer` for custom.
+    #[wasm_bindgen(constructor)]
+    pub fn new(root_ca_der: Option<Vec<u8>>) -> Self {
+        let inner = match root_ca_der {
+            Some(der) => QuoteVerifier::new(der, default_crypto::backend()),
+            None => QuoteVerifier::new_prod(default_crypto::backend()),
+        };
+        Self { inner }
+    }
+
+    /// Perform cryptographic verification, returning a [`QuoteVerificationResult`].
+    pub fn verify(
+        &self,
+        raw_quote: JsValue,
+        quote_collateral: JsValue,
+        now: u64,
+    ) -> Result<JsQuoteVerificationResult, JsValue> {
+        let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+            .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+        let quote_collateral =
+            serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+
+        let result = self
+            .inner
+            .verify(&raw_quote, quote_collateral, now)
+            .map_err(|e| {
+                let error_msg = format_error_chain(&e);
+                serde_wasm_bindgen::to_value(&error_msg)
+                    .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
+            })?;
+
+        Ok(JsQuoteVerificationResult {
+            inner: Some(result),
+        })
+    }
+
+    /// Fetch collateral from a PCCS server.
+    pub async fn get_collateral(
+        pccs_url: &str,
+        raw_quote: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+            .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+
+        let collateral: QuoteCollateralV3 =
+            crate::collateral::get_collateral(pccs_url, &raw_quote)
+                .await
+                .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&collateral)
+            .map_err(|_| JsValue::from_str("Failed to encode collateral"))
+    }
 }
 
 // =============================================================================

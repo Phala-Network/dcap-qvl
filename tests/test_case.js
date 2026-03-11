@@ -87,15 +87,13 @@ async function cmdVerify(args) {
     }
 
     try {
-        let result;
-        if (rootCaDer) {
-            result = wasmModule.js_verify_with_root_ca(quoteBytes, collateral, rootCaDer, now);
-        } else {
-            result = wasmModule.js_verify(quoteBytes, collateral, now);
-        }
-
+        const verifier = rootCaDer
+            ? new wasmModule.QuoteVerifier(rootCaDer)
+            : new wasmModule.QuoteVerifier();
+        const result = verifier.verify(quoteBytes, collateral, now);
+        const report = result.into_report_unchecked();
         console.log("Verification successful");
-        console.log(`Status: ${result.status}`);
+        console.log(`Status: ${report.status}`);
         process.exit(0);
     } catch (e) {
         console.error(`Verification failed: ${e}`);
@@ -136,7 +134,7 @@ async function cmdGetCollateral(args) {
     }
 
     try {
-        const result = await wasmModule.js_get_collateral(pccsUrl, quoteBytes);
+        const result = await wasmModule.QuoteVerifier.get_collateral(pccsUrl, quoteBytes);
 
         if (!result || !result.tcb_info_issuer_chain) {
             console.error("Error: Collateral missing required fields");
