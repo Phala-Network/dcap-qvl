@@ -140,16 +140,59 @@ make test_python_versions
 
 ```python
 import asyncio
+import time
 import dcap_qvl
 
 async def main():
     quote_data = open("quote.bin", "rb").read()
 
-    # Get collateral and verify in one step (defaults to Phala PCCS)
+    # Get collateral and perform crypto verification (defaults to Phala PCCS)
     result = await dcap_qvl.get_collateral_and_verify(quote_data)
-    print(f"Status: {result.status}")
+
+    # Validate with SimplePolicy
+    now = int(time.time())
+    policy = dcap_qvl.SimplePolicy.strict(now)
+    report = result.validate(policy)
+    print(f"Status: {report.status}")
 
 asyncio.run(main())
+```
+
+You can also validate with Intel QAL-compatible Rego policies:
+
+```python
+policy_json = r'''{
+  "environment": {
+    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570"
+  },
+  "reference": {
+    "accepted_tcb_status": ["UpToDate"],
+    "collateral_grace_period": 0
+  }
+}'''
+
+rego_policy = dcap_qvl.RegoPolicy(policy_json)
+report = result.validate(rego_policy)
+```
+
+And from JS/WASM:
+
+```js
+import init, { QuoteVerifier, SimplePolicy, RegoPolicy } from "@phala/dcap-qvl-web";
+
+await init();
+
+const collateral = await QuoteVerifier.get_collateral(pccsUrl, quoteBytes);
+const verifier = new QuoteVerifier();
+const now = BigInt(Math.floor(Date.now() / 1000));
+const result = verifier.verify(quoteBytes, collateral, now);
+
+const simplePolicy = new SimplePolicy(now);
+const report1 = result.validate(simplePolicy);
+
+const regoPolicy = new RegoPolicy(policyJson);
+const result2 = verifier.verify(quoteBytes, collateral, now);
+const report2 = result2.validate_rego(regoPolicy);
 ```
 
 See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.

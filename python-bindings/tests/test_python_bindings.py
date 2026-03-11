@@ -83,6 +83,58 @@ class TestVerify:
             dcap_qvl.verify(invalid_quote, collateral, 1234567890)
 
 
+class TestRegoPolicies:
+    """Test Rego policy bindings."""
+
+    def test_rego_policy_constructor(self):
+        """Test creating a RegoPolicy from valid JSON."""
+        policy_json = json.dumps(
+            {
+                "environment": {
+                    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570",
+                },
+                "reference": {
+                    "accepted_tcb_status": ["UpToDate"],
+                    "collateral_grace_period": 0,
+                },
+            }
+        )
+
+        policy = dcap_qvl.RegoPolicy(policy_json)
+        assert isinstance(policy, dcap_qvl.RegoPolicy)
+
+    def test_rego_policy_set_constructor(self):
+        """Test creating a RegoPolicySet from valid JSON policies."""
+        policy_json = json.dumps(
+            {
+                "environment": {
+                    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570",
+                },
+                "reference": {
+                    "accepted_tcb_status": ["UpToDate"],
+                    "collateral_grace_period": 0,
+                },
+            }
+        )
+
+        policies = dcap_qvl.RegoPolicySet([policy_json])
+        assert isinstance(policies, dcap_qvl.RegoPolicySet)
+
+    def test_rego_policy_missing_class_id(self):
+        """Test that missing class_id is rejected."""
+        policy_json = json.dumps(
+            {
+                "reference": {
+                    "accepted_tcb_status": ["UpToDate"],
+                    "collateral_grace_period": 0,
+                },
+            }
+        )
+
+        with pytest.raises(ValueError):
+            dcap_qvl.RegoPolicy(policy_json)
+
+
 @pytest.mark.skipif(
     os.getenv("DCAP_QVL_RUN_SAMPLE_VERIFY") != "1",
     reason="Sample verify is an integration test. Set DCAP_QVL_RUN_SAMPLE_VERIFY=1 to run.",
@@ -118,3 +170,69 @@ class TestWithSampleData:
         assert isinstance(result, dcap_qvl.VerifiedReport)
         assert isinstance(result.status, str)
         assert isinstance(result.advisory_ids, list)
+
+    def test_validate_with_rego_policy(self):
+        """Test validation with RegoPolicy using sample SGX quote."""
+        if not Path("sample/sgx_quote").exists() or not Path(
+            "sample/sgx_quote_collateral.json"
+        ).exists():
+            pytest.skip("Sample files not available")
+
+        with open("sample/sgx_quote", "rb") as f:
+            quote_data = f.read()
+
+        with open("sample/sgx_quote_collateral.json", "r") as f:
+            collateral_json = json.load(f)
+
+        collateral = dcap_qvl.QuoteCollateralV3.from_json(json.dumps(collateral_json))
+        qvr = dcap_qvl.verify(quote_data, collateral, 1234567890)
+
+        policy_json = json.dumps(
+            {
+                "environment": {
+                    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570",
+                },
+                "reference": {
+                    "accepted_tcb_status": ["UpToDate"],
+                    "collateral_grace_period": 0,
+                },
+            }
+        )
+        policy = dcap_qvl.RegoPolicy(policy_json)
+        result = qvr.validate(policy)
+
+        assert isinstance(result, dcap_qvl.VerifiedReport)
+        assert isinstance(result.status, str)
+
+    def test_validate_with_rego_policy_set(self):
+        """Test validation with RegoPolicySet using sample SGX quote."""
+        if not Path("sample/sgx_quote").exists() or not Path(
+            "sample/sgx_quote_collateral.json"
+        ).exists():
+            pytest.skip("Sample files not available")
+
+        with open("sample/sgx_quote", "rb") as f:
+            quote_data = f.read()
+
+        with open("sample/sgx_quote_collateral.json", "r") as f:
+            collateral_json = json.load(f)
+
+        collateral = dcap_qvl.QuoteCollateralV3.from_json(json.dumps(collateral_json))
+        qvr = dcap_qvl.verify(quote_data, collateral, 1234567890)
+
+        policy_json = json.dumps(
+            {
+                "environment": {
+                    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570",
+                },
+                "reference": {
+                    "accepted_tcb_status": ["UpToDate"],
+                    "collateral_grace_period": 0,
+                },
+            }
+        )
+        policy = dcap_qvl.RegoPolicySet([policy_json])
+        result = qvr.validate(policy)
+
+        assert isinstance(result, dcap_qvl.VerifiedReport)
+        assert isinstance(result.status, str)

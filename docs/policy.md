@@ -142,8 +142,11 @@ Runs Intel's official `qal_script.rego` via the `regorus` Rego interpreter. Acce
 use dcap_qvl::RegoPolicy;
 
 let policy_json = r#"{
-    "policy": {
-        "tcb_status": ["UpToDate", "SWHardeningNeeded"],
+    "environment": {
+        "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570"
+    },
+    "reference": {
+        "accepted_tcb_status": ["UpToDate", "SWHardeningNeeded"],
         "collateral_grace_period": 7776000
     }
 }"#;
@@ -152,5 +155,42 @@ let report = result.validate(&policy)?;
 ```
 
 `RegoPolicySet` supports multiple JSON policies for multi-measurement appraisal (one per `class_id`), matching Intel QAL's full functionality. Both `RegoPolicy` and `RegoPolicySet` implement the `Policy` trait, so they work with the standard `validate()` method.
+
+### Python
+
+```python
+import dcap_qvl
+
+policy_json = r'''{
+  "environment": {
+    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570"
+  },
+  "reference": {
+    "accepted_tcb_status": ["UpToDate"],
+    "collateral_grace_period": 0
+  }
+}'''
+
+policy = dcap_qvl.RegoPolicy(policy_json)
+report = result.validate(policy)
+```
+
+### JS / WASM
+
+```js
+import init, { QuoteVerifier, RegoPolicy, RegoPolicySet } from "@phala/dcap-qvl-web";
+
+await init();
+
+const verifier = new QuoteVerifier();
+const result = verifier.verify(quoteBytes, collateral, now);
+
+const policy = new RegoPolicy(policyJson);
+const report = result.validate_rego(policy);
+
+const policySet = new RegoPolicySet([platformPolicyJson, tenantPolicyJson]);
+const result2 = verifier.verify(quoteBytes, collateral, now);
+const report2 = result2.validate_rego_set(policySet);
+```
 
 See [Intel's DCAP Appraisal documentation](https://github.com/intel/SGXDataCenterAttestationPrimitives) for the Rego policy JSON format.

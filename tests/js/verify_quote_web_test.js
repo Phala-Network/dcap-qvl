@@ -1,4 +1,4 @@
-import init, { QuoteVerifier } from "/pkg/web/dcap-qvl-web.js";
+import init, { QuoteVerifier, RegoPolicy, RegoPolicySet } from "/pkg/web/dcap-qvl-web.js";
 
 const testOutputs = [];
 let passed = 0;
@@ -136,6 +136,52 @@ async function runTests() {
         const report = result.into_report_unchecked();
         if (!report || !report.status) {
             throw new Error('Verification should succeed but got no result');
+        }
+    });
+
+    await runTest('RegoPolicy validates valid SGX v3 quote', async () => {
+        const quote = await fetchFile('/test_data/samples/valid_sgx_v3/quote.bin');
+        const collateral = await fetchJSON('/test_data/samples/valid_sgx_v3/collateral.json');
+        const rootCA = await fetchFile('/test_data/certs/root_ca.der');
+        const now = BigInt(Math.floor(Date.now() / 1000));
+
+        const policyJson = JSON.stringify({
+            environment: {
+                class_id: '3123ec35-8d38-4ea5-87a5-d6c48b567570',
+            },
+            reference: {
+                accepted_tcb_status: ['UpToDate'],
+                collateral_grace_period: 0,
+            },
+        });
+
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.validate_rego(new RegoPolicy(policyJson));
+        if (!report || !report.status) {
+            throw new Error('RegoPolicy validation should succeed but got no report');
+        }
+    });
+
+    await runTest('RegoPolicySet validates valid SGX v3 quote', async () => {
+        const quote = await fetchFile('/test_data/samples/valid_sgx_v3/quote.bin');
+        const collateral = await fetchJSON('/test_data/samples/valid_sgx_v3/collateral.json');
+        const rootCA = await fetchFile('/test_data/certs/root_ca.der');
+        const now = BigInt(Math.floor(Date.now() / 1000));
+
+        const platformPolicyJson = JSON.stringify({
+            environment: {
+                class_id: '3123ec35-8d38-4ea5-87a5-d6c48b567570',
+            },
+            reference: {
+                accepted_tcb_status: ['UpToDate'],
+                collateral_grace_period: 0,
+            },
+        });
+
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.validate_rego_set(new RegoPolicySet([platformPolicyJson]));
+        if (!report || !report.status) {
+            throw new Error('RegoPolicySet validation should succeed but got no report');
         }
     });
 
