@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { QuoteVerifier } = require("../../pkg/node/dcap-qvl-node");
+const { QuoteVerifier, SimplePolicy } = require("../../pkg/node/dcap-qvl-node");
 
 // Function to read a file as a Uint8Array
 function readFileAsUint8Array(filePath) {
@@ -23,7 +23,8 @@ const now = BigInt(Math.floor(Date.now() / 1000));
     const quoteCollateral = await QuoteVerifier.get_collateral(pccs_url, rawQuote);
     const verifier = new QuoteVerifier();
     const result = verifier.verify(rawQuote, quoteCollateral, now);
-    const report = result.into_report_unchecked();
+    const policy = new SimplePolicy(now);
+    const report = result.validate(policy);
     console.log("Verification Result:", report);
   } catch (error) {
     console.error("Verification failed:", error);

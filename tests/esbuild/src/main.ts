@@ -1,4 +1,4 @@
-import init, { js_verify, js_get_collateral } from "@phala/dcap-qvl-web";
+import init, { QuoteVerifier, SimplePolicy } from "@phala/dcap-qvl-web";
 import wasm from "@phala/dcap-qvl-web/dcap-qvl-web_bg.wasm";
 
 const PCCS_URL = "https://pccs.phala.network/tdx/certification/v4";
@@ -14,12 +14,14 @@ async function fetchQuoteAsUint8Array(url: string): Promise<Uint8Array> {
 
 init(wasm).then(() => {
   console.log("Phala DCAP QVL initialized!");
-  // You can now use js_verify, js_get_collateral, etc.
   fetchQuoteAsUint8Array("/sample/tdx_quote").then(async (rawQuote) => {
-    const quoteCollateral = await js_get_collateral(PCCS_URL, rawQuote);
+    const quoteCollateral = await QuoteVerifier.get_collateral(PCCS_URL, rawQuote);
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const result = js_verify(rawQuote, quoteCollateral, now);
-    console.log("Verification Result:", result);
+    const verifier = new QuoteVerifier();
+    const result = verifier.verify(rawQuote, quoteCollateral, now);
+    const policy = new SimplePolicy(now);
+    const report = result.validate(policy);
+    console.log("Verification Result:", report);
   });
 }).catch((error: unknown) => {
   console.error("Error:", error);

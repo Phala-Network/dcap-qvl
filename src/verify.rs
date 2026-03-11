@@ -339,7 +339,9 @@ fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
         "OutOfDate" => Ok(TcbStatus::OutOfDate),
         "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
         "Revoked" => Ok(TcbStatus::Revoked),
-        _ => Err(JsValue::from_str(&alloc::format!("Unknown TCB status: {s}"))),
+        _ => Err(JsValue::from_str(&alloc::format!(
+            "Unknown TCB status: {s}"
+        ))),
     }
 }
 
@@ -417,6 +419,13 @@ impl JsSimplePolicy {
     pub fn allow_smt(self, allow: bool) -> Self {
         Self {
             inner: self.inner.allow_smt(allow),
+        }
+    }
+
+    /// Set accepted SGX types (e.g. [0, 1, 2]).
+    pub fn accepted_sgx_types(self, types: Vec<u8>) -> Self {
+        Self {
+            inner: self.inner.accepted_sgx_types(&types),
         }
     }
 }
@@ -511,17 +520,13 @@ impl JsQuoteVerifier {
     }
 
     /// Fetch collateral from a PCCS server.
-    pub async fn get_collateral(
-        pccs_url: &str,
-        raw_quote: JsValue,
-    ) -> Result<JsValue, JsValue> {
+    pub async fn get_collateral(pccs_url: &str, raw_quote: JsValue) -> Result<JsValue, JsValue> {
         let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
             .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
 
-        let collateral: QuoteCollateralV3 =
-            crate::collateral::get_collateral(pccs_url, &raw_quote)
-                .await
-                .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        let collateral: QuoteCollateralV3 = crate::collateral::get_collateral(pccs_url, &raw_quote)
+            .await
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
         serde_wasm_bindgen::to_value(&collateral)
             .map_err(|_| JsValue::from_str("Failed to encode collateral"))
     }

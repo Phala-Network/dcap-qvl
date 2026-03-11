@@ -1,4 +1,4 @@
-import init, { QuoteVerifier } from "/pkg/web/dcap-qvl-web.js";
+import init, { QuoteVerifier, SimplePolicy } from "/pkg/web/dcap-qvl-web.js";
 
 // Function to fetch a file as a Uint8Array
 async function fetchFileAsUint8Array(url) {
@@ -34,7 +34,8 @@ async function loadFilesAndVerify() {
     // Verify
     const verifier = new QuoteVerifier();
     const result = verifier.verify(rawQuote, quoteCollateral, now);
-    const report = result.into_report_unchecked();
+    const policy = new SimplePolicy(now);
+    const report = result.validate(policy);
     console.log("Verification Result:", report);
   } catch (error) {
     console.error("Verification failed:", error);
