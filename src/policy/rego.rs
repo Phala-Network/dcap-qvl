@@ -618,7 +618,11 @@ fn to_rego_qvl_result(data: &SupplementalData) -> Vec<serde_json::Value> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::manual_range_contains
+)]
 mod tests {
     use super::*;
     use crate::policy::{PckCertFlag, PckIdentity, PlatformInfo, QeInfo, TcbVerdict};

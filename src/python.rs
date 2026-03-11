@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict, PyTuple};
 use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
 
@@ -25,31 +25,42 @@ pub struct PyQuoteCollateralV3 {
 #[pymethods]
 impl PyQuoteCollateralV3 {
     #[new]
-    fn new(
-        pck_crl_issuer_chain: String,
-        root_ca_crl: Vec<u8>,
-        pck_crl: Vec<u8>,
-        tcb_info_issuer_chain: String,
-        tcb_info: String,
-        tcb_info_signature: Vec<u8>,
-        qe_identity_issuer_chain: String,
-        qe_identity: String,
-        qe_identity_signature: Vec<u8>,
-    ) -> Self {
-        Self {
+    fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        fn get_arg<T>(
+            args: &Bound<'_, PyTuple>,
+            kwargs: Option<&Bound<'_, PyDict>>,
+            index: usize,
+            name: &str,
+        ) -> PyResult<T>
+        where
+            T: for<'py> pyo3::FromPyObject<'py>,
+        {
+            if let Ok(value) = args.get_item(index) {
+                return value.extract::<T>();
+            }
+            let value = kwargs
+                .and_then(|kw| kw.get_item(name).transpose())
+                .transpose()?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!("missing required argument: {name}"))
+                })?;
+            value.extract::<T>()
+        }
+
+        Ok(Self {
             inner: QuoteCollateralV3 {
-                pck_crl_issuer_chain,
-                root_ca_crl,
-                pck_crl,
-                tcb_info_issuer_chain,
-                tcb_info,
-                tcb_info_signature,
-                qe_identity_issuer_chain,
-                qe_identity,
-                qe_identity_signature,
+                pck_crl_issuer_chain: get_arg(args, kwargs, 0, "pck_crl_issuer_chain")?,
+                root_ca_crl: get_arg(args, kwargs, 1, "root_ca_crl")?,
+                pck_crl: get_arg(args, kwargs, 2, "pck_crl")?,
+                tcb_info_issuer_chain: get_arg(args, kwargs, 3, "tcb_info_issuer_chain")?,
+                tcb_info: get_arg(args, kwargs, 4, "tcb_info")?,
+                tcb_info_signature: get_arg(args, kwargs, 5, "tcb_info_signature")?,
+                qe_identity_issuer_chain: get_arg(args, kwargs, 6, "qe_identity_issuer_chain")?,
+                qe_identity: get_arg(args, kwargs, 7, "qe_identity")?,
+                qe_identity_signature: get_arg(args, kwargs, 8, "qe_identity_signature")?,
                 pck_certificate_chain: None,
             },
-        }
+        })
     }
 
     #[getter]
@@ -629,11 +640,12 @@ impl PyQuote {
             Ok(v) => v,
             Err(_) => return Ok(None),
         };
-        let mut end = raw.len();
-        while end > 0 && raw[end - 1] == 0 {
-            end -= 1;
-        }
-        Ok(Some(PyBytes::new(py, &raw[..end]).into()))
+        let trimmed = raw
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .and_then(|end| raw.get(..=end))
+            .unwrap_or(&[]);
+        Ok(Some(PyBytes::new(py, trimmed).into()))
     }
 
     /// Parse the Intel SGX extension from the leaf PCK certificate.
@@ -681,8 +693,8 @@ impl PyQuoteVerificationResult {
     /// Get VerifiedReport without policy validation. Consumes the result.
     ///
     /// WARNING: Skips all policy checks. Use only when you handle validation externally.
-    fn into_report_unchecked(&mut self) -> PyResult<PyVerifiedReport> {
-        let result = self
+    fn into_report_unchecked(mut slf: PyRefMut<'_, Self>) -> PyResult<PyVerifiedReport> {
+        let result = slf
             .inner
             .take()
             .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;

@@ -302,11 +302,12 @@ pub unsafe extern "C" fn dcap_parse_quote_cb(
     let quote_type = if parsed.header.is_sgx() { "SGX" } else { "TDX" };
 
     let cert_chain_pem = parsed.raw_cert_chain().ok().map(|raw| {
-        let mut end = raw.len();
-        while end > 0 && raw[end.saturating_sub(1)] == 0 {
-            end = end.saturating_sub(1);
-        }
-        String::from_utf8_lossy(&raw[..end]).into_owned()
+        let trimmed = raw
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .and_then(|end| raw.get(..=end))
+            .unwrap_or(&[]);
+        String::from_utf8_lossy(trimmed).into_owned()
     });
 
     // For cert_type 5: extract fmspc/ca from embedded cert chain
@@ -548,9 +549,7 @@ pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem_cb(
         pce_id: ext.pce_id.to_vec(),
         fmspc: ext.fmspc.to_vec(),
         sgx_type: ext.sgx_type,
-        platform_instance_id: ext
-            .platform_instance_id
-            .map(|v| serde_bytes::ByteBuf::from(v)),
+        platform_instance_id: ext.platform_instance_id.map(serde_bytes::ByteBuf::from),
         raw_extension: ext.raw_extension,
     };
 

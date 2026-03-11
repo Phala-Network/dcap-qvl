@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use dcap_qvl::{quote::Quote, verify::VerifiedReport, QuoteCollateralV3};
 use der::Decode as DerDecode;
