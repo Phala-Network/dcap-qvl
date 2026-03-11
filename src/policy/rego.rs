@@ -401,11 +401,15 @@ fn register_rand_intn(engine: &mut regorus::Engine) -> Result<()> {
                     .as_i64()
                     .map_err(|_| anyhow::anyhow!("rand.intn: second argument must be integer"))?;
 
-                if n <= 0 {
+                if n == 0 {
                     return Ok(regorus::Value::from(0i64));
                 }
 
+                // OPA uses abs(n) for negative values
+                let n = n.unsigned_abs();
+
                 // Cache key = "{seed}-{n}", matching OPA's `fmt.Sprintf("%s-%d", strOp, n)`
+                // Note: OPA caches with abs'd n, so "-5" and "5" share the same key.
                 let key = alloc::format!("{seed}-{n}");
 
                 if let Some(&cached) = cache.get(&key) {
@@ -415,8 +419,7 @@ fn register_rand_intn(engine: &mut regorus::Engine) -> Result<()> {
                 let mut buf = [0u8; 8];
                 getrandom::getrandom(&mut buf)
                     .map_err(|e| anyhow::anyhow!("rand.intn: RNG failed: {e}"))?;
-                let random_val =
-                    (u64::from_le_bytes(buf).checked_rem(n as u64).unwrap_or(0)) as i64;
+                let random_val = (u64::from_le_bytes(buf).checked_rem(n).unwrap_or(0)) as i64;
                 cache.insert(key, random_val);
                 Ok(regorus::Value::from(random_val))
             }),
