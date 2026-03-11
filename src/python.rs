@@ -25,6 +25,7 @@ pub struct PyQuoteCollateralV3 {
 #[pymethods]
 impl PyQuoteCollateralV3 {
     #[new]
+    #[pyo3(signature = (*args, **kwargs))]
     fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
         fn get_arg<T>(
             args: &Bound<'_, PyTuple>,
