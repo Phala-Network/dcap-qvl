@@ -205,6 +205,11 @@ impl QuoteVerificationResult {
         Ok(self.into_report_unchecked())
     }
 
+    /// The Platform Provisioning ID (PPID) extracted from the PCK certificate.
+    pub fn ppid(&self) -> &[u8] {
+        &self.pck_ext.ppid
+    }
+
     /// Convert directly into [`VerifiedReport`] **without applying any policy**.
     ///
     /// # Warning
