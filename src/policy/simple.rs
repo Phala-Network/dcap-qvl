@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use {
     super::{PckCertFlag, Policy, SupplementalData},
     crate::tcb_info::TcbStatus,
+    crate::utils::parse_rfc3339_unix_secs,
     alloc::string::String,
     alloc::vec::Vec,
 };
@@ -242,9 +243,8 @@ impl Policy for SimplePolicy {
         }
 
         // 4b. QE TCB freshness: QE tcb_date + grace >= now.
-        let qe_tcb_date_tag = chrono::DateTime::parse_from_rfc3339(&data.qe.tcb_level.tcb_date)
-            .map_err(|e| anyhow::anyhow!("Failed to parse QE TCB date: {e}"))?
-            .timestamp() as u64;
+        let qe_tcb_date_tag = parse_rfc3339_unix_secs(&data.qe.tcb_level.tcb_date)
+            .map_err(|e| anyhow::anyhow!("Failed to parse QE TCB date: {e}"))?;
         let qe_is_out_of_date = data.qe.tcb_level.tcb_status == TcbStatus::OutOfDate;
         let qe_in_grace =
             qe_is_out_of_date && within_grace(qe_tcb_date_tag, self.qe_grace_period, self.now);

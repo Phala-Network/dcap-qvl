@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::json;
 
+use crate::utils::parse_rfc3339_unix_secs;
 use anyhow::{bail, Result};
 
 /// Convert a unix timestamp (seconds) to an RFC3339 string.
@@ -126,7 +127,7 @@ fn build_platform_measurement(data: &SupplementalData) -> serde_json::Value {
 }
 
 /// Build QE Identity measurement for Rego appraisal (TDX).
-fn build_qe_measurement(data: &SupplementalData) -> serde_json::Value {
+fn build_qe_measurement(data: &SupplementalData) -> Result<serde_json::Value> {
     let mut m = serde_json::Map::new();
 
     m.insert(
@@ -134,10 +135,8 @@ fn build_qe_measurement(data: &SupplementalData) -> serde_json::Value {
         tcb_status_to_rego_array(data.qe.tcb_level.tcb_status),
     );
 
-    let qe_tcb_date = chrono::DateTime::parse_from_rfc3339(&data.qe.tcb_level.tcb_date)
-        .ok()
-        .map(|dt| dt.timestamp() as u64)
-        .unwrap_or(0);
+    let qe_tcb_date = parse_rfc3339_unix_secs(&data.qe.tcb_level.tcb_date)
+        .map_err(|e| anyhow::anyhow!("Failed to parse QE TCB date: {e}"))?;
     let qe_date_str = unix_to_rfc3339(qe_tcb_date);
     if !qe_date_str.is_empty() {
         m.insert("tcb_level_date_tag".into(), json!(qe_date_str));
@@ -162,7 +161,7 @@ fn build_qe_measurement(data: &SupplementalData) -> serde_json::Value {
         json!(hex::encode_upper(data.platform.root_key_id)),
     );
 
-    serde_json::Value::Object(m)
+    Ok(serde_json::Value::Object(m))
 }
 
 // ── Tenant measurement helpers ─────────────────────────────────────────
@@ -570,7 +569,7 @@ impl Policy for RegoPolicy {
 
 impl Policy for RegoPolicySet {
     fn validate(&self, data: &SupplementalData) -> Result<()> {
-        let qvl_result = to_rego_qvl_result(data);
+        let qvl_result = to_rego_qvl_result(data)?;
         let policy_refs: Vec<&serde_json::Value> = self.policies.iter().collect();
         eval_rego_engine(&self.engine, &policy_refs, qvl_result)
     }
@@ -580,7 +579,7 @@ impl Policy for RegoPolicySet {
 ///
 /// SGX quotes produce 2 entries (platform + enclave).
 /// TDX quotes produce 3 entries (platform + QE identity + TD).
-fn to_rego_qvl_result(data: &SupplementalData) -> Vec<serde_json::Value> {
+fn to_rego_qvl_result(data: &SupplementalData) -> Result<Vec<serde_json::Value>> {
     use crate::quote::Report;
 
     let mut result = Vec::new();
@@ -596,7 +595,7 @@ fn to_rego_qvl_result(data: &SupplementalData) -> Vec<serde_json::Value> {
     if matches!(data.report, Report::TD10(_) | Report::TD15(_)) {
         result.push(json!({
             "environment": { "class_id": "3769258c-75e6-4bc7-8d72-d2b0e224cad2" },
-            "measurement": build_qe_measurement(data),
+            "measurement": build_qe_measurement(data)?,
         }));
     }
 
@@ -617,7 +616,7 @@ fn to_rego_qvl_result(data: &SupplementalData) -> Vec<serde_json::Value> {
         "measurement": tenant_m,
     }));
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -912,7 +911,7 @@ mod tests {
     #[test]
     fn rego_qe_measurement_fields() {
         let data = make_rego_supplemental(UpToDate);
-        let m = build_qe_measurement(&data);
+        let m = build_qe_measurement(&data).unwrap();
         assert!(m.get("tcb_status").is_some());
         assert_eq!(m.get("tcb_eval_num").unwrap(), 17);
         assert!(m.get("root_key_id").is_some());
@@ -1071,7 +1070,7 @@ mod tests {
         data.qe_iden_earliest_issue_date = 1_850_000_000;
         data.qe_iden_latest_issue_date = 1_850_100_000;
         data.qe_iden_earliest_expiration_date = 1_950_000_000;
-        let m = build_qe_measurement(&data);
+        let m = build_qe_measurement(&data).unwrap();
         // QE measurement should use qe_iden_* dates, not the global ones
         let earliest = m.get("earliest_issue_date").unwrap().as_str().unwrap();
         let expected = "2028-08-16T"; // 1_850_000_000 = 2028-08-16T00:53:20Z

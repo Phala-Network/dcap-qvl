@@ -24,7 +24,9 @@ pub(crate) use self::ring as default_crypto;
 pub(crate) use self::rustcrypto as default_crypto;
 use crate::{
     quote::{Report, TDAttributes},
-    utils::{encode_as_der, extract_certs, parse_crls, verify_certificate_chain},
+    utils::{
+        encode_as_der, extract_certs, parse_crls, parse_rfc3339_unix_secs, verify_certificate_chain,
+    },
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -146,10 +148,8 @@ impl QuoteVerificationResult {
         let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl).unwrap_or(0);
 
         // tcb_date_tag
-        let tcb_date_tag = chrono::DateTime::parse_from_rfc3339(&self.platform_tcb_level.tcb_date)
-            .ok()
-            .map(|dt| dt.timestamp() as u64)
-            .unwrap_or(0);
+        let tcb_date_tag = parse_rfc3339_unix_secs(&self.platform_tcb_level.tcb_date)
+            .context("Failed to parse platform TCB date")?;
 
         Ok(SupplementalData {
             tee_type: self.tee_type,
@@ -632,16 +632,14 @@ fn verify_tcb_info_signature(
         .context("Failed to decode TcbInfo")?;
 
     // Check validity window
-    let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
-        .ok()
+    let issue_date = parse_rfc3339_unix_secs(&tcb_info.issue_date)
         .context("Failed to parse TCB Info issue date")?;
-    let next_update = chrono::DateTime::parse_from_rfc3339(&tcb_info.next_update)
-        .ok()
+    let next_update = parse_rfc3339_unix_secs(&tcb_info.next_update)
         .context("Failed to parse TCB Info next update")?;
-    if now.as_secs() < issue_date.timestamp() as u64 {
+    if now.as_secs() < issue_date {
         bail!("TCBInfo issue date is in the future");
     }
-    if now.as_secs() > next_update.timestamp() as u64 {
+    if now.as_secs() > next_update {
         bail!("TCBInfo expired");
     }
 
@@ -687,16 +685,14 @@ fn verify_qe_identity_signature(
         .context("Failed to decode QeIdentity")?;
 
     // Check validity window
-    let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
-        .ok()
+    let issue_date = parse_rfc3339_unix_secs(&qe_identity.issue_date)
         .context("Failed to parse QE Identity issue date")?;
-    let next_update = chrono::DateTime::parse_from_rfc3339(&qe_identity.next_update)
-        .ok()
+    let next_update = parse_rfc3339_unix_secs(&qe_identity.next_update)
         .context("Failed to parse QE Identity next update")?;
-    if now.as_secs() < issue_date.timestamp() as u64 {
+    if now.as_secs() < issue_date {
         bail!("QE Identity issue date is in the future");
     }
-    if now.as_secs() > next_update.timestamp() as u64 {
+    if now.as_secs() > next_update {
         bail!("QE Identity expired");
     }
 
@@ -1192,12 +1188,6 @@ fn compute_collateral_time_window(
     tcb_info: &TcbInfo,
     qe_identity: &QeIdentity,
 ) -> Result<CollateralDates> {
-    fn parse_rfc3339_ts(s: &str) -> Option<u64> {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|dt| dt.timestamp() as u64)
-    }
-
     fn parse_crl_dates(crl_der: &[u8]) -> Result<(u64, Option<u64>)> {
         use der::Decode as _;
         let crl = x509_cert::crl::CertificateList::from_der(crl_der)
@@ -1251,12 +1241,14 @@ fn compute_collateral_time_window(
     }
 
     // TCBInfo dates (already parsed upstream)
-    let tcb_issue = parse_rfc3339_ts(&tcb_info.issue_date).context("TCBInfo issueDate")?;
-    let tcb_next = parse_rfc3339_ts(&tcb_info.next_update).context("TCBInfo nextUpdate")?;
+    let tcb_issue = parse_rfc3339_unix_secs(&tcb_info.issue_date).context("TCBInfo issueDate")?;
+    let tcb_next = parse_rfc3339_unix_secs(&tcb_info.next_update).context("TCBInfo nextUpdate")?;
 
     // QEIdentity dates (already parsed upstream)
-    let qe_issue = parse_rfc3339_ts(&qe_identity.issue_date).context("QEIdentity issueDate")?;
-    let qe_next = parse_rfc3339_ts(&qe_identity.next_update).context("QEIdentity nextUpdate")?;
+    let qe_issue =
+        parse_rfc3339_unix_secs(&qe_identity.issue_date).context("QEIdentity issueDate")?;
+    let qe_next =
+        parse_rfc3339_unix_secs(&qe_identity.next_update).context("QEIdentity nextUpdate")?;
 
     let mut earliest_issue = tcb_issue.min(qe_issue);
     let mut latest_issue = tcb_issue.max(qe_issue);

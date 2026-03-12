@@ -104,6 +104,14 @@ pub(crate) fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
         .collect())
 }
 
+pub(crate) fn parse_rfc3339_unix_secs(value: &str) -> Result<u64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .context("Failed to parse RFC3339 datetime")?
+        .timestamp()
+        .try_into()
+        .context("RFC3339 datetime is before Unix epoch")
+}
+
 pub(crate) mod serde_vec_bytes {
     use alloc::vec::Vec;
     use serde::ser::SerializeSeq;
