@@ -112,7 +112,8 @@ let policy = SimplePolicy::strict(now);
 let policy = SimplePolicy::strict(now)
     .allow_status(TcbStatus::OutOfDate)
     .collateral_grace_period(Duration::from_secs(30 * 24 * 3600))
-    .accept_advisory("INTEL-SA-00334");
+    .reject_advisory("INTEL-SA-00334")
+    .reject_advisories(&["INTEL-SA-00615", "INTEL-SA-00809"]);
 ```
 
 For custom validation logic, implement the `Policy` trait directly.

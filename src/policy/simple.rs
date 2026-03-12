@@ -14,7 +14,7 @@ use {
 ///
 /// Covers the 9 checks from Intel's Appraisal framework (`qal_script.rego`)
 /// without requiring a Rego engine. Strict by default: only `UpToDate`,
-/// no grace period, no advisory tolerance.
+/// no grace period, no advisory blacklist.
 ///
 /// # Example
 /// ```no_run
@@ -31,7 +31,7 @@ use {
 /// let policy = SimplePolicy::strict(now)
 ///     .allow_status(TcbStatus::SWHardeningNeeded)
 ///     .collateral_grace_period(Duration::from_secs(90 * 24 * 3600))
-///     .accept_advisory("INTEL-SA-00334");
+///     .reject_advisory("INTEL-SA-00334");
 /// ```
 #[derive(Clone, Debug)]
 pub struct SimplePolicy {
@@ -46,8 +46,8 @@ pub struct SimplePolicy {
     // TCB evaluation
     min_tcb_eval_data_number: Option<u32>,
 
-    // Advisory whitelist (all advisories in quote must be in this set)
-    accepted_advisory_ids: Vec<String>,
+    // Advisory blacklist (quote is rejected if any advisory is in this set)
+    rejected_advisory_ids: Vec<String>,
 
     // Platform flags (default false = reject if True)
     allow_dynamic_platform: bool,
@@ -88,7 +88,7 @@ impl SimplePolicy {
             platform_grace_period: 0,
             qe_grace_period: 0,
             min_tcb_eval_data_number: None,
-            accepted_advisory_ids: Vec::new(),
+            rejected_advisory_ids: Vec::new(),
             allow_dynamic_platform: false,
             allow_cached_keys: false,
             allow_smt: false,
@@ -97,7 +97,7 @@ impl SimplePolicy {
     }
 
     /// Create a strict policy: only `UpToDate` status is accepted,
-    /// no grace period, no advisory tolerance.
+    /// no grace period, no advisory blacklist.
     pub fn strict(now_secs: u64) -> Self {
         Self::new_with_statuses(now_secs, Self::UP_TO_DATE)
     }
@@ -137,11 +137,18 @@ impl SimplePolicy {
         self
     }
 
-    /// Accept a specific advisory ID. All advisories in the quote must be in
-    /// the accepted set or validation fails. By default the set is empty,
-    /// rejecting any quote with advisories.
-    pub fn accept_advisory(mut self, id: impl Into<String>) -> Self {
-        self.accepted_advisory_ids.push(id.into());
+    /// Reject a specific advisory ID. Quotes containing any advisory in the
+    /// rejected set fail validation. By default the set is empty, allowing all
+    /// advisory IDs.
+    pub fn reject_advisory(mut self, id: impl Into<String>) -> Self {
+        self.rejected_advisory_ids.push(id.into());
+        self
+    }
+
+    /// Reject multiple advisory IDs at once.
+    pub fn reject_advisories(mut self, ids: &[impl AsRef<str>]) -> Self {
+        self.rejected_advisory_ids
+            .extend(ids.iter().map(|id| id.as_ref().to_string()));
         self
     }
 
@@ -186,8 +193,8 @@ impl Policy for SimplePolicy {
             date_tag.saturating_add(grace_period) >= now
         }
 
-        fn advisory_accepted(accepted_advisory_ids: &[String], id: &str) -> bool {
-            accepted_advisory_ids
+        fn advisory_rejected(rejected_advisory_ids: &[String], id: &str) -> bool {
+            rejected_advisory_ids
                 .iter()
                 .any(|a| a.eq_ignore_ascii_case(id))
         }
@@ -250,26 +257,15 @@ impl Policy for SimplePolicy {
             );
         }
 
-        // 2. Advisory ID whitelist.
-        // Platform grace skips only platform advisories for pure OutOfDate.
-        // QE grace skips only QE advisories for pure OutOfDate.
-        let skip_platform_advisories =
-            platform_in_grace && data.platform.tcb_level.tcb_status == TcbStatus::OutOfDate;
-        let skip_qe_advisories =
-            qe_in_grace && data.qe.tcb_level.tcb_status == TcbStatus::OutOfDate;
-
-        if !skip_platform_advisories {
-            for id in &data.platform.tcb_level.advisory_ids {
-                if !advisory_accepted(&self.accepted_advisory_ids, id) {
-                    bail!("Advisory ID {id} is not in the accepted set");
-                }
+        // 2. Advisory ID blacklist.
+        for id in &data.platform.tcb_level.advisory_ids {
+            if advisory_rejected(&self.rejected_advisory_ids, id) {
+                bail!("Advisory ID {id} is rejected by policy");
             }
         }
-        if !skip_qe_advisories {
-            for id in &data.qe.tcb_level.advisory_ids {
-                if !advisory_accepted(&self.accepted_advisory_ids, id) {
-                    bail!("Advisory ID {id} is not in the accepted set");
-                }
+        for id in &data.qe.tcb_level.advisory_ids {
+            if advisory_rejected(&self.rejected_advisory_ids, id) {
+                bail!("Advisory ID {id} is rejected by policy");
             }
         }
 
@@ -322,7 +318,7 @@ impl Policy for SimplePolicy {
 /// ```json
 /// {
 ///   "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
-///   "accepted_advisories": ["INTEL-SA-00334"],
+///   "rejected_advisory_ids": ["INTEL-SA-00334"],
 ///   "collateral_grace_period_secs": 2592000,
 ///   "allow_smt": true
 /// }
@@ -332,7 +328,7 @@ pub struct SimplePolicyConfig {
     #[serde(default)]
     pub allowed_statuses: Vec<TcbStatus>,
     #[serde(default)]
-    pub accepted_advisories: Vec<String>,
+    pub rejected_advisory_ids: Vec<String>,
     #[serde(default)]
     pub collateral_grace_period_secs: u64,
     #[serde(default)]
@@ -365,8 +361,8 @@ impl SimplePolicyConfig {
             }
             p
         };
-        for id in self.accepted_advisories {
-            policy = policy.accept_advisory(id);
+        for id in self.rejected_advisory_ids {
+            policy = policy.reject_advisory(id);
         }
         if self.collateral_grace_period_secs > 0 {
             policy = policy
@@ -517,34 +513,46 @@ mod tests {
         assert!(policy.validate(&data).is_ok());
     }
 
-    // -- Advisory ID whitelist --
+    // -- Advisory ID blacklist --
 
     #[test]
-    fn policy_rejects_unknown_advisory() {
+    fn policy_allows_advisory_when_not_blacklisted() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000);
+        assert!(policy.validate(&data).is_ok());
+    }
+
+    #[test]
+    fn policy_rejects_blacklisted_advisory() {
+        let mut data = make_test_supplemental(UpToDate);
+        data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        let policy = SimplePolicy::strict(1_702_000_000).reject_advisory("INTEL-SA-00615");
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     #[test]
-    fn policy_accepts_whitelisted_advisory() {
+    fn policy_advisory_blacklist_case_insensitive() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        let policy = SimplePolicy::strict(1_702_000_000).accept_advisory("INTEL-SA-00615");
-        assert!(policy.validate(&data).is_ok());
+        let policy = SimplePolicy::strict(1_702_000_000).reject_advisory("intel-sa-00615");
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     #[test]
-    fn policy_advisory_case_insensitive() {
+    fn policy_reject_advisories_batch() {
         let mut data = make_test_supplemental(UpToDate);
-        data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        let policy = SimplePolicy::strict(1_702_000_000).accept_advisory("intel-sa-00615");
-        assert!(policy.validate(&data).is_ok());
+        data.tcb.advisory_ids = vec!["INTEL-SA-00820".to_string()];
+        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00820".to_string()];
+        let policy = SimplePolicy::strict(1_702_000_000)
+            .reject_advisories(&["INTEL-SA-00615", "INTEL-SA-00820"]);
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("INTEL-SA-00820"), "{err}");
     }
 
     #[test]
@@ -552,7 +560,6 @@ mod tests {
         let data = make_test_supplemental(UpToDate);
         assert!(data.tcb.advisory_ids.is_empty());
         let policy = SimplePolicy::strict(1_702_000_000);
-        // Empty advisory list in quote → nothing to check against whitelist → passes
         assert!(policy.validate(&data).is_ok());
     }
 
@@ -739,55 +746,52 @@ mod tests {
         assert!(policy.validate(&data).is_ok());
     }
 
-    // -- Advisory skipped during grace --
+    // -- Advisory blacklist during grace --
 
     #[test]
-    fn policy_advisory_checked_during_collateral_grace() {
+    fn policy_blacklist_checked_during_collateral_grace() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        // Collateral grace doesn't skip advisory checks — stale collateral
-        // doesn't invalidate advisory data.
         let policy = SimplePolicy::strict(1_704_000_000)
-            .collateral_grace_period(Duration::from_secs(2_000_000));
+            .collateral_grace_period(Duration::from_secs(2_000_000))
+            .reject_advisory("INTEL-SA-00615");
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     #[test]
-    fn policy_advisory_skipped_during_platform_grace() {
+    fn policy_blacklist_checked_during_platform_grace() {
         let mut data = make_test_supplemental(OutOfDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        // now=1_702_000_000, tcb_date_tag=1_690_000_000 (old),
-        // grace=13_000_000 → within grace → advisories skipped
         let policy = SimplePolicy::strict(1_702_000_000)
             .allow_status(OutOfDate)
-            .platform_grace_period(Duration::from_secs(13_000_000));
-        assert!(policy.validate(&data).is_ok());
+            .platform_grace_period(Duration::from_secs(13_000_000))
+            .reject_advisory("INTEL-SA-00615");
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     #[test]
-    fn policy_advisory_not_skipped_for_out_of_date_config_needed() {
-        // OutOfDateConfigurationNeeded should NOT skip advisory checks during grace,
-        // because the Configuration advisories are unrelated to the OutOfDate grace.
+    fn policy_blacklist_checked_for_out_of_date_config_needed() {
         let mut data = make_test_supplemental(OutOfDateConfigurationNeeded);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         let policy = SimplePolicy::strict(1_702_000_000)
             .allow_status(OutOfDateConfigurationNeeded)
-            .platform_grace_period(Duration::from_secs(13_000_000));
+            .platform_grace_period(Duration::from_secs(13_000_000))
+            .reject_advisory("INTEL-SA-00615");
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     #[test]
-    fn policy_advisory_checked_without_grace() {
+    fn policy_blacklist_checked_without_grace() {
         let mut data = make_test_supplemental(UpToDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
         data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        // No grace period → advisories checked normally
-        let policy = SimplePolicy::strict(1_702_000_000);
+        let policy = SimplePolicy::strict(1_702_000_000).reject_advisory("INTEL-SA-00615");
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("INTEL-SA-00615"), "{err}");
     }

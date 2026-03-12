@@ -36,7 +36,7 @@ pub use rego::RegoPolicySet;
 /// let policy = SimplePolicy::strict(now_unix_secs)
 ///     .allow_status(TcbStatus::SWHardeningNeeded)
 ///     .collateral_grace_period(Duration::from_secs(90 * 24 * 3600))
-///     .accept_advisory("INTEL-SA-00334");
+///     .reject_advisory("INTEL-SA-00334");
 /// ```
 ///
 /// Implement this trait directly only for logic that [`SimplePolicy`] cannot express.

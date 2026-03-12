@@ -323,22 +323,26 @@ class PySimplePolicy:
 
         policy = SimplePolicy.strict(now_secs) \\
             .allow_status("SWHardeningNeeded") \\
-            .accept_advisory("INTEL-SA-00334") \\
+            .reject_advisory("INTEL-SA-00334") \\
             .collateral_grace_period(90 * 24 * 3600) \\
             .qe_grace_period(7 * 24 * 3600)
     """
 
     @staticmethod
     def strict(now_secs: int) -> "PySimplePolicy":
-        """Create a strict policy: only UpToDate, no grace, no advisory tolerance."""
+        """Create a strict policy: only UpToDate, no grace, no advisory blacklist."""
         ...
 
     def allow_status(self, status: str) -> "PySimplePolicy":
         """Allow an additional TCB status (e.g. "SWHardeningNeeded")."""
         ...
 
-    def accept_advisory(self, advisory_id: str) -> "PySimplePolicy":
-        """Accept a specific advisory ID (e.g. "INTEL-SA-00334")."""
+    def reject_advisory(self, advisory_id: str) -> "PySimplePolicy":
+        """Reject a specific advisory ID (e.g. "INTEL-SA-00334")."""
+        ...
+
+    def reject_advisories(self, advisory_ids: List[str]) -> "PySimplePolicy":
+        """Reject multiple advisory IDs at once."""
         ...
 
     def collateral_grace_period(self, secs: int) -> "PySimplePolicy":

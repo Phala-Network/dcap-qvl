@@ -348,7 +348,7 @@ fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
 #[cfg(feature = "js")]
 #[wasm_bindgen(js_class = "SimplePolicy")]
 impl JsSimplePolicy {
-    /// Create a strict policy: only `UpToDate`, no grace period, no advisory tolerance.
+    /// Create a strict policy: only `UpToDate`, no grace period, no advisory blacklist.
     #[wasm_bindgen(constructor)]
     pub fn strict(now_secs: u64) -> Self {
         Self {
@@ -364,10 +364,17 @@ impl JsSimplePolicy {
         })
     }
 
-    /// Accept a specific advisory ID (e.g. "INTEL-SA-00334").
-    pub fn accept_advisory(self, id: &str) -> Self {
+    /// Reject a specific advisory ID (e.g. "INTEL-SA-00334").
+    pub fn reject_advisory(self, id: &str) -> Self {
         Self {
-            inner: self.inner.accept_advisory(id),
+            inner: self.inner.reject_advisory(id),
+        }
+    }
+
+    /// Reject multiple advisory IDs at once.
+    pub fn reject_advisories(self, ids: Vec<String>) -> Self {
+        Self {
+            inner: self.inner.reject_advisories(&ids),
         }
     }
 

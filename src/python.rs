@@ -470,7 +470,7 @@ fn parse_tcb_status(s: &str) -> PyResult<TcbStatus> {
 
 #[pymethods]
 impl PySimplePolicy {
-    /// Create a strict policy: only `UpToDate` status, no grace, no advisory tolerance.
+    /// Create a strict policy: only `UpToDate` status, no grace, no advisory blacklist.
     #[staticmethod]
     fn strict(now_secs: u64) -> Self {
         Self {
@@ -486,10 +486,17 @@ impl PySimplePolicy {
         })
     }
 
-    /// Accept a specific advisory ID (e.g. "INTEL-SA-00334").
-    fn accept_advisory(&self, advisory_id: &str) -> Self {
+    /// Reject a specific advisory ID (e.g. "INTEL-SA-00334").
+    fn reject_advisory(&self, advisory_id: &str) -> Self {
         Self {
-            inner: self.inner.clone().accept_advisory(advisory_id),
+            inner: self.inner.clone().reject_advisory(advisory_id),
+        }
+    }
+
+    /// Reject multiple advisory IDs at once.
+    fn reject_advisories(&self, advisory_ids: Vec<String>) -> Self {
+        Self {
+            inner: self.inner.clone().reject_advisories(&advisory_ids),
         }
     }
 
