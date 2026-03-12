@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use {
     crate::constants::*,
@@ -8,6 +9,11 @@ use {
     alloc::string::String,
     alloc::vec::Vec,
 };
+
+#[cfg(feature = "borsh_schema")]
+use borsh::BorshSchema;
+#[cfg(feature = "borsh")]
+use borsh::{BorshDeserialize, BorshSerialize};
 
 mod simple;
 pub use simple::{SimplePolicy, SimplePolicyConfig};
@@ -51,7 +57,10 @@ pub trait Policy {
 ///
 /// These flags are only present in PCK certificates issued by the **Platform CA**.
 /// For Processor CA certificates, the value is [`Undefined`](PckCertFlag::Undefined).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+#[cfg_attr(feature = "borsh", borsh(use_discriminant = true))]
 pub enum PckCertFlag {
     /// The flag is explicitly false (ASN.1 BOOLEAN FALSE).
     False = 0,

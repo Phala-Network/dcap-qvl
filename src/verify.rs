@@ -95,9 +95,13 @@ use borsh::{BorshDeserialize, BorshSerialize};
 ///
 /// [`SupplementalData`] is built lazily via [`supplemental()`](Self::supplemental) —
 /// the `verify()` call itself does the minimum work (crypto only).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QuoteVerificationResult {
     report: Report,
     collateral: QuoteCollateralV3,
+    #[serde(with = "crate::utils::serde_vec_bytes")]
     pck_cert_chain_der: Vec<Vec<u8>>,
     // -- core verification results (always computed) --
     tee_type: u32,
@@ -109,8 +113,8 @@ pub struct QuoteVerificationResult {
     qe_report: EnclaveReport,
     tcb_eval_data_number: u32,
     qe_tcb_eval_data_number: u32,
-    root_ca_der: Vec<u8>,
-    sha384: fn(&[u8]) -> [u8; 48],
+    #[serde(with = "serde_bytes")]
+    root_key_id: [u8; 48],
 }
 
 impl QuoteVerificationResult {
@@ -134,16 +138,7 @@ impl QuoteVerificationResult {
             compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
 
         // root_key_id: SHA-384 of root CA's raw public key bytes
-        let root_key_id = {
-            let root_cert: x509_cert::Certificate = der::Decode::from_der(&self.root_ca_der)
-                .context("root CA already validated but failed to re-parse")?;
-            let raw_key = root_cert
-                .tbs_certificate
-                .subject_public_key_info
-                .subject_public_key
-                .raw_bytes();
-            (self.sha384)(raw_key)
-        };
+        let root_key_id = self.root_key_id;
 
         // CRL numbers
         let root_ca_crl_num =
@@ -802,12 +797,20 @@ fn verify_pck_cert_chain(
 }
 
 /// Result from PCK certificate chain verification
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 struct PckCertChainResult {
+    #[serde(with = "crate::utils::serde_vec_bytes")]
     pck_cert_chain_der: Vec<Vec<u8>>,
+    #[serde(with = "serde_bytes")]
     pck_leaf_der: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     ppid: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     cpu_svn: [u8; 16],
     pce_svn: u16,
+    #[serde(with = "serde_bytes")]
     fmspc: [u8; 6],
     pce_id: u16,
     sgx_type: u8,
@@ -1127,6 +1130,17 @@ fn verify_impl(
         bail!("TCB status is invalid: Revoked");
     }
 
+    let root_key_id = {
+        let root_cert: x509_cert::Certificate =
+            der::Decode::from_der(root_ca_der).context("Failed to parse root CA certificate")?;
+        let raw_key = root_cert
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .raw_bytes();
+        (backend.sha384)(raw_key)
+    };
+
     // Validate report attributes (debug mode check, etc.)
     validate_attrs(&quote.report)?;
 
@@ -1145,8 +1159,7 @@ fn verify_impl(
             .tcb_evaluation_data_number
             .min(qe_identity.tcb_evaluation_data_number),
         qe_tcb_eval_data_number: qe_identity.tcb_evaluation_data_number,
-        root_ca_der: root_ca_der.to_vec(),
-        sha384: backend.sha384,
+        root_key_id,
     })
 }
 

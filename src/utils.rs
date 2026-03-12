@@ -104,6 +104,32 @@ pub(crate) fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
         .collect())
 }
 
+pub(crate) mod serde_vec_bytes {
+    use alloc::vec::Vec;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_bytes::{ByteBuf, Bytes};
+
+    pub fn serialize<S>(value: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(value.len()))?;
+        for item in value {
+            seq.serialize_element(Bytes::new(item))?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Vec::<ByteBuf>::deserialize(deserializer)?;
+        Ok(value.into_iter().map(ByteBuf::into_vec).collect())
+    }
+}
+
 pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>> {
     let mut certs = Vec::<CertificateDer<'a>>::new();
 

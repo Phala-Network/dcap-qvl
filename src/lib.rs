@@ -51,7 +51,9 @@ use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(
+    Encode, Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QuoteCollateralV3 {
