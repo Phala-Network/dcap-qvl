@@ -659,7 +659,7 @@ mod tests {
                     ppid: vec![0u8; 16],
                     cpu_svn: [0u8; 16],
                     pce_svn: 13,
-                    pce_id: 0,
+                    pce_id: vec![0u8; 2],
                     fmspc: [0u8; 6],
                     sgx_type: 0,
                     platform_instance_id: None,

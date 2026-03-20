@@ -165,7 +165,7 @@ impl QuoteVerificationResult {
                     ppid: self.pck_ext.ppid.clone(),
                     cpu_svn: self.pck_ext.cpu_svn,
                     pce_svn: self.pck_ext.pce_svn,
-                    pce_id: self.pck_ext.pce_id,
+                    pce_id: self.pck_ext.pce_id.clone(),
                     fmspc: self.pck_ext.fmspc,
                     sgx_type: self.pck_ext.sgx_type,
                     platform_instance_id: self.pck_ext.platform_instance_id,
@@ -765,12 +765,8 @@ fn verify_pck_cert_chain(
     // Extract Intel extension data from PCK cert (parsed once)
     let pck_ext = intel::parse_pck_extension(pck_leaf)?;
 
-    // Convert pce_id bytes to u16 (big-endian)
-    let pce_id = match pck_ext.pce_id.as_slice() {
-        [hi, lo] => u16::from_be_bytes([*hi, *lo]),
-        [lo] => u16::from(*lo),
-        _ => 0,
-    };
+    // Preserve pce_id as the raw value from the PCK cert SGX extension.
+    let pce_id = pck_ext.pce_id.clone();
 
     // Convert platform_instance_id to fixed-size array
     let platform_instance_id = pck_ext.platform_instance_id.as_ref().and_then(|v| {
@@ -813,7 +809,8 @@ struct PckCertChainResult {
     pce_svn: u16,
     #[serde(with = "serde_bytes")]
     fmspc: [u8; 6],
-    pce_id: u16,
+    #[serde(with = "serde_bytes")]
+    pce_id: Vec<u8>,
     sgx_type: u8,
     platform_instance_id: Option<[u8; 16]>,
     dynamic_platform: PckCertFlag,

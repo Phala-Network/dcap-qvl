@@ -161,8 +161,8 @@ pub struct PckIdentity {
     pub cpu_svn: CpuSvn,
     /// PCE ISV Security Version Number.
     pub pce_svn: Svn,
-    /// PCE ID.
-    pub pce_id: u16,
+    /// PCE ID (raw value from the PCK certificate SGX extension).
+    pub pce_id: Vec<u8>,
     /// FMSPC (6 bytes).
     pub fmspc: Fmspc,
     /// SGX type: 0=Standard, 1=Scalable, 2=ScalableWithIntegrity.

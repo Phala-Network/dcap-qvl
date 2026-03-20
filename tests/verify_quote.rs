@@ -198,11 +198,7 @@ fn sgx_supplemental_data_cross_validation() {
     assert_eq!(s.platform.pck.ppid, pck_ext.ppid);
     assert_eq!(s.platform.pck.sgx_type, pck_ext.sgx_type as u8);
 
-    let expected_pce_id = match pck_ext.pce_id.len() {
-        2 => u16::from_be_bytes([pck_ext.pce_id[0], pck_ext.pce_id[1]]),
-        1 => u16::from(pck_ext.pce_id[0]),
-        _ => 0,
-    };
+    let expected_pce_id = pck_ext.pce_id.clone();
     assert_eq!(s.platform.pck.pce_id, expected_pce_id);
 
     // ── TEE type ────────────────────────────────────────────────────────
