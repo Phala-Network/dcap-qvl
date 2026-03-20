@@ -73,8 +73,8 @@ use dcap_qvl::verify::rustcrypto::verify;
 
 ```rust
 use dcap_qvl::collateral::get_collateral;
-// Use explicit backend for predictable behavior
-use dcap_qvl::verify::ring::verify;
+use dcap_qvl::verify::{QuoteVerifier, ring};
+use dcap_qvl::SimplePolicy;
 use dcap_qvl::PHALA_PCCS_URL;
 
 #[tokio::main]
@@ -86,10 +86,39 @@ async fn main() {
     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
 
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let report = verify(&quote, &collateral, now).expect("failed to verify quote");
+
+    // Phase 1: Cryptographic verification
+    let verifier = QuoteVerifier::new_prod(ring::backend());
+    let result = verifier.verify(&quote, collateral, now).expect("verification failed");
+
+    // Phase 2: Policy validation
+    let report = result.validate(&SimplePolicy::strict(now)).expect("policy failed");
     println!("{:?}", report);
 }
 ```
+
+# Policy Validation
+
+After cryptographic verification, apply a **policy** to check TCB status, advisory IDs, collateral freshness, and platform flags.
+
+```rust
+use dcap_qvl::{SimplePolicy, TcbStatus};
+use core::time::Duration;
+
+// Strict: only UpToDate (default)
+let policy = SimplePolicy::strict(now);
+
+// Relaxed: accept OutOfDate + 30-day collateral grace
+let policy = SimplePolicy::strict(now)
+    .allow_status(TcbStatus::OutOfDate)
+    .collateral_grace_period(Duration::from_secs(30 * 24 * 3600))
+    .reject_advisory("INTEL-SA-00334")
+    .reject_advisories(&["INTEL-SA-00615", "INTEL-SA-00809"]);
+```
+
+For custom validation logic, implement the `Policy` trait directly.
+
+See [docs/policy.md](docs/policy.md) for the complete policy guide, including grace period semantics, platform flags, `RegoPolicy`, and custom `Policy` trait examples.
 
 <!-- cargo-rdme end -->
 
@@ -112,16 +141,59 @@ make test_python_versions
 
 ```python
 import asyncio
+import time
 import dcap_qvl
 
 async def main():
     quote_data = open("quote.bin", "rb").read()
 
-    # Get collateral and verify in one step (defaults to Phala PCCS)
+    # Get collateral and perform crypto verification (defaults to Phala PCCS)
     result = await dcap_qvl.get_collateral_and_verify(quote_data)
-    print(f"Status: {result.status}")
+
+    # Validate with SimplePolicy
+    now = int(time.time())
+    policy = dcap_qvl.SimplePolicy.strict(now)
+    report = result.validate(policy)
+    print(f"Status: {report.status}")
 
 asyncio.run(main())
+```
+
+You can also validate with Intel QAL-compatible Rego policies:
+
+```python
+policy_json = r'''{
+  "environment": {
+    "class_id": "3123ec35-8d38-4ea5-87a5-d6c48b567570"
+  },
+  "reference": {
+    "accepted_tcb_status": ["UpToDate"],
+    "collateral_grace_period": 0
+  }
+}'''
+
+rego_policy = dcap_qvl.RegoPolicy(policy_json)
+report = result.validate(rego_policy)
+```
+
+And from JS/WASM:
+
+```js
+import init, { QuoteVerifier, SimplePolicy, RegoPolicy } from "@phala/dcap-qvl-web";
+
+await init();
+
+const collateral = await QuoteVerifier.get_collateral(pccsUrl, quoteBytes);
+const verifier = new QuoteVerifier();
+const now = BigInt(Math.floor(Date.now() / 1000));
+const result = verifier.verify(quoteBytes, collateral, now);
+
+const simplePolicy = new SimplePolicy(now);
+const report1 = result.validate(simplePolicy);
+
+const regoPolicy = new RegoPolicy(policyJson);
+const result2 = verifier.verify(quoteBytes, collateral, now);
+const report2 = result2.validate_rego(regoPolicy);
 ```
 
 See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.

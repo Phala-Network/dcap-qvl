@@ -313,6 +313,138 @@ class PyPckExtension:
         ...
 
 
+class PySimplePolicy:
+    """Verification policy with builder pattern.
+
+    Use ``SimplePolicy.strict(now_secs)`` to create a strict policy (only UpToDate),
+    then chain builder methods to relax constraints.
+
+    Example::
+
+        policy = SimplePolicy.strict(now_secs) \\
+            .allow_status("SWHardeningNeeded") \\
+            .reject_advisory("INTEL-SA-00334") \\
+            .collateral_grace_period(90 * 24 * 3600) \\
+            .qe_grace_period(7 * 24 * 3600)
+    """
+
+    @staticmethod
+    def strict(now_secs: int) -> "PySimplePolicy":
+        """Create a strict policy: only UpToDate, no grace, no advisory blacklist."""
+        ...
+
+    def allow_status(self, status: str) -> "PySimplePolicy":
+        """Allow an additional TCB status (e.g. "SWHardeningNeeded")."""
+        ...
+
+    def reject_advisory(self, advisory_id: str) -> "PySimplePolicy":
+        """Reject a specific advisory ID (e.g. "INTEL-SA-00334")."""
+        ...
+
+    def reject_advisories(self, advisory_ids: List[str]) -> "PySimplePolicy":
+        """Reject multiple advisory IDs at once."""
+        ...
+
+    def collateral_grace_period(self, secs: int) -> "PySimplePolicy":
+        """Set collateral grace period in seconds."""
+        ...
+
+    def platform_grace_period(self, secs: int) -> "PySimplePolicy":
+        """Set platform grace period in seconds."""
+        ...
+
+    def qe_grace_period(self, secs: int) -> "PySimplePolicy":
+        """Set QE grace period in seconds."""
+        ...
+
+    def min_tcb_eval_data_number(self, min: int) -> "PySimplePolicy":
+        """Set minimum TCB evaluation data number."""
+        ...
+
+    def allow_dynamic_platform(self, allow: bool) -> "PySimplePolicy":
+        """Set whether dynamic platforms are allowed."""
+        ...
+
+    def allow_cached_keys(self, allow: bool) -> "PySimplePolicy":
+        """Set whether cached keys are allowed."""
+        ...
+
+    def allow_smt(self, allow: bool) -> "PySimplePolicy":
+        """Set whether SMT (hyperthreading) is allowed."""
+        ...
+
+    def accepted_sgx_types(self, types: List[int]) -> "PySimplePolicy":
+        """Set accepted SGX types (e.g. [0, 1, 2])."""
+        ...
+
+
+class PyRegoPolicy:
+    """Intel QAL-compatible Rego policy."""
+
+    def __init__(self, policy_json: str) -> None:
+        """Create a Rego policy from Intel-format JSON."""
+        ...
+
+    @staticmethod
+    def with_rego(policy_json: str, rego_source: str) -> "PyRegoPolicy":
+        """Create a Rego policy with a custom Rego script."""
+        ...
+
+
+class PyRegoPolicySet:
+    """Intel QAL-compatible multi-measurement Rego policy set."""
+
+    def __init__(self, policy_jsons: List[str]) -> None:
+        """Create a Rego policy set from multiple Intel-format JSON policies."""
+        ...
+
+    @staticmethod
+    def with_rego(
+        policy_jsons: List[str], rego_source: str
+    ) -> "PyRegoPolicySet":
+        """Create a Rego policy set with a custom Rego script."""
+        ...
+
+
+class PyQuoteVerificationResult:
+    """Intermediate result from crypto verification (phase 1).
+
+    Use ``validate(policy)`` to apply a policy and get a ``PyVerifiedReport``.
+    Use ``into_report_unchecked()`` to skip policy validation (dangerous).
+
+    The result is consumed on validate/into_report_unchecked — calling twice raises ValueError.
+    """
+
+    def validate(
+        self, policy: Union[PySimplePolicy, PyRegoPolicy, PyRegoPolicySet]
+    ) -> PyVerifiedReport:
+        """Validate against a policy, returning a VerifiedReport. Consumes the result.
+
+        Args:
+            policy: Verification policy
+
+        Returns:
+            PyVerifiedReport containing verification status
+
+        Raises:
+            ValueError: If result already consumed or policy validation fails
+        """
+        ...
+
+    def into_report_unchecked(self) -> PyVerifiedReport:
+        """Get VerifiedReport without policy validation. Consumes the result.
+
+        WARNING: Skips all policy checks. Use only when you handle validation externally.
+
+        Returns:
+            PyVerifiedReport containing verification status
+
+        Raises:
+            ValueError: If result already consumed
+        """
+        ...
+
+
 class PyQuote:
     """
     Represents a parsed SGX or TDX quote.
@@ -420,13 +552,13 @@ class PyQuote:
 
 def py_verify(
     raw_quote: bytes, collateral: PyQuoteCollateralV3, now_secs: int
-) -> PyVerifiedReport:
+) -> PyQuoteVerificationResult:
     """
-    Verify an SGX or TDX quote with the provided collateral data.
+    Verify an SGX or TDX quote (crypto only, phase 1).
 
-    This function performs cryptographic verification of the quote against
-    the provided collateral information, checking certificates, signatures,
-    and revocation status.
+    Performs cryptographic verification of the quote against the provided
+    collateral. Returns a QuoteVerificationResult that must be validated
+    with a policy via .validate(policy) to get a VerifiedReport.
 
     Args:
         raw_quote: Raw quote data as bytes (SGX or TDX format)
@@ -434,11 +566,10 @@ def py_verify(
         now_secs: Current timestamp in seconds since Unix epoch for time-based checks
 
     Returns:
-        PyVerifiedReport containing verification status and advisory information
+        PyQuoteVerificationResult: use .validate(policy) to get VerifiedReport
 
     Raises:
-        ValueError: If verification fails due to invalid data, expired certificates,
-                   revoked keys, or other verification errors
+        ValueError: If cryptographic verification fails
     """
     ...
 
@@ -446,10 +577,10 @@ def py_verify_with_root_ca(
     raw_quote: bytes,
     collateral: PyQuoteCollateralV3,
     root_ca_der: bytes,
-    now_secs: int
-) -> PyVerifiedReport:
+    now_secs: int,
+) -> PyQuoteVerificationResult:
     """
-    Verify an SGX or TDX quote with the provided collateral data and custom root CA.
+    Verify an SGX or TDX quote with custom root CA (crypto only, phase 1).
 
     Args:
         raw_quote: Raw quote data as bytes (SGX or TDX format)
@@ -458,10 +589,10 @@ def py_verify_with_root_ca(
         now_secs: Current timestamp in seconds since Unix epoch for time-based checks
 
     Returns:
-        PyVerifiedReport containing verification status and advisory information
+        PyQuoteVerificationResult: use .validate(policy) to get VerifiedReport
 
     Raises:
-        ValueError: If verification fails
+        ValueError: If cryptographic verification fails
     """
     ...
 

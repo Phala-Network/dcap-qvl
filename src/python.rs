@@ -1,14 +1,20 @@
+use core::time::Duration;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict, PyTuple};
 use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
 
+#[cfg(feature = "rego")]
+use crate::policy::{RegoPolicy, RegoPolicySet};
 use crate::{
     collateral::get_collateral_for_fmspc,
     intel,
+    policy::SimplePolicy,
     quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
-    verify::{verify, VerifiedReport},
+    tcb_info::TcbStatus,
+    verify::{QuoteVerifier, VerifiedReport},
     QuoteCollateralV3,
 };
 
@@ -21,31 +27,43 @@ pub struct PyQuoteCollateralV3 {
 #[pymethods]
 impl PyQuoteCollateralV3 {
     #[new]
-    fn new(
-        pck_crl_issuer_chain: String,
-        root_ca_crl: Vec<u8>,
-        pck_crl: Vec<u8>,
-        tcb_info_issuer_chain: String,
-        tcb_info: String,
-        tcb_info_signature: Vec<u8>,
-        qe_identity_issuer_chain: String,
-        qe_identity: String,
-        qe_identity_signature: Vec<u8>,
-    ) -> Self {
-        Self {
+    #[pyo3(signature = (*args, **kwargs))]
+    fn new(args: &Bound<'_, PyTuple>, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        fn get_arg<T>(
+            args: &Bound<'_, PyTuple>,
+            kwargs: Option<&Bound<'_, PyDict>>,
+            index: usize,
+            name: &str,
+        ) -> PyResult<T>
+        where
+            T: for<'py> pyo3::FromPyObject<'py>,
+        {
+            if let Ok(value) = args.get_item(index) {
+                return value.extract::<T>();
+            }
+            let value = kwargs
+                .and_then(|kw| kw.get_item(name).transpose())
+                .transpose()?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!("missing required argument: {name}"))
+                })?;
+            value.extract::<T>()
+        }
+
+        Ok(Self {
             inner: QuoteCollateralV3 {
-                pck_crl_issuer_chain,
-                root_ca_crl,
-                pck_crl,
-                tcb_info_issuer_chain,
-                tcb_info,
-                tcb_info_signature,
-                qe_identity_issuer_chain,
-                qe_identity,
-                qe_identity_signature,
+                pck_crl_issuer_chain: get_arg(args, kwargs, 0, "pck_crl_issuer_chain")?,
+                root_ca_crl: get_arg(args, kwargs, 1, "root_ca_crl")?,
+                pck_crl: get_arg(args, kwargs, 2, "pck_crl")?,
+                tcb_info_issuer_chain: get_arg(args, kwargs, 3, "tcb_info_issuer_chain")?,
+                tcb_info: get_arg(args, kwargs, 4, "tcb_info")?,
+                tcb_info_signature: get_arg(args, kwargs, 5, "tcb_info_signature")?,
+                qe_identity_issuer_chain: get_arg(args, kwargs, 6, "qe_identity_issuer_chain")?,
+                qe_identity: get_arg(args, kwargs, 7, "qe_identity")?,
+                qe_identity_signature: get_arg(args, kwargs, 8, "qe_identity_signature")?,
                 pck_certificate_chain: None,
             },
-        }
+        })
     }
 
     #[getter]
@@ -427,6 +445,177 @@ impl PyPckExtension {
     }
 }
 
+/// Verification policy with builder pattern.
+///
+/// Mirrors the Rust `SimplePolicy` API. Use `SimplePolicy.strict(now_secs)` to create
+/// a strict policy (only UpToDate), then chain builder methods to relax constraints.
+#[pyclass]
+#[derive(Clone)]
+pub struct PySimplePolicy {
+    inner: SimplePolicy,
+}
+
+fn parse_tcb_status(s: &str) -> PyResult<TcbStatus> {
+    match s {
+        "UpToDate" => Ok(TcbStatus::UpToDate),
+        "SWHardeningNeeded" => Ok(TcbStatus::SWHardeningNeeded),
+        "ConfigurationNeeded" => Ok(TcbStatus::ConfigurationNeeded),
+        "ConfigurationAndSWHardeningNeeded" => Ok(TcbStatus::ConfigurationAndSWHardeningNeeded),
+        "OutOfDate" => Ok(TcbStatus::OutOfDate),
+        "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
+        "Revoked" => Ok(TcbStatus::Revoked),
+        _ => Err(PyValueError::new_err(format!("Unknown TCB status: {s}"))),
+    }
+}
+
+#[pymethods]
+impl PySimplePolicy {
+    /// Create a strict policy: only `UpToDate` status, no grace, no advisory blacklist.
+    #[staticmethod]
+    fn strict(now_secs: u64) -> Self {
+        Self {
+            inner: SimplePolicy::strict(now_secs),
+        }
+    }
+
+    /// Allow an additional TCB status (e.g. "SWHardeningNeeded").
+    fn allow_status(&self, status: &str) -> PyResult<Self> {
+        let s = parse_tcb_status(status)?;
+        Ok(Self {
+            inner: self.inner.clone().allow_status(s),
+        })
+    }
+
+    /// Reject a specific advisory ID (e.g. "INTEL-SA-00334").
+    fn reject_advisory(&self, advisory_id: &str) -> Self {
+        Self {
+            inner: self.inner.clone().reject_advisory(advisory_id),
+        }
+    }
+
+    /// Reject multiple advisory IDs at once.
+    fn reject_advisories(&self, advisory_ids: Vec<String>) -> Self {
+        Self {
+            inner: self.inner.clone().reject_advisories(&advisory_ids),
+        }
+    }
+
+    /// Set collateral grace period in seconds.
+    fn collateral_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .collateral_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set platform grace period in seconds.
+    fn platform_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .platform_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set QE grace period in seconds.
+    fn qe_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .qe_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set minimum TCB evaluation data number.
+    fn min_tcb_eval_data_number(&self, min: u32) -> Self {
+        Self {
+            inner: self.inner.clone().min_tcb_eval_data_number(min),
+        }
+    }
+
+    /// Set whether dynamic platforms are allowed.
+    fn allow_dynamic_platform(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_dynamic_platform(allow),
+        }
+    }
+
+    /// Set whether cached keys are allowed.
+    fn allow_cached_keys(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_cached_keys(allow),
+        }
+    }
+
+    /// Set whether SMT (hyperthreading) is allowed.
+    fn allow_smt(&self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_smt(allow),
+        }
+    }
+
+    /// Set accepted SGX types (e.g. [0, 1, 2]).
+    fn accepted_sgx_types(&self, types: Vec<u8>) -> Self {
+        Self {
+            inner: self.inner.clone().accepted_sgx_types(&types),
+        }
+    }
+}
+
+#[cfg(feature = "rego")]
+#[pyclass]
+pub struct PyRegoPolicy {
+    inner: RegoPolicy,
+}
+
+#[cfg(feature = "rego")]
+#[pymethods]
+impl PyRegoPolicy {
+    #[new]
+    fn new(policy_json: &str) -> PyResult<Self> {
+        let inner = RegoPolicy::new(policy_json)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy: {e}")))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn with_rego(policy_json: &str, rego_source: &str) -> PyResult<Self> {
+        let inner = RegoPolicy::with_rego(policy_json, rego_source)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy: {e}")))?;
+        Ok(Self { inner })
+    }
+}
+
+#[cfg(feature = "rego")]
+#[pyclass]
+pub struct PyRegoPolicySet {
+    inner: RegoPolicySet,
+}
+
+#[cfg(feature = "rego")]
+#[pymethods]
+impl PyRegoPolicySet {
+    #[new]
+    fn new(policy_jsons: Vec<String>) -> PyResult<Self> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = RegoPolicySet::new(&policy_refs)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy set: {e}")))?;
+        Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    fn with_rego(policy_jsons: Vec<String>, rego_source: &str) -> PyResult<Self> {
+        let policy_refs: Vec<&str> = policy_jsons.iter().map(String::as_str).collect();
+        let inner = RegoPolicySet::with_rego(&policy_refs, rego_source)
+            .map_err(|e| PyValueError::new_err(format!("Invalid Rego policy set: {e}")))?;
+        Ok(Self { inner })
+    }
+}
+
 #[pyclass]
 pub struct PyQuote {
     inner: Quote,
@@ -511,11 +700,12 @@ impl PyQuote {
             Ok(v) => v,
             Err(_) => return Ok(None),
         };
-        let mut end = raw.len();
-        while end > 0 && raw[end - 1] == 0 {
-            end -= 1;
-        }
-        Ok(Some(PyBytes::new(py, &raw[..end]).into()))
+        let trimmed = raw
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .and_then(|end| raw.get(..=end))
+            .unwrap_or(&[]);
+        Ok(Some(PyBytes::new(py, trimmed).into()))
     }
 
     /// Parse the Intel SGX extension from the leaf PCK certificate.
@@ -537,20 +727,76 @@ impl PyQuote {
     }
 }
 
+/// Result of cryptographic quote verification (phase 1).
+///
+/// Use `validate(policy)` to apply a policy and get a `VerifiedReport`.
+/// Use `into_report_unchecked()` to skip policy validation (dangerous).
+#[pyclass]
+pub struct PyQuoteVerificationResult {
+    inner: Option<crate::verify::QuoteVerificationResult>,
+}
+
+#[pymethods]
+impl PyQuoteVerificationResult {
+    /// Validate against a policy, returning a VerifiedReport. Consumes the result.
+    fn validate<'py>(&mut self, policy: &Bound<'py, PyAny>) -> PyResult<PyVerifiedReport> {
+        let result = self
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;
+
+        let report = if let Ok(policy) = policy.extract::<PyRef<'py, PySimplePolicy>>() {
+            result.validate(&policy.inner)
+        } else {
+            #[cfg(feature = "rego")]
+            {
+                if let Ok(policy) = policy.extract::<PyRef<'py, PyRegoPolicy>>() {
+                    result.validate(&policy.inner)
+                } else if let Ok(policy) = policy.extract::<PyRef<'py, PyRegoPolicySet>>() {
+                    result.validate(&policy.inner)
+                } else {
+                    return Err(PyValueError::new_err(
+                        "policy must be SimplePolicy, RegoPolicy, or RegoPolicySet",
+                    ));
+                }
+            }
+            #[cfg(not(feature = "rego"))]
+            {
+                return Err(PyValueError::new_err("policy must be SimplePolicy"));
+            }
+        }
+        .map_err(|e| PyValueError::new_err(format!("Policy validation failed: {e:?}")))?;
+        Ok(PyVerifiedReport { inner: report })
+    }
+
+    /// Get VerifiedReport without policy validation. Consumes the result.
+    ///
+    /// WARNING: Skips all policy checks. Use only when you handle validation externally.
+    fn into_report_unchecked(mut slf: PyRefMut<'_, Self>) -> PyResult<PyVerifiedReport> {
+        let result = slf
+            .inner
+            .take()
+            .ok_or_else(|| PyValueError::new_err("verification result already consumed"))?;
+        Ok(PyVerifiedReport {
+            inner: result.into_report_unchecked(),
+        })
+    }
+}
+
 #[pyfunction]
 fn py_verify(
     raw_quote: &Bound<'_, PyBytes>,
     collateral: &PyQuoteCollateralV3,
     now_secs: u64,
-) -> PyResult<PyVerifiedReport> {
+) -> PyResult<PyQuoteVerificationResult> {
     let quote_bytes = raw_quote.as_bytes();
-
-    match verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    let verifier = QuoteVerifier::new_prod(crate::verify::ring::backend());
+    let result = verifier
+        .verify(quote_bytes, collateral.inner.clone(), now_secs)
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))?;
+    Ok(PyQuoteVerificationResult {
+        inner: Some(result),
+    })
 }
 
 #[pyfunction]
@@ -559,20 +805,17 @@ fn py_verify_with_root_ca(
     collateral: &PyQuoteCollateralV3,
     root_ca_der: &Bound<'_, PyBytes>,
     now_secs: u64,
-) -> PyResult<PyVerifiedReport> {
+) -> PyResult<PyQuoteVerificationResult> {
     let quote_bytes = raw_quote.as_bytes();
     let root_ca = root_ca_der.as_bytes();
 
-    let verifier = crate::verify::QuoteVerifier::new(
-        root_ca.to_vec(),
-        crate::verify::default_crypto::backend(),
-    );
-    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    let verifier = QuoteVerifier::new(root_ca.to_vec(), crate::verify::ring::backend());
+    let result = verifier
+        .verify(quote_bytes, collateral.inner.clone(), now_secs)
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))?;
+    Ok(PyQuoteVerificationResult {
+        inner: Some(result),
+    })
 }
 
 #[pyfunction]
@@ -619,6 +862,12 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTdReport15>()?;
     m.add_class::<PySgxEnclaveReport>()?;
     m.add_class::<PyPckExtension>()?;
+    m.add_class::<PySimplePolicy>()?;
+    #[cfg(feature = "rego")]
+    m.add_class::<PyRegoPolicy>()?;
+    #[cfg(feature = "rego")]
+    m.add_class::<PyRegoPolicySet>()?;
+    m.add_class::<PyQuoteVerificationResult>()?;
     m.add_class::<PyQuote>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;

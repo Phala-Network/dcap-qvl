@@ -83,9 +83,10 @@ def cmd_verify(args):
             # Use production Intel root CA
             result = dcap_qvl.verify(quote_bytes, collateral_obj, now_secs)
 
-        # Verification successful
+        # Verification successful — get report without policy (test harness)
+        report = result.into_report_unchecked()
         print("Verification successful")
-        print(f"Status: {result.status}")
+        print(f"Status: {report.status}")
         return 0
 
     except Exception as e:

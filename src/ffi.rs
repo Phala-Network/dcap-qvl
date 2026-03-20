@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::intel;
 use crate::quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15};
+use crate::tcb_info::TcbStatusWithAdvisory;
 use crate::verify::{self, VerifiedReport};
 use crate::QuoteCollateralV3;
 
@@ -196,19 +197,25 @@ struct FfiVerifiedReport {
     report: FfiReport,
     #[serde(with = "serde_bytes")]
     ppid: Vec<u8>,
-    qe_status: crate::tcb_info::TcbStatusWithAdvisory,
-    platform_status: crate::tcb_info::TcbStatusWithAdvisory,
+    qe_status: TcbStatusWithAdvisory,
+    platform_status: TcbStatusWithAdvisory,
 }
 
 impl FfiVerifiedReport {
     fn from(vr: VerifiedReport) -> Self {
+        let qe_status =
+            TcbStatusWithAdvisory::new(vr.qe_tcb_level.tcb_status, vr.qe_tcb_level.advisory_ids);
+        let platform_status = TcbStatusWithAdvisory::new(
+            vr.platform_tcb_level.tcb_status,
+            vr.platform_tcb_level.advisory_ids,
+        );
         Self {
             status: vr.status,
             advisory_ids: vr.advisory_ids,
             report: FfiReport::from_report(&vr.report),
             ppid: vr.ppid,
-            qe_status: vr.qe_status,
-            platform_status: vr.platform_status,
+            qe_status,
+            platform_status,
         }
     }
 }
@@ -295,11 +302,12 @@ pub unsafe extern "C" fn dcap_parse_quote_cb(
     let quote_type = if parsed.header.is_sgx() { "SGX" } else { "TDX" };
 
     let cert_chain_pem = parsed.raw_cert_chain().ok().map(|raw| {
-        let mut end = raw.len();
-        while end > 0 && raw[end.saturating_sub(1)] == 0 {
-            end = end.saturating_sub(1);
-        }
-        String::from_utf8_lossy(&raw[..end]).into_owned()
+        let trimmed = raw
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .and_then(|end| raw.get(..=end))
+            .unwrap_or(&[]);
+        String::from_utf8_lossy(trimmed).into_owned()
     });
 
     // For cert_type 5: extract fmspc/ca from embedded cert chain
@@ -379,8 +387,9 @@ pub unsafe extern "C" fn dcap_verify_cb(
         }
     };
 
-    let report = match verify::verify(quote_slice, &collateral, now_secs) {
-        Ok(r) => r,
+    let verifier = verify::QuoteVerifier::new_prod(verify::default_crypto::backend());
+    let report = match verifier.verify(quote_slice, collateral, now_secs) {
+        Ok(qvr) => qvr.into_report_unchecked(),
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
@@ -421,9 +430,8 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca_cb(
     };
 
     let verifier = verify::QuoteVerifier::new(root_ca.to_vec(), verify::default_crypto::backend());
-
-    let report = match verifier.verify(quote_slice, &collateral, now_secs) {
-        Ok(r) => r,
+    let report = match verifier.verify(quote_slice, collateral, now_secs) {
+        Ok(qvr) => qvr.into_report_unchecked(),
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
 
@@ -541,9 +549,7 @@ pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem_cb(
         pce_id: ext.pce_id.to_vec(),
         fmspc: ext.fmspc.to_vec(),
         sgx_type: ext.sgx_type,
-        platform_instance_id: ext
-            .platform_instance_id
-            .map(|v| serde_bytes::ByteBuf::from(v)),
+        platform_instance_id: ext.platform_instance_id.map(serde_bytes::ByteBuf::from),
         raw_extension: ext.raw_extension,
     };
 

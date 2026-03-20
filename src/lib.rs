@@ -18,7 +18,8 @@
 //!
 //! ```no_run
 //! use dcap_qvl::collateral::get_collateral;
-//! use dcap_qvl::verify::verify;
+//! use dcap_qvl::verify::{QuoteVerifier, ring};
+//! use dcap_qvl::SimplePolicy;
 //! use dcap_qvl::PHALA_PCCS_URL;
 //!
 //! #[tokio::main]
@@ -30,7 +31,9 @@
 //!     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
 //!
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-//!     let report = verify(&quote, &collateral, now).expect("failed to verify quote");
+//!     let verifier = QuoteVerifier::new_prod(ring::backend());
+//!     let result = verifier.verify(&quote, collateral, now).expect("verification failed");
+//!     let report = result.validate(&SimplePolicy::strict(now)).expect("policy validation failed");
 //!     println!("{:?}", report);
 //! }
 //! ```
@@ -48,7 +51,9 @@ use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(
+    Encode, Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct QuoteCollateralV3 {
@@ -83,10 +88,26 @@ pub mod oids;
 
 mod constants;
 pub mod intel;
-mod qe_identity;
+pub mod qe_identity;
 pub mod tcb_info;
 mod utils;
 
+// Common type aliases
+pub use constants::{CpuSvn, Fmspc, MrEnclave, MrSigner, Svn};
+
+// Re-export commonly used types
+pub use policy::{
+    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, SimplePolicy, SimplePolicyConfig,
+    SupplementalData, TcbVerdict,
+};
+pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
+pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
+pub use verify::QuoteVerificationResult;
+
+#[cfg(feature = "rego")]
+pub use policy::{RegoPolicy, RegoPolicySet};
+
+pub mod policy;
 pub mod quote;
 pub mod verify;
 

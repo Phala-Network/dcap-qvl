@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use derive_more::Display;
@@ -57,20 +59,30 @@ pub struct TcbComponents {
     pub svn: u8,
 }
 
-#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, Display,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Display)]
 #[display("{_variant}")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub enum TcbStatus {
     UpToDate,
-    OutOfDateConfigurationNeeded,
-    OutOfDate,
-    ConfigurationAndSWHardeningNeeded,
-    ConfigurationNeeded,
     SWHardeningNeeded,
+    ConfigurationNeeded,
+    ConfigurationAndSWHardeningNeeded,
+    OutOfDate,
+    OutOfDateConfigurationNeeded,
     Revoked,
+}
+
+impl Ord for TcbStatus {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.severity().cmp(&other.severity())
+    }
+}
+
+impl PartialOrd for TcbStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl TcbStatus {
@@ -86,19 +98,19 @@ impl TcbStatus {
         }
     }
 
-    /// Returns true if the TCB status is acceptable to let the caller decide
-    /// whether to accept the quote or not.
+    /// Converge platform TCB status with QE TCB status.
     ///
-    /// Currently, `Revoked` status is considered invalid and will cause the verification to fail.
-    pub(crate) fn is_valid(&self) -> bool {
-        match self {
-            Self::UpToDate => true,
-            Self::SWHardeningNeeded => true,
-            Self::ConfigurationNeeded => true,
-            Self::ConfigurationAndSWHardeningNeeded => true,
-            Self::OutOfDate => true,
-            Self::OutOfDateConfigurationNeeded => true,
-            Self::Revoked => false,
+    /// Matches Intel QVL's `convergeTcbStatusWithQeTcbStatus()` from
+    /// `TcbLevelCheck.cpp`. The QE status can only be UpToDate, OutOfDate,
+    /// or Revoked (from QE Identity verification).
+    fn converge_with_qe(self, qe: TcbStatus) -> TcbStatus {
+        use TcbStatus::*;
+        match (qe, self) {
+            // QE is OutOfDate: escalate platform status
+            (OutOfDate, ConfigurationNeeded | ConfigurationAndSWHardeningNeeded) => {
+                OutOfDateConfigurationNeeded
+            }
+            _ => qe.max(self),
         }
     }
 }
@@ -124,13 +136,11 @@ impl TcbStatusWithAdvisory {
         }
     }
 
-    /// Merge two TCB statuses, taking the worse status and combining advisory IDs
+    /// Merge platform TCB status with QE TCB status, following Intel QVL's
+    /// `convergeTcbStatusWithQeTcbStatus()` logic. `self` is the platform
+    /// status, `other` is the QE status.
     pub fn merge(self, other: &TcbStatusWithAdvisory) -> Self {
-        let final_status = if other.status.severity() > self.status.severity() {
-            other.status
-        } else {
-            self.status
-        };
+        let final_status = self.status.converge_with_qe(other.status);
 
         let mut advisory_ids = self.advisory_ids;
         for id in &other.advisory_ids {
@@ -151,30 +161,70 @@ mod tests {
     use super::*;
     use TcbStatus::*;
 
+    fn merge(platform: TcbStatus, qe: TcbStatus) -> TcbStatus {
+        TcbStatusWithAdvisory::new(platform, vec![])
+            .merge(&TcbStatusWithAdvisory::new(qe, vec![]))
+            .status
+    }
+
+    // ── QE UpToDate: pass through platform status ──────────────────────
     #[test]
-    fn test_tcb_status_merge_both_up_to_date() {
-        let a = TcbStatusWithAdvisory::new(UpToDate, vec![]);
-        let b = TcbStatusWithAdvisory::new(UpToDate, vec![]);
-        let result = a.merge(&b);
-        assert_eq!(result.status, UpToDate);
-        assert!(result.advisory_ids.is_empty());
+    fn qe_uptodate_passes_through() {
+        assert_eq!(merge(UpToDate, UpToDate), UpToDate);
+        assert_eq!(merge(SWHardeningNeeded, UpToDate), SWHardeningNeeded);
+        assert_eq!(merge(ConfigurationNeeded, UpToDate), ConfigurationNeeded);
+        assert_eq!(
+            merge(ConfigurationAndSWHardeningNeeded, UpToDate),
+            ConfigurationAndSWHardeningNeeded
+        );
+        assert_eq!(merge(OutOfDate, UpToDate), OutOfDate);
+        assert_eq!(
+            merge(OutOfDateConfigurationNeeded, UpToDate),
+            OutOfDateConfigurationNeeded
+        );
+        assert_eq!(merge(Revoked, UpToDate), Revoked);
+    }
+
+    // ── QE OutOfDate: escalate platform status ─────────────────────────
+    #[test]
+    fn qe_outofdate_escalates() {
+        assert_eq!(merge(UpToDate, OutOfDate), OutOfDate);
+        assert_eq!(merge(SWHardeningNeeded, OutOfDate), OutOfDate);
+        assert_eq!(
+            merge(ConfigurationNeeded, OutOfDate),
+            OutOfDateConfigurationNeeded
+        );
+        assert_eq!(
+            merge(ConfigurationAndSWHardeningNeeded, OutOfDate),
+            OutOfDateConfigurationNeeded
+        );
     }
 
     #[test]
-    fn test_tcb_status_merge_takes_worse() {
-        let a = TcbStatusWithAdvisory::new(UpToDate, vec![]);
-        let b = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
-        let result = a.merge(&b);
-        assert_eq!(result.status, OutOfDate);
-        assert_eq!(result.advisory_ids, vec!["INTEL-SA-00001"]);
+    fn qe_outofdate_already_worse_keeps() {
+        assert_eq!(merge(OutOfDate, OutOfDate), OutOfDate);
+        assert_eq!(
+            merge(OutOfDateConfigurationNeeded, OutOfDate),
+            OutOfDateConfigurationNeeded
+        );
+        assert_eq!(merge(Revoked, OutOfDate), Revoked);
     }
 
+    // ── QE Revoked: always revoked ─────────────────────────────────────
     #[test]
-    fn test_tcb_status_merge_combines_advisories() {
+    fn qe_revoked_always_revoked() {
+        assert_eq!(merge(UpToDate, Revoked), Revoked);
+        assert_eq!(merge(SWHardeningNeeded, Revoked), Revoked);
+        assert_eq!(merge(OutOfDate, Revoked), Revoked);
+        assert_eq!(merge(ConfigurationNeeded, Revoked), Revoked);
+    }
+
+    // ── Advisory ID merging ────────────────────────────────────────────
+    #[test]
+    fn merge_combines_advisories() {
         let a = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
-        let b = TcbStatusWithAdvisory::new(SWHardeningNeeded, vec!["INTEL-SA-00002".into()]);
+        let b = TcbStatusWithAdvisory::new(UpToDate, vec!["INTEL-SA-00002".into()]);
         let result = a.merge(&b);
-        assert_eq!(result.status, OutOfDate);
         assert_eq!(
             result.advisory_ids,
             vec!["INTEL-SA-00001", "INTEL-SA-00002"]
@@ -182,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tcb_status_merge_deduplicates_advisories() {
+    fn merge_deduplicates_advisories() {
         let a = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
         let b = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
         let result = a.merge(&b);

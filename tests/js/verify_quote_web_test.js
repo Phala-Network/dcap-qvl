@@ -1,4 +1,4 @@
-import init, { js_verify, js_verify_with_root_ca, js_get_collateral } from "/pkg/web/dcap-qvl-web.js";
+import init, { QuoteVerifier, RegoPolicy, RegoPolicySet } from "/pkg/web/dcap-qvl-web.js";
 
 const testOutputs = [];
 let passed = 0;
@@ -90,8 +90,9 @@ async function runTests() {
         const rootCA = await fetchFile('/test_data/certs/root_ca.der');
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-        if (!result || !result.status) {
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.into_report_unchecked();
+        if (!report || !report.status) {
             throw new Error('Verification should succeed but got no result');
         }
     });
@@ -103,8 +104,9 @@ async function runTests() {
         const rootCA = await fetchFile('/test_data/certs/root_ca.der');
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-        if (!result || !result.status) {
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.into_report_unchecked();
+        if (!report || !report.status) {
             throw new Error('Verification should succeed but got no result');
         }
     });
@@ -116,8 +118,9 @@ async function runTests() {
         const rootCA = await fetchFile('/test_data/certs/root_ca.der');
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-        if (!result || !result.status) {
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.into_report_unchecked();
+        if (!report || !report.status) {
             throw new Error('Verification should succeed but got no result');
         }
     });
@@ -129,9 +132,56 @@ async function runTests() {
         const rootCA = await fetchFile('/test_data/certs/root_ca.der');
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-        if (!result || !result.status) {
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.into_report_unchecked();
+        if (!report || !report.status) {
             throw new Error('Verification should succeed but got no result');
+        }
+    });
+
+    await runTest('RegoPolicy validates valid SGX v3 quote', async () => {
+        const quote = await fetchFile('/test_data/samples/valid_sgx_v3/quote.bin');
+        const collateral = await fetchJSON('/test_data/samples/valid_sgx_v3/collateral.json');
+        const rootCA = await fetchFile('/test_data/certs/root_ca.der');
+        const now = BigInt(Math.floor(Date.now() / 1000));
+
+        const policyJson = JSON.stringify({
+            environment: {
+                class_id: '3123ec35-8d38-4ea5-87a5-d6c48b567570',
+            },
+            reference: {
+                accepted_tcb_status: ['UpToDate'],
+                collateral_grace_period: 0,
+            },
+        });
+
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.validate_rego(new RegoPolicy(policyJson));
+        if (!report || !report.status) {
+            throw new Error('RegoPolicy validation should succeed but got no report');
+        }
+    });
+
+    await runTest('RegoPolicySet validates valid SGX v3 quote', async () => {
+        const quote = await fetchFile('/test_data/samples/valid_sgx_v3/quote.bin');
+        const collateral = await fetchJSON('/test_data/samples/valid_sgx_v3/collateral.json');
+        const rootCA = await fetchFile('/test_data/certs/root_ca.der');
+        const now = BigInt(Math.floor(Date.now() / 1000));
+
+        const platformPolicyJson = JSON.stringify({
+            environment: {
+                class_id: '3123ec35-8d38-4ea5-87a5-d6c48b567570',
+            },
+            reference: {
+                accepted_tcb_status: ['UpToDate'],
+                collateral_grace_period: 0,
+            },
+        });
+
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.validate_rego_set(new RegoPolicySet([platformPolicyJson]));
+        if (!report || !report.status) {
+            throw new Error('RegoPolicySet validation should succeed but got no report');
         }
     });
 
@@ -146,7 +196,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             // WASM errors might be strings or objects
@@ -165,7 +215,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             // WASM errors might be strings or objects
@@ -184,7 +234,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -205,7 +255,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             // WASM errors might be strings or objects
@@ -224,7 +274,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -245,7 +295,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -263,7 +313,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -284,7 +334,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -305,7 +355,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -323,7 +373,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -344,7 +394,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -365,7 +415,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -386,7 +436,7 @@ async function runTests() {
         const now = BigInt(Math.floor(Date.now() / 1000));
 
         try {
-            const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
+            const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
             throw new Error('Should have failed but succeeded');
         } catch (error) {
             const errorStr = typeof error === 'string' ? error : (error.message || String(error));
@@ -407,8 +457,9 @@ async function runTests() {
         const rootCA = await fetchFile("/test_data/certs/root_ca.der");
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = js_verify_with_root_ca(quote, collateral, rootCA, now);
-        if (!result || !result.status) {
+        const result = new QuoteVerifier(rootCA).verify(quote, collateral, now);
+        const report = result.into_report_unchecked();
+        if (!report || !report.status) {
             throw new Error(
                 "Verification should succeed for PKS enabled quote"
             );
@@ -422,14 +473,9 @@ async function runTests() {
     await runTest('Fetch collateral from PCCS', async () => {
         const quote = await fetchFile('/sample/tdx_quote');
 
-        // Check if get_collateral function is available in Web WASM
-        if (typeof js_get_collateral !== 'function') {
-            throw new Error('js_get_collateral function not available in Web WASM');
-        }
-
         // Test with HTTP URL (our mock server runs on HTTP)
         const mockPccsUrl = 'http://localhost:8765/tdx/certification/v4';
-        const result = js_get_collateral(mockPccsUrl, quote);
+        const result = QuoteVerifier.get_collateral(mockPccsUrl, quote);
 
         // The function should return a promise in Web WASM just like in Node.js
         if (!result || typeof result.then !== 'function') {
