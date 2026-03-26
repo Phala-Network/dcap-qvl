@@ -2,7 +2,7 @@
 
 use dcap_qvl::{
     intel,
-    quote::{Quote, Report},
+    quote::{Data, Quote, Report},
 };
 use scale::Decode as ScaleDecode;
 
@@ -46,4 +46,16 @@ fn sgx_quote_parsing_exports_cert_chain_and_extension() {
 
     assert_eq!(quote.fmspc().unwrap(), ext.fmspc);
     assert!(!ext.ppid.is_empty());
+}
+
+#[test]
+fn data_decode_rejects_overlong_length() {
+    use scale::Encode as ScaleEncode;
+
+    // Length slightly above the 1 MiB bound used in Data::<u32>::decode.
+    let len: u32 = 1_048_576 + 1;
+    let encoded = len.encode();
+
+    let result = Data::<u32>::decode(&mut &encoded[..]);
+    assert!(result.is_err());
 }
