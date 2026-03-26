@@ -40,9 +40,11 @@ impl PckExtension {
     /// automatically so the caller only needs to supply the leaf OID.
     pub fn get_value(&self, oid: &const_oid::ObjectIdentifier) -> Result<Option<Vec<u8>>> {
         let obj = DerObject::decode(&self.raw_extension).context("Failed to decode DER object")?;
-        find_recursive(oid, obj)
+        find_recursive(oid, obj, 0)
     }
 }
+
+const MAX_DER_RECURSION_DEPTH: usize = 10;
 
 /// Return the PCK certificate chain (DER encoded) embedded inside the quote.
 ///
@@ -167,7 +169,11 @@ fn sub_object_opt<'a>(
 fn find_recursive<'a>(
     oid: &const_oid::ObjectIdentifier,
     obj: DerObject<'a>,
+    depth: usize,
 ) -> Result<Option<Vec<u8>>> {
+    if depth > MAX_DER_RECURSION_DEPTH {
+        bail!("DER recursion depth exceeded");
+    }
     let seq = match Sequence::load(obj) {
         Ok(s) => s,
         Err(_) => return Ok(None),
@@ -194,7 +200,10 @@ fn find_recursive<'a>(
         }
         // Tag 0x30 = SEQUENCE — recurse into nested containers
         if value.tag() == 0x30 {
-            if let Some(found) = find_recursive(oid, value)? {
+            let next_depth = depth
+                .checked_add(1)
+                .context("DER recursion depth overflow")?;
+            if let Some(found) = find_recursive(oid, value, next_depth)? {
                 return Ok(Some(found));
             }
         }
