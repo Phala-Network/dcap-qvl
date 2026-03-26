@@ -686,28 +686,22 @@ fn main() -> Result<()> {
                     // internally consistent with the generated quote but do not
                     // try to model real-world module versions.
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode(
-                            // MR_SIGNER_SEAM == MR_SIGNER of the SEAM in the TD report.
-                            // We reuse the same form as other test data: 48-byte hex string.
-                            // The generator uses a fixed key for SEAM, so we mirror it here.
-                            // For now we treat it as all zeros which matches the
-                            // default create_tdx_report() used in generate_tdx_quote_v4.
-                            [0u8; 48]
-                        ),
+                        // Match create_tdx_report(): mr_signer_seam is 0x02 repeated.
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
-                    // A single identity whose TCB levels accept ISVSVN=0
+                    // A single identity whose TCB levels accept ISVSVN=1 (tee_tcb_svn[0])
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
 
@@ -793,20 +787,20 @@ fn main() -> Result<()> {
                         }
                     }
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
@@ -912,21 +906,24 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    // Provide TDX Module and Module Identities consistent with the
+                    // generated TDReport10 so that module identity verification
+                    // succeeds and this sample fails only due to debug being set.
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
@@ -1018,20 +1015,20 @@ fn main() -> Result<()> {
                         }
                     }
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
@@ -1122,20 +1119,20 @@ fn main() -> Result<()> {
                         }
                     }
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
@@ -1225,21 +1222,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    // Module identity should also be present so that this
+                    // sample exercises only PKS handling, not module checks.
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
@@ -1329,21 +1328,24 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    // Align KL-enabled sample with the same TDX Module
+                    // Identity used in the valid TDX sample so that it
+                    // exercises only KL handling.
                     tcb["tdxModule"] = json!({
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                     });
                     tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_00",
-                        "mrsigner": hex::encode([0u8; 48]),
+                        "id": "TDX_01",
+                        "mrsigner": hex::encode([0x02u8; 48]),
                         "attributes": hex::encode([0u8; 8]),
                         "attributesMask": hex::encode([0u8; 8]),
                         "tcbLevels": [{
-                            "tcb": { "isvsvn": 0 },
+                            "tcb": { "isvsvn": 1 },
                             "tcbDate": tcb["issueDate"].clone(),
                             "tcbStatus": "UpToDate",
-                            "advisoryIDs": [] as [String; 0],
+                            "advisoryIDs": [],
                         }],
                     }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
