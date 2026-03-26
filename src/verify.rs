@@ -647,14 +647,19 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let tcb_info =
+    let mut tcb_info =
         verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
 
     #[cfg(feature = "danger-allow-tcb-override")]
-    let tcb_info = match override_tcb_info {
-        Some(override_tcb_info) => override_tcb_info(tcb_info),
-        None => tcb_info,
-    };
+    {
+        tcb_info = match override_tcb_info {
+            Some(override_tcb_info) => override_tcb_info(tcb_info),
+            None => tcb_info,
+        };
+    }
+
+    // Canonicalize TCB levels ordering to match Intel QVL expectations.
+    tcb_info.canonicalize_tcb_levels();
 
     // Step 2: Verify QE Identity signature
     let qe_identity =

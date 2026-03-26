@@ -2,6 +2,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 
 #[cfg(feature = "borsh_schema")]
 use borsh::BorshSchema;
@@ -24,6 +25,27 @@ pub struct TcbInfo {
     pub tcb_levels: Vec<TcbLevel>,
 }
 
+impl TcbInfo {
+    /// Canonicalize `tcb_levels` ordering to match Intel QVL.
+    ///
+    /// Intel's QVL does not rely on the JSON order of `tcbLevels`. Instead, it
+    /// inserts levels into a sorted container using a custom comparator:
+    ///
+    /// - First by SGX CPU SVN components (lexicographically, highest first)
+    /// - Then by PCE SVN (highest first)
+    /// - For TDX TCB Info (version >= 3, id == "TDX") where PCE SVN is equal,
+    ///   by TDX TCB components (lexicographically, highest first)
+    ///
+    /// This function mirrors that behavior so that matching logic operates on a
+    /// stable, implementation-defined order rather than whatever the PCS JSON
+    /// happens to contain.
+    pub(crate) fn canonicalize_tcb_levels(&mut self) {
+        let is_tdx = self.version >= 3 && self.id == "TDX";
+        self.tcb_levels
+            .sort_by(|a, b| compare_tcb_levels(a, b, is_tdx));
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
@@ -34,6 +56,39 @@ pub struct TcbLevel {
     pub tcb_status: TcbStatus,
     #[serde(rename = "advisoryIDs", default)]
     pub advisory_ids: Vec<String>,
+}
+
+fn ord_desc<T: Ord>(a: &T, b: &T) -> Ordering {
+    use Ordering::*;
+    if a > b {
+        Less
+    } else if a < b {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+fn compare_tcb_levels(a: &TcbLevel, b: &TcbLevel, is_tdx: bool) -> Ordering {
+    use Ordering::Equal;
+
+    // Primary key: SGX CPU SVN components (lexicographically, highest first)
+    let cpu_ord = ord_desc(&a.tcb.sgx_components, &b.tcb.sgx_components);
+    if cpu_ord != Equal {
+        return cpu_ord;
+    }
+
+    // For TDX TCB Info, when CPU SVN and PCE SVN are equal, refine by TDX TCB
+    // components (lexicographically, highest first).
+    if is_tdx && a.tcb.pce_svn == b.tcb.pce_svn {
+        let tdx_ord = ord_desc(&a.tcb.tdx_components, &b.tcb.tdx_components);
+        if tdx_ord != Equal {
+            return tdx_ord;
+        }
+    }
+
+    // Fallback: PCE SVN (highest first)
+    ord_desc(&a.tcb.pce_svn, &b.tcb.pce_svn)
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
