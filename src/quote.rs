@@ -51,8 +51,15 @@ impl<'de, T> Deserialize<'de> for Data<T> {
 
 impl<T: Decode + Into<u64>> Decode for Data<T> {
     fn decode<I: Input>(input: &mut I) -> Result<Self, scale::Error> {
+        const MAX_DATA_LEN: u64 = 1_048_576; // 1 MiB upper bound for variable-length fields
+
         let len = T::decode(input)?;
-        let mut data = vec![0u8; len.into() as usize];
+        let len_u64 = len.into();
+        if len_u64 > MAX_DATA_LEN {
+            return Err(scale::Error::from("Data length exceeds maximum"));
+        }
+
+        let mut data = vec![0u8; len_u64 as usize];
         input.read(&mut data)?;
         Ok(Data {
             data,
