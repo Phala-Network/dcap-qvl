@@ -680,6 +680,37 @@ fn main() -> Result<()> {
                         }
                     }
 
+                    // Add minimal TDX Module and Module Identities so that
+                    // TDX Module Identity verification can run for this sample.
+                    // For the purposes of the test suite we keep the fields
+                    // internally consistent with the generated quote but do not
+                    // try to model real-world module versions.
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode(
+                            // MR_SIGNER_SEAM == MR_SIGNER of the SEAM in the TD report.
+                            // We reuse the same form as other test data: 48-byte hex string.
+                            // The generator uses a fixed key for SEAM, so we mirror it here.
+                            // For now we treat it as all zeros which matches the
+                            // default create_tdx_report() used in generate_tdx_quote_v4.
+                            [0u8; 48]
+                        ),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    // A single identity whose TCB levels accept ISVSVN=0
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
+
                     let new_tcb_info = serde_json::to_string(&tcb)?;
 
                     // Re-sign the modified TCB info
@@ -746,7 +777,7 @@ fn main() -> Result<()> {
         ),
         quote_generator: Box::new(generate_tdx_quote_v4),
         collateral_modifier: Some(Box::new(|collateral| {
-            // Ensure TDX TCB info has TDX components
+            // Ensure TDX TCB info has TDX components and module identity
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
                 if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
                     tcb["version"] = json!(3);
@@ -761,6 +792,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
@@ -849,7 +897,7 @@ fn main() -> Result<()> {
             Ok(quote.encode())
         }),
         collateral_modifier: Some(Box::new(|collateral| {
-            // Add TDX TCB info
+            // Add TDX TCB info with module identity
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
                 if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
                     tcb["version"] = json!(3);
@@ -864,6 +912,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
@@ -952,6 +1017,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
@@ -1039,6 +1121,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
@@ -1126,6 +1225,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
@@ -1213,6 +1329,23 @@ fn main() -> Result<()> {
                             }
                         }
                     }
+                    tcb["tdxModule"] = json!({
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                    });
+                    tcb["tdxModuleIdentities"] = json!([{
+                        "id": "TDX_00",
+                        "mrsigner": hex::encode([0u8; 48]),
+                        "attributes": hex::encode([0u8; 8]),
+                        "attributesMask": hex::encode([0u8; 8]),
+                        "tcbLevels": [{
+                            "tcb": { "isvsvn": 0 },
+                            "tcbDate": tcb["issueDate"].clone(),
+                            "tcbStatus": "UpToDate",
+                            "advisoryIDs": [] as [String; 0],
+                        }],
+                    }]);
                     let new_tcb_info = serde_json::to_string(&tcb)?;
                     let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
                     let key_pair = load_private_key(key_path)?;
