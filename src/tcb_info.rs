@@ -22,6 +22,10 @@ pub struct TcbInfo {
     pub tcb_type: u32,
     pub tcb_evaluation_data_number: u32,
     pub tcb_levels: Vec<TcbLevel>,
+    #[serde(default)]
+    pub tdx_module: Option<TdxModule>,
+    #[serde(rename = "tdxModuleIdentities", default)]
+    pub tdx_module_identities: Vec<TdxModuleIdentity>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -55,6 +59,51 @@ pub struct Tcb {
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct TcbComponents {
     pub svn: u8,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub struct TdxModule {
+    /// Expected TDX module MRSIGNER as hex string
+    pub mrsigner: String,
+    /// Expected SEAMATTRIBUTES value as hex string
+    pub attributes: String,
+    /// Mask to apply when comparing SEAMATTRIBUTES, as hex string
+    pub attributes_mask: String,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub struct TdxModuleIdentity {
+    pub id: String,
+    pub mrsigner: String,
+    pub attributes: String,
+    pub attributes_mask: String,
+    pub tcb_levels: Vec<TdxModuleTcbLevel>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub struct TdxModuleTcbLevel {
+    pub tcb: TdxModuleTcb,
+    pub tcb_date: String,
+    pub tcb_status: TcbStatus,
+    #[serde(rename = "advisoryIDs", default)]
+    pub advisory_ids: Vec<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub struct TdxModuleTcb {
+    pub isvsvn: u8,
 }
 
 #[derive(

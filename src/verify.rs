@@ -8,7 +8,7 @@ use {
     crate::constants::*,
     crate::intel,
     crate::qe_identity::QeIdentity,
-    crate::tcb_info::{TcbInfo, TcbStatusWithAdvisory},
+    crate::tcb_info::{TcbInfo, TcbStatusWithAdvisory, TdxModuleTcbLevel},
     alloc::string::String,
     alloc::vec::Vec,
 };
@@ -500,7 +500,10 @@ fn verify_isv_report_signature(
 // Step 8: Match Platform TCB (PCK Cert's CPU_SVN/PCE_SVN/FMSPC vs TCB Info)
 // =============================================================================
 
-/// Match platform TCB level and return status with advisory IDs
+/// Match platform TCB level and return status with advisory IDs.
+///
+/// For TDX, this also folds in TDX Module Identity status and advisory IDs,
+/// following Intel DCAP QVL behavior.
 fn match_platform_tcb(
     tcb_info: &TcbInfo,
     quote: &Quote,
@@ -570,13 +573,167 @@ fn match_platform_tcb(
         }
 
         // Found matching level
-        return Ok(TcbStatusWithAdvisory::new(
-            tcb_level.tcb_status,
-            tcb_level.advisory_ids.clone(),
-        ));
+        let mut status =
+            TcbStatusWithAdvisory::new(tcb_level.tcb_status, tcb_level.advisory_ids.clone());
+
+        // For TDX, also fold in TDX module identity status and advisories
+        if tee_type.is_tdx() {
+            if let Some(module_status) =
+                match_tdx_module_identity(tcb_info, quote).context("TDX module identity check")?
+            {
+                status = status.merge(&module_status);
+            }
+        }
+
+        return Ok(status);
     }
 
     bail!("No matching TCB level found");
+}
+
+/// Match TDX Module Identity against TCB Info and TD report.
+///
+/// Follows Intel DCAP QVL behavior:
+/// - For TDX TCB Info (version >= 3, id == "TDX"), read `tdxModule`
+/// - For module versions > 0, select the `tdxModuleIdentities` entry whose `id`
+///   matches `TDX_{tee_tcb_svn[1]}` (case-insensitive)
+/// - Verify MRSEAM signer matches the expected `mrsigner`
+/// - Apply `attributes_mask` when comparing SEAMATTRIBUTES
+/// - If a module identity entry is used, derive module TCB status and
+///   advisory IDs from its TCB levels based on module ISVSVN.
+fn match_tdx_module_identity(
+    tcb_info: &TcbInfo,
+    quote: &Quote,
+) -> Result<Option<TcbStatusWithAdvisory>> {
+    if tcb_info.id != "TDX" || tcb_info.version < 3 {
+        return Ok(None);
+    }
+
+    let td_report = quote
+        .report
+        .as_td10()
+        .context("Failed to get TD10 report for TDX module identity")?;
+
+    let module_isvsvn = td_report.tee_tcb_svn[0];
+    let module_version = td_report.tee_tcb_svn[1];
+
+    let base_module = match &tcb_info.tdx_module {
+        Some(m) => m,
+        None => {
+            bail!("TDX TCB Info is missing tdxModule field");
+        }
+    };
+
+    // Helper to decode a hex string into a fixed-size array
+    fn decode_hex_array<const N: usize>(hex_str: &str, field: &str) -> Result<[u8; N]> {
+        let bytes = hex::decode(hex_str)
+            .map_err(|e| anyhow::anyhow!("Failed to decode {field} as hex: {e}"))?;
+        ensure!(
+            bytes.len() == N,
+            "{field} has invalid length {}, expected {N}",
+            bytes.len()
+        );
+        let mut arr = [0u8; N];
+        arr.copy_from_slice(&bytes);
+        Ok(arr)
+    }
+
+    // Start from the base module values
+    let mut expected_mrsigner =
+        decode_hex_array::<48>(&base_module.mrsigner, "tdxModule.mrsigner")?;
+    let mut expected_attributes =
+        decode_hex_array::<8>(&base_module.attributes, "tdxModule.attributes")?;
+    let mut attributes_mask =
+        decode_hex_array::<8>(&base_module.attributes_mask, "tdxModule.attributesMask")?;
+
+    // If a specific module version is indicated and identities are present,
+    // override expectations from the matching identity entry.
+    let mut identity_tcb_levels: Option<&[TdxModuleTcbLevel]> = None;
+    if module_version > 0 && !tcb_info.tdx_module_identities.is_empty() {
+        let wanted_id = format!("TDX_{:02X}", module_version);
+        let identity = tcb_info
+            .tdx_module_identities
+            .iter()
+            .find(|id| id.id.eq_ignore_ascii_case(&wanted_id))
+            .with_context(|| {
+                format!(
+                    "No TDX module identity with id {} found in TCB Info",
+                    wanted_id
+                )
+            })?;
+
+        expected_mrsigner =
+            decode_hex_array::<48>(&identity.mrsigner, "tdxModuleIdentity.mrsigner")?;
+        expected_attributes =
+            decode_hex_array::<8>(&identity.attributes, "tdxModuleIdentity.attributes")?;
+        attributes_mask = decode_hex_array::<8>(
+            &identity.attributes_mask,
+            "tdxModuleIdentity.attributesMask",
+        )?;
+        identity_tcb_levels = Some(&identity.tcb_levels);
+    }
+
+    // Verify MRSEAM signer (MR_SIGNER_SEAM) matches expected module MRSIGNER.
+    if td_report.mr_signer_seam != expected_mrsigner {
+        bail!(
+            "TDX module MRSIGNER mismatch: expected {}, got {}",
+            hex::encode_upper(expected_mrsigner),
+            hex::encode_upper(td_report.mr_signer_seam)
+        );
+    }
+
+    // Verify SEAMATTRIBUTES with mask: masked bits must match, and bits
+    // outside the mask must be zero (defense in depth).
+    for (i, ((expected, mask), actual)) in expected_attributes
+        .iter()
+        .zip(attributes_mask.iter())
+        .zip(td_report.seam_attributes.iter())
+        .enumerate()
+    {
+        let expected_masked = expected & mask;
+        let actual_masked = actual & mask;
+        if expected_masked != actual_masked {
+            bail!(
+                "TDX module SEAMATTRIBUTES mismatch at byte {}: expected {:02X} (masked), got {:02X} (masked)",
+                i,
+                expected_masked,
+                actual_masked
+            );
+        }
+        if actual & !mask != 0 {
+            bail!(
+                "TDX module SEAMATTRIBUTES has bits set outside mask at byte {}",
+                i
+            );
+        }
+    }
+
+    // If we have module identity TCB levels, derive module status from them.
+    if let Some(levels) = identity_tcb_levels {
+        let mut matched: Option<&TdxModuleTcbLevel> = None;
+        for level in levels {
+            if module_isvsvn >= level.tcb.isvsvn {
+                matched = Some(level);
+                break;
+            }
+        }
+
+        let module_level = matched.with_context(|| {
+            format!(
+                "TDX module ISVSVN {} is below minimum required from TDX module TCB levels",
+                module_isvsvn
+            )
+        })?;
+
+        return Ok(Some(TcbStatusWithAdvisory::new(
+            module_level.tcb_status,
+            module_level.advisory_ids.clone(),
+        )));
+    }
+
+    // No identity-specific TCB levels: we've still corroborated module identity,
+    // but there is no additional status/advisory to merge.
+    Ok(None)
 }
 
 // =============================================================================
