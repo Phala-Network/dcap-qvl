@@ -87,6 +87,8 @@ mod qe_identity;
 pub mod tcb_info;
 mod utils;
 
+pub use constants::INTEL_QE_VENDOR_ID;
+
 pub mod quote;
 pub mod verify;
 

@@ -625,6 +625,9 @@ fn verify_impl(
     if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
         bail!("Unsupported DCAP quote version");
     }
+    if quote.header.qe_vendor_id != INTEL_QE_VENDOR_ID {
+        bail!("Unknown QE vendor ID");
+    }
     let tee_type = TeeType::from_u32(quote.header.tee_type)?;
     match tee_type {
         TeeType::Sgx => {
