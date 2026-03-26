@@ -620,7 +620,8 @@ fn match_tdx_module_identity(
     let base_module = match &tcb_info.tdx_module {
         Some(m) => m,
         None => {
-            bail!("TDX TCB Info is missing tdxModule field");
+            // Older or non-module-aware TCB Info: skip module identity checks.
+            return Ok(None);
         }
     };
 
