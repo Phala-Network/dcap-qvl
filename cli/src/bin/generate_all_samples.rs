@@ -3,7 +3,7 @@
 /// Comprehensive test sample generator for DCAP quote verification
 /// Generates samples in the correct directory structure with quote.bin, collateral.json, and expected.json
 use anyhow::Result;
-use dcap_qvl::quote::*;
+use dcap_qvl::{quote::*, INTEL_QE_VENDOR_ID};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use scale::Encode;
@@ -87,7 +87,7 @@ fn create_sgx_header(version: u16, attestation_key_type: u16, tee_type: u32) -> 
         tee_type,
         qe_svn: 1,
         pce_svn: 1,
-        qe_vendor_id: [0u8; 16],
+        qe_vendor_id: INTEL_QE_VENDOR_ID,
         user_data: [0u8; 20],
     }
 }
