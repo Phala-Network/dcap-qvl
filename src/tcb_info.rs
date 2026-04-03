@@ -290,10 +290,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_canonicalize_sgx_sorts_by_cpu_svn_desc() {
-        let mut info = TcbInfo {
-            id: "SGX".into(),
+    fn make_tcb_info(id: &str, tcb_levels: Vec<TcbLevel>) -> TcbInfo {
+        TcbInfo {
+            id: id.into(),
             version: 3,
             issue_date: String::new(),
             next_update: String::new(),
@@ -301,12 +300,22 @@ mod tests {
             pce_id: String::new(),
             tcb_type: 0,
             tcb_evaluation_data_number: 0,
-            tcb_levels: vec![
+            tcb_levels,
+            tdx_module: None,
+            tdx_module_identities: vec![],
+        }
+    }
+
+    #[test]
+    fn test_canonicalize_sgx_sorts_by_cpu_svn_desc() {
+        let mut info = make_tcb_info(
+            "SGX",
+            vec![
                 make_tcb_level(&[2, 0], 10, &[], UpToDate),
                 make_tcb_level(&[5, 0], 10, &[], UpToDate),
                 make_tcb_level(&[3, 0], 10, &[], UpToDate),
             ],
-        };
+        );
         info.canonicalize_tcb_levels();
         let svns: Vec<u8> = info
             .tcb_levels
@@ -318,21 +327,14 @@ mod tests {
 
     #[test]
     fn test_canonicalize_sgx_pce_svn_tiebreaker() {
-        let mut info = TcbInfo {
-            id: "SGX".into(),
-            version: 3,
-            issue_date: String::new(),
-            next_update: String::new(),
-            fmspc: String::new(),
-            pce_id: String::new(),
-            tcb_type: 0,
-            tcb_evaluation_data_number: 0,
-            tcb_levels: vec![
+        let mut info = make_tcb_info(
+            "SGX",
+            vec![
                 make_tcb_level(&[5], 7, &[], UpToDate),
                 make_tcb_level(&[5], 12, &[], UpToDate),
                 make_tcb_level(&[5], 9, &[], UpToDate),
             ],
-        };
+        );
         info.canonicalize_tcb_levels();
         let pce_svns: Vec<u16> = info.tcb_levels.iter().map(|l| l.tcb.pce_svn).collect();
         assert_eq!(pce_svns, vec![12, 9, 7]);
@@ -340,21 +342,14 @@ mod tests {
 
     #[test]
     fn test_canonicalize_tdx_components_tiebreaker() {
-        let mut info = TcbInfo {
-            id: "TDX".into(),
-            version: 3,
-            issue_date: String::new(),
-            next_update: String::new(),
-            fmspc: String::new(),
-            pce_id: String::new(),
-            tcb_type: 0,
-            tcb_evaluation_data_number: 0,
-            tcb_levels: vec![
+        let mut info = make_tcb_info(
+            "TDX",
+            vec![
                 make_tcb_level(&[5], 10, &[1, 0], UpToDate),
                 make_tcb_level(&[5], 10, &[3, 0], UpToDate),
                 make_tcb_level(&[5], 10, &[2, 0], UpToDate),
             ],
-        };
+        );
         info.canonicalize_tcb_levels();
         let tdx_svns: Vec<u8> = info
             .tcb_levels
@@ -366,20 +361,13 @@ mod tests {
 
     #[test]
     fn test_canonicalize_sgx_ignores_tdx_components() {
-        let mut info = TcbInfo {
-            id: "SGX".into(),
-            version: 3,
-            issue_date: String::new(),
-            next_update: String::new(),
-            fmspc: String::new(),
-            pce_id: String::new(),
-            tcb_type: 0,
-            tcb_evaluation_data_number: 0,
-            tcb_levels: vec![
+        let mut info = make_tcb_info(
+            "SGX",
+            vec![
                 make_tcb_level(&[5], 10, &[1], UpToDate),
                 make_tcb_level(&[5], 10, &[9], UpToDate),
             ],
-        };
+        );
         info.canonicalize_tcb_levels();
         // For SGX, tdx_components should NOT break the tie — order is stable
         let tdx_svns: Vec<u8> = info
