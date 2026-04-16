@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use anyhow::{anyhow, bail, Context, Result};
 use scale::{Decode, Encode, Input, Output};
 use serde::{Deserialize, Serialize};
-use x509_cert::Certificate;
 
 #[cfg(feature = "borsh_schema")]
 use borsh::BorshSchema;
@@ -640,9 +639,8 @@ impl Quote {
             .context("Failed to get raw cert chain")?;
         let certs = utils::extract_certs(raw_cert_chain).context("Failed to extract certs")?;
         let cert = certs.first().ok_or(anyhow!("Invalid certificate"))?;
-        let cert_der: Certificate =
-            der::Decode::from_der(cert).context("Failed to decode certificate")?;
-        let issuer = cert_der.tbs_certificate.issuer.to_string();
+        let issuer =
+            utils::get_cert_issuer_string(cert).context("Failed to extract certificate issuer")?;
         if issuer.contains(constants::PROCESSOR_ISSUER) {
             return Ok(constants::PROCESSOR_ISSUER_ID);
         } else if issuer.contains(constants::PLATFORM_ISSUER) {

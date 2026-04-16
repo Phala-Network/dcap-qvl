@@ -25,13 +25,13 @@ chrono = { version = "0.4.42", default-features = false, features = [
     "serde",
 ] }
 const-oid = { version = "0.9.5", default-features = false }
-x509-cert = { version = "0.2.4", default-features = false }
+x509-cert = { version = "0.2.4", default-features = false, optional = true }
 byteorder = { version = "1.5.0", default-features = false }
 pem = { version = "3", default-features = false }
 asn1_der = { version = "0.7", default-features = false, features = [
     "native_types",
 ] }
-der = { version = "0.7.8", default-features = false, features = ["alloc"] }
+der = { version = "0.7.8", default-features = false, features = ["alloc"], optional = true }
 
 log = { version = "0.4.29", default-features = false }
 
@@ -97,7 +97,7 @@ std = [
     "const-oid/std",
     "pem/std",
     "asn1_der/std",
-    "der/std",
+    "der?/std",
     "serde_json",
     "anyhow",
     "urlencoding",
@@ -105,7 +105,7 @@ std = [
 ]
 borsh = ["dep:borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
-report = ["std", "tracing", "futures", "reqwest"]
+report = ["std", "tracing", "futures", "reqwest", "der", "x509-cert"]
 js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
 go = ["std", "ring", "serde_json"]
