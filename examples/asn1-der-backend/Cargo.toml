@@ -7,11 +7,19 @@ description = "Downstream `Config` example: smaller-footprint X.509 / DER backen
 license = "MIT"
 
 [dependencies]
+# Production-shape feature set: this is what a downstream crate would
+# pick to drop `der` / `x509-cert` from the build. `default-x509` is
+# *not* enabled here.
 dcap-qvl = { path = "../..", default-features = false, features = ["std", "ring"] }
 asn1_der = { version = "0.7", default-features = false, features = ["native_types", "std"] }
 anyhow = "1"
 
 [dev-dependencies]
+# Tests need `DefaultConfig` to compare against — pull in `default-x509`
+# only at test time. Cargo unifies features per dep within a build, so
+# `cargo test` sees `std + ring + default-x509` while `cargo build`
+# (lib + example binary) keeps the lean `std + ring` build.
+dcap-qvl = { path = "../..", default-features = false, features = ["std", "ring", "default-x509"] }
 serde_json = "1"
 hex = "0.4"
 pem = "3"

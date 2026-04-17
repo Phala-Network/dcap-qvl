@@ -12,6 +12,20 @@ that overhead matters. `asn1_der` is already a transitive dependency of
 `dcap-qvl`, so a backend built on it adds no new dependencies and avoids
 duplicating ASN.1 parsing logic.
 
+To opt out of the audited backend, depend on `dcap-qvl` without the
+`default-x509` feature:
+
+```toml
+[dependencies]
+dcap-qvl = { version = "...", default-features = false, features = ["std", "ring"] }
+```
+
+This drops `der` and `x509-cert` from the build entirely. The trade-off
+is that the non-generic entry points (`verify::verify`,
+`intel::quote_fmspc`, `intel::quote_ca`, etc.) are gone — you must use
+the `_with::<C>` variants and supply your own `Config` impl, which is
+what this example provides.
+
 ## Layout
 
 | File | Purpose |
