@@ -11,6 +11,8 @@ use x509_cert::{
     Certificate,
 };
 
+use crate::config::{Config, ParsedCert, X509Codec};
+use crate::configs::DefaultConfig;
 use crate::constants::{
     PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN,
 };
@@ -214,23 +216,31 @@ async fn fetch_pck_certificate(
 }
 
 /// Extract FMSPC and CA type from a PEM certificate chain.
-fn extract_fmspc_and_ca(pem_chain: &str) -> Result<(String, &'static str)> {
+///
+/// Generic over [`Config`]; the cert parse and issuer DN extraction go
+/// through the configured [`X509Codec`].
+fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'static str)> {
     let certs = crate::utils::extract_certs(pem_chain.as_bytes())
         .context("Failed to extract certificates from PEM chain")?;
     let cert = certs
         .first()
         .ok_or_else(|| anyhow!("Empty certificate chain"))?;
 
+    // Parse cert once; reuse for both extension lookup and issuer DN.
+    let parsed = <C as Config>::X509::from_der(cert).context("Failed to decode certificate")?;
+
     // Extract FMSPC from Intel extension
-    let extension = crate::utils::get_intel_extension(cert)
-        .context("Failed to get Intel extension from certificate")?;
+    let extension = parsed
+        .extension(crate::oids::SGX_EXTENSION.as_bytes())
+        .context("Failed to get Intel extension from certificate")?
+        .ok_or_else(|| anyhow!("Intel extension not found"))?;
     let fmspc = crate::utils::get_fmspc(&extension)?;
     let fmspc_hex = hex::encode_upper(fmspc);
 
-    // Extract CA type from issuer
-    let cert_der: Certificate =
-        der::Decode::from_der(cert).context("Failed to decode certificate")?;
-    let issuer = cert_der.tbs_certificate.issuer.to_string();
+    // Extract CA type from issuer (reuses parsed cert above)
+    let issuer = parsed
+        .issuer_dn()
+        .context("Failed to extract certificate issuer")?;
     let ca = if issuer.contains(crate::constants::PROCESSOR_ISSUER) {
         crate::constants::PROCESSOR_ISSUER_ID
     } else if issuer.contains(crate::constants::PLATFORM_ISSUER) {
@@ -275,7 +285,17 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
-pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCollateralV3> {
+pub async fn get_collateral(pccs_url: &str, quote: &[u8]) -> Result<QuoteCollateralV3> {
+    get_collateral_with::<DefaultConfig>(pccs_url, quote).await
+}
+
+/// Variant of [`get_collateral`] with an explicit [`Config`] for the cert
+/// parsing performed during FMSPC/CA extraction. Use this to plug in a custom
+/// backend.
+pub async fn get_collateral_with<C: Config>(
+    pccs_url: &str,
+    mut quote: &[u8],
+) -> Result<QuoteCollateralV3> {
     let parsed_quote = Quote::decode(&mut quote)?;
     let client = build_http_client()?;
 
@@ -285,7 +305,7 @@ pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCol
         .context("Failed to get PCK certificate chain")?;
 
     // Extract FMSPC and CA from the certificate
-    let (fmspc, ca) = extract_fmspc_and_ca(&pck_chain)?;
+    let (fmspc, ca) = extract_fmspc_and_ca_with::<C>(&pck_chain)?;
 
     // Fetch the rest of the collateral
     let mut collateral =
@@ -420,7 +440,12 @@ async fn get_collateral_for_fmspc_impl(
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
 pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> {
-    get_collateral(INTEL_PCS_URL, quote).await
+    get_collateral_from_pcs_with::<DefaultConfig>(quote).await
+}
+
+/// Variant of [`get_collateral_from_pcs`] with an explicit [`Config`].
+pub async fn get_collateral_from_pcs_with<C: Config>(quote: &[u8]) -> Result<QuoteCollateralV3> {
+    get_collateral_with::<C>(INTEL_PCS_URL, quote).await
 }
 
 /// Get collateral and verify the quote (uses ring backend).
@@ -434,18 +459,28 @@ pub async fn get_collateral_and_verify(
     quote: &[u8],
     pccs_url: Option<&str>,
 ) -> Result<crate::verify::VerifiedReport> {
+    get_collateral_and_verify_with::<DefaultConfig>(quote, pccs_url).await
+}
+
+/// Variant of [`get_collateral_and_verify`] with an explicit [`Config`] used
+/// for both the collateral fetch and the verification.
+#[cfg(feature = "_anycrypto")]
+pub async fn get_collateral_and_verify_with<C: Config>(
+    quote: &[u8],
+    pccs_url: Option<&str>,
+) -> Result<crate::verify::VerifiedReport> {
     use std::time::SystemTime;
 
     let pccs_url = pccs_url
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or(PHALA_PCCS_URL);
-    let collateral = get_collateral(pccs_url, quote).await?;
+    let collateral = get_collateral_with::<C>(pccs_url, quote).await?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .context("Failed to get current time")?
         .as_secs();
-    crate::verify::verify(quote, &collateral, now)
+    crate::verify::verify_with::<C>(quote, &collateral, now)
 }
 
 #[cfg(test)]
@@ -519,7 +554,8 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
 
     #[test]
     fn test_extract_fmspc_and_ca_processor() {
-        let (fmspc, ca) = extract_fmspc_and_ca(TEST_PCK_CHAIN_PROCESSOR).unwrap();
+        let (fmspc, ca) =
+            extract_fmspc_and_ca_with::<DefaultConfig>(TEST_PCK_CHAIN_PROCESSOR).unwrap();
         assert_eq!(fmspc, "00A067110000");
         assert_eq!(ca, PROCESSOR_ISSUER_ID);
     }

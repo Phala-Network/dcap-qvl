@@ -82,7 +82,8 @@ fn command_decode_quote(args: DecodeQuoteArgs) -> Result<()> {
     if args.fmspc {
         println!(
             "fmspc={}",
-            hex::encode(decoded_quote.fmspc().context("no fmspc found")?).to_uppercase()
+            hex::encode(intel::quote_fmspc(&decoded_quote).context("no fmspc found")?)
+                .to_uppercase()
         );
     } else {
         let json = serde_json::to_string(&decoded_quote).context("Failed to serialize quote")?;

@@ -305,11 +305,11 @@ pub unsafe extern "C" fn dcap_parse_quote_cb(
     // For cert_type 5: extract fmspc/ca from embedded cert chain
     // For cert_type 2/3: these are unavailable until PCK cert is fetched
     let (fmspc, ca) = if cert_chain_pem.is_some() {
-        let fmspc = match parsed.fmspc() {
+        let fmspc = match crate::intel::quote_fmspc(&parsed) {
             Ok(f) => Some(hex::encode_upper(f)),
             Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
-        let ca = match parsed.ca() {
+        let ca = match crate::intel::quote_ca(&parsed) {
             Ok(c) => Some(c.to_string()),
             Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
@@ -420,7 +420,7 @@ pub unsafe extern "C" fn dcap_verify_with_root_ca_cb(
         }
     };
 
-    let verifier = verify::QuoteVerifier::new(root_ca.to_vec(), verify::default_crypto::backend());
+    let verifier = verify::QuoteVerifier::new(root_ca.to_vec());
 
     let report = match verifier.verify(quote_slice, &collateral, now_secs) {
         Ok(r) => r,

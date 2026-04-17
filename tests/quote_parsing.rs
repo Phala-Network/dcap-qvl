@@ -25,7 +25,7 @@ fn tdx_quote_parsing_exports_cert_chain_and_extension() {
     let ext = intel::parse_pck_extension(leaf).expect("parse pck extension");
 
     // FMSPC from quote should match extension.
-    assert_eq!(quote.fmspc().unwrap(), ext.fmspc);
+    assert_eq!(intel::quote_fmspc(&quote).unwrap(), ext.fmspc);
     assert!(!ext.ppid.is_empty());
 }
 
@@ -44,7 +44,7 @@ fn sgx_quote_parsing_exports_cert_chain_and_extension() {
     let leaf = certs_der.first().expect("leaf cert");
     let ext = intel::parse_pck_extension(leaf).expect("parse pck extension");
 
-    assert_eq!(quote.fmspc().unwrap(), ext.fmspc);
+    assert_eq!(intel::quote_fmspc(&quote).unwrap(), ext.fmspc);
     assert!(!ext.ppid.is_empty());
 }
 

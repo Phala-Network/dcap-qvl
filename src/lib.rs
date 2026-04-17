@@ -79,7 +79,12 @@ pub mod collateral;
 #[cfg(feature = "report")]
 pub use collateral::PHALA_PCCS_URL;
 
+pub mod config;
+pub mod configs;
+pub mod crypto;
 pub mod oids;
+pub mod signature;
+pub mod x509;
 
 mod constants;
 pub mod intel;

@@ -5,6 +5,8 @@ use asn1_der::{
 };
 
 use crate::{
+    config::{Config, ParsedCert, X509Codec},
+    configs::DefaultConfig,
     constants::{self, CpuSvn, Fmspc, Svn},
     oids,
     quote::{AuthData, Quote},
@@ -64,9 +66,9 @@ pub fn extract_cert_chain(quote: &Quote) -> Result<Vec<Vec<u8>>> {
     );
 }
 
-/// Parse the Intel SGX extension values from a DER-encoded PCK certificate.
-pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
-    let extension = utils::get_intel_extension(cert_der)?;
+/// Generic version of [`parse_pck_extension`] using a custom [`Config`].
+pub fn parse_pck_extension_with<C: Config>(cert_der: &[u8]) -> Result<PckExtension> {
+    let extension = utils::get_intel_extension_with::<C>(cert_der)?;
 
     let ppid = find_extension_required(&[oids::PPID], &extension)?;
     let cpu_svn = utils::get_cpu_svn(&extension)?;
@@ -88,15 +90,85 @@ pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
     })
 }
 
-/// Parse the Intel SGX extension from a PEM-encoded certificate chain.
+/// Parse the Intel SGX extension values from a DER-encoded PCK certificate.
 ///
-/// The first (leaf) certificate in the chain is used.
-pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
+/// Uses the audited [`DefaultConfig`]. For a custom backend, use
+/// [`parse_pck_extension_with`].
+pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
+    parse_pck_extension_with::<DefaultConfig>(cert_der)
+}
+
+/// Generic version of [`parse_pck_extension_from_pem`] using a custom [`Config`].
+pub fn parse_pck_extension_from_pem_with<C: Config>(pem_data: &[u8]) -> Result<PckExtension> {
     let certs = utils::extract_certs(pem_data)?;
     let leaf = certs
         .first()
         .ok_or_else(|| anyhow!("No certificates found in PEM chain"))?;
-    parse_pck_extension(leaf)
+    parse_pck_extension_with::<C>(leaf)
+}
+
+/// Parse the Intel SGX extension from a PEM-encoded certificate chain.
+///
+/// The first (leaf) certificate in the chain is used. Uses the audited
+/// [`DefaultConfig`]. For a custom backend, use
+/// [`parse_pck_extension_from_pem_with`].
+pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
+    parse_pck_extension_from_pem_with::<DefaultConfig>(pem_data)
+}
+
+/// Classify the PCK certificate authority of a leaf cert as
+/// [`crate::constants::PROCESSOR_ISSUER_ID`] or
+/// [`crate::constants::PLATFORM_ISSUER_ID`] by inspecting the issuer DN.
+///
+/// Generic over [`Config`]; the issuer DN extraction goes through the
+/// configured [`X509Codec`].
+pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<&'static str> {
+    let issuer = C::X509::from_der(cert_der)
+        .context("Failed to decode certificate")?
+        .issuer_dn()
+        .context("Failed to extract certificate issuer")?;
+    if issuer.contains(constants::PROCESSOR_ISSUER) {
+        Ok(constants::PROCESSOR_ISSUER_ID)
+    } else if issuer.contains(constants::PLATFORM_ISSUER) {
+        Ok(constants::PLATFORM_ISSUER_ID)
+    } else {
+        // Preserve legacy fallback behavior: unknown issuer is treated as processor.
+        Ok(constants::PROCESSOR_ISSUER_ID)
+    }
+}
+
+/// [`pck_ca_with`] under the audited [`DefaultConfig`].
+pub fn pck_ca(cert_der: &[u8]) -> Result<&'static str> {
+    pck_ca_with::<DefaultConfig>(cert_der)
+}
+
+/// Return the FMSPC of a quote's PCK leaf certificate.
+///
+/// Convenience over [`extract_cert_chain`] + [`parse_pck_extension_with`];
+/// generic over [`Config`].
+pub fn quote_fmspc_with<C: Config>(quote: &Quote) -> Result<Fmspc> {
+    let chain = extract_cert_chain(quote)?;
+    let leaf = chain.first().context("Empty PCK certificate chain")?;
+    Ok(parse_pck_extension_with::<C>(leaf)?.fmspc)
+}
+
+/// [`quote_fmspc_with`] under the audited [`DefaultConfig`].
+pub fn quote_fmspc(quote: &Quote) -> Result<Fmspc> {
+    quote_fmspc_with::<DefaultConfig>(quote)
+}
+
+/// Return the PCK CA classification of a quote's PCK leaf certificate.
+///
+/// Generic over [`Config`].
+pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<&'static str> {
+    let chain = extract_cert_chain(quote)?;
+    let leaf = chain.first().context("Empty PCK certificate chain")?;
+    pck_ca_with::<C>(leaf)
+}
+
+/// [`quote_ca_with`] under the audited [`DefaultConfig`].
+pub fn quote_ca(quote: &Quote) -> Result<&'static str> {
+    quote_ca_with::<DefaultConfig>(quote)
 }
 
 fn find_extension_required(
