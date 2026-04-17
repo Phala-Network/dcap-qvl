@@ -33,12 +33,30 @@ let report = dcap_qvl::verify::verify_with::<Asn1DerConfig>(
 )?;
 ```
 
-## Run the conformance tests
+## Run it
 
 ```sh
 cd examples/asn1-der-backend
+
+# End-to-end demo against the bundled TDX sample (no args).
+cargo run --example verify_sample
+
+# Or with your own quote / collateral / now (unix secs):
+cargo run --example verify_sample -- path/to/quote.bin path/to/collateral.json 1700000000
+
+# Conformance tests vs DefaultConfig.
 cargo test
 ```
+
+The interesting line is in `examples/verify_sample.rs`:
+
+```rust
+let report = verify_with::<Asn1DerConfig>(&quote, &collateral, now)?;
+```
+
+That single type parameter is the entire opt-in surface — every X.509,
+DER, and crypto operation downstream of that call goes through
+`Asn1DerConfig`'s associated types.
 
 ## Adapting this for your project
 
