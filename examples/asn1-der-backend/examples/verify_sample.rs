@@ -70,9 +70,7 @@ fn run() -> Result<()> {
             (quote, collateral, now)
         }
         _ => {
-            anyhow::bail!(
-                "usage: verify_sample [<quote> <collateral.json> [<now-unix-secs>]]"
-            );
+            anyhow::bail!("usage: verify_sample [<quote> <collateral.json> [<now-unix-secs>]]");
         }
     };
 

@@ -118,8 +118,7 @@ fn encode_ecdsa_sig_matches_default() {
 
 #[test]
 fn verify_with_asn1_der_config_matches_default() {
-    let collateral: QuoteCollateralV3 =
-        serde_json::from_slice(TDX_COLLATERAL).expect("collateral");
+    let collateral: QuoteCollateralV3 = serde_json::from_slice(TDX_COLLATERAL).expect("collateral");
     let now: u64 = chrono::DateTime::parse_from_rfc3339(
         serde_json::from_str::<serde_json::Value>(&collateral.tcb_info)
             .expect("tcb json")
@@ -133,8 +132,7 @@ fn verify_with_asn1_der_config_matches_default() {
         - 1;
 
     let default_result = dcap_qvl::verify::verify(TDX_QUOTE, &collateral, now);
-    let custom_result =
-        dcap_qvl::verify::verify_with::<Asn1DerConfig>(TDX_QUOTE, &collateral, now);
+    let custom_result = dcap_qvl::verify::verify_with::<Asn1DerConfig>(TDX_QUOTE, &collateral, now);
 
     assert_eq!(
         default_result.map_err(|e| e.to_string()),
