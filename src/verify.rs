@@ -13,10 +13,11 @@ use {
     alloc::vec::Vec,
 };
 
+#[cfg(feature = "default-x509")]
+use crate::configs::DefaultConfig;
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
     config::{Config, CryptoProvider},
-    configs::DefaultConfig,
     quote::{Report, TDAttributes},
     utils::{encode_as_der_with, extract_certs, parse_crls, verify_certificate_chain},
 };
@@ -104,6 +105,7 @@ impl QuoteVerifier {
 
     /// Verify a quote with the configured root certificate, using
     /// [`DefaultConfig`].
+    #[cfg(feature = "default-x509")]
     pub fn verify(
         &self,
         raw_quote: &[u8],
@@ -133,7 +135,7 @@ impl QuoteVerifier {
 
     /// Like [`Self::verify`], but takes a closure to mutate TCB info after the
     /// signature check passes. Uses [`DefaultConfig`].
-    #[cfg(feature = "danger-allow-tcb-override")]
+    #[cfg(all(feature = "default-x509", feature = "danger-allow-tcb-override"))]
     pub fn dangerous_verify_with_tcb_override(
         &self,
         raw_quote: &[u8],
@@ -169,7 +171,7 @@ impl QuoteVerifier {
     }
 }
 
-#[cfg(all(feature = "js", feature = "_anycrypto"))]
+#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
 #[wasm_bindgen]
 pub fn js_verify(
     raw_quote: JsValue,
@@ -190,7 +192,7 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
-#[cfg(all(feature = "js", feature = "_anycrypto"))]
+#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
 #[wasm_bindgen]
 pub fn js_verify_with_root_ca(
     raw_quote: JsValue,
@@ -919,7 +921,7 @@ fn validate_attrs(report: &Report) -> Result<()> {
 /// Convenience entry points pinning the [`crate::configs::RingConfig`]
 /// (audited cert parser + sig encoder + ring crypto). Equivalent to calling
 /// `verify_with::<RingConfig>(...)` on a default `QuoteVerifier`.
-#[cfg(feature = "ring")]
+#[cfg(all(feature = "ring", feature = "default-x509"))]
 pub mod ring {
     use super::*;
     pub use crate::configs::RingConfig;
@@ -956,7 +958,7 @@ pub mod ring {
 /// [`crate::configs::RustCryptoConfig`] (audited cert parser + sig
 /// encoder + RustCrypto crypto). Equivalent to calling
 /// `verify_with::<RustCryptoConfig>(...)` on a default `QuoteVerifier`.
-#[cfg(feature = "rustcrypto")]
+#[cfg(all(feature = "rustcrypto", feature = "default-x509"))]
 pub mod rustcrypto {
     use super::*;
     pub use crate::configs::RustCryptoConfig;
@@ -996,7 +998,7 @@ pub mod rustcrypto {
 /// `ring` crypto provider when the `ring` feature is enabled, otherwise
 /// `rustcrypto`. To pin a specific config, use [`verify_with`] or one of the
 /// [`ring::verify`] / [`rustcrypto::verify`] convenience entry points.
-#[cfg(feature = "_anycrypto")]
+#[cfg(all(feature = "_anycrypto", feature = "default-x509"))]
 pub fn verify(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,
@@ -1018,7 +1020,11 @@ pub fn verify_with<C: Config>(
 
 /// Like [`verify`], but takes a closure to mutate TCB info after the
 /// signature check. Uses [`DefaultConfig`].
-#[cfg(all(feature = "_anycrypto", feature = "danger-allow-tcb-override"))]
+#[cfg(all(
+    feature = "_anycrypto",
+    feature = "default-x509",
+    feature = "danger-allow-tcb-override"
+))]
 pub fn dangerous_verify_with_tcb_override(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,

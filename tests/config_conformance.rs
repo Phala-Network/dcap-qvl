@@ -6,6 +6,7 @@
 //! gate — if the default backend's output ever changes, these tests catch it.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![cfg(feature = "default-x509")]
 
 use dcap_qvl::config::{Config, EcdsaSigEncoder, ParsedCert, X509Codec};
 use dcap_qvl::configs::DefaultConfig;

@@ -80,10 +80,13 @@ pub mod collateral;
 pub use collateral::PHALA_PCCS_URL;
 
 pub mod config;
+#[cfg(feature = "default-x509")]
 pub mod configs;
 pub mod crypto;
 pub mod oids;
+#[cfg(feature = "default-x509")]
 pub mod signature;
+#[cfg(feature = "default-x509")]
 pub mod x509;
 
 mod constants;

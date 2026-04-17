@@ -6,6 +6,7 @@ use dcap_qvl::{
 };
 use scale::Decode as ScaleDecode;
 
+#[cfg(feature = "default-x509")]
 #[test]
 fn tdx_quote_parsing_exports_cert_chain_and_extension() {
     let raw_quote = include_bytes!("../sample/tdx_quote");
@@ -29,6 +30,7 @@ fn tdx_quote_parsing_exports_cert_chain_and_extension() {
     assert!(!ext.ppid.is_empty());
 }
 
+#[cfg(feature = "default-x509")]
 #[test]
 fn sgx_quote_parsing_exports_cert_chain_and_extension() {
     let raw_quote = include_bytes!("../sample/sgx_quote");

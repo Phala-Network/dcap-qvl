@@ -4,9 +4,10 @@ use asn1_der::{
     DerObject,
 };
 
+#[cfg(feature = "default-x509")]
+use crate::configs::DefaultConfig;
 use crate::{
     config::{Config, ParsedCert, X509Codec},
-    configs::DefaultConfig,
     constants::{self, CpuSvn, Fmspc, Svn},
     oids,
     quote::{AuthData, Quote},
@@ -94,6 +95,7 @@ pub fn parse_pck_extension_with<C: Config>(cert_der: &[u8]) -> Result<PckExtensi
 ///
 /// Uses the audited [`DefaultConfig`]. For a custom backend, use
 /// [`parse_pck_extension_with`].
+#[cfg(feature = "default-x509")]
 pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
     parse_pck_extension_with::<DefaultConfig>(cert_der)
 }
@@ -112,6 +114,7 @@ pub fn parse_pck_extension_from_pem_with<C: Config>(pem_data: &[u8]) -> Result<P
 /// The first (leaf) certificate in the chain is used. Uses the audited
 /// [`DefaultConfig`]. For a custom backend, use
 /// [`parse_pck_extension_from_pem_with`].
+#[cfg(feature = "default-x509")]
 pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
     parse_pck_extension_from_pem_with::<DefaultConfig>(pem_data)
 }
@@ -138,6 +141,7 @@ pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<&'static str> {
 }
 
 /// [`pck_ca_with`] under the audited [`DefaultConfig`].
+#[cfg(feature = "default-x509")]
 pub fn pck_ca(cert_der: &[u8]) -> Result<&'static str> {
     pck_ca_with::<DefaultConfig>(cert_der)
 }
@@ -153,6 +157,7 @@ pub fn quote_fmspc_with<C: Config>(quote: &Quote) -> Result<Fmspc> {
 }
 
 /// [`quote_fmspc_with`] under the audited [`DefaultConfig`].
+#[cfg(feature = "default-x509")]
 pub fn quote_fmspc(quote: &Quote) -> Result<Fmspc> {
     quote_fmspc_with::<DefaultConfig>(quote)
 }
@@ -167,6 +172,7 @@ pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<&'static str> {
 }
 
 /// [`quote_ca_with`] under the audited [`DefaultConfig`].
+#[cfg(feature = "default-x509")]
 pub fn quote_ca(quote: &Quote) -> Result<&'static str> {
     quote_ca_with::<DefaultConfig>(quote)
 }
