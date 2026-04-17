@@ -1,0 +1,64 @@
+# `asn1_der`-based downstream backend (example)
+
+Reference implementation of [`dcap_qvl::config::Config`] backed by `asn1_der`
+instead of the audited `x509-cert` + `der` stack. **Not part of the
+audited `dcap-qvl` codebase** — copy and adapt.
+
+## Why
+
+`x509-cert` + `der` add roughly 37 KiB to a `wasm32-unknown-unknown` build
+(`lto="fat"` + `wasm-opt -O`). For WASM smart contracts (NEAR, ink!, etc.)
+that overhead matters. `asn1_der` is already a transitive dependency of
+`dcap-qvl`, so a backend built on it adds no new dependencies and avoids
+duplicating ASN.1 parsing logic.
+
+## Layout
+
+| File | Purpose |
+|---|---|
+| `src/lib.rs` | Re-exports + `Asn1DerConfig` bundle |
+| `src/x509.rs` | `Asn1DerCertBackend` (`X509Codec`) + `Asn1DerParsedCert<'_>` (`ParsedCert`) — zero-copy via the `Parsed<'a>` GAT |
+| `src/sig.rs` | `Asn1DerSigEncoder` (`EcdsaSigEncoder`) |
+| `tests/conformance.rs` | Drop-in equivalence checks against `DefaultConfig` on the bundled SGX/TDX corpus |
+
+## Usage
+
+```rust
+use asn1_der_backend_example::Asn1DerConfig;
+
+let report = dcap_qvl::verify::verify_with::<Asn1DerConfig>(
+    &raw_quote,
+    &collateral,
+    now_secs,
+)?;
+```
+
+## Run the conformance tests
+
+```sh
+cd examples/asn1-der-backend
+cargo test
+```
+
+## Adapting this for your project
+
+1. Copy `src/x509.rs` and `src/sig.rs` into your crate.
+2. Define your own `Config` impl picking the crypto provider you prefer
+   (`RingCrypto`, `RustCryptoCrypto`, or your own `CryptoProvider`).
+3. Run `tests/conformance.rs` against a corpus that matches your
+   production traffic.
+4. Audit the parser changes yourself — `dcap-qvl` only audits the
+   in-tree `X509CertBackend` / `DerSigEncoder`.
+
+## Caveats
+
+- `Asn1DerParsedCert::issuer_dn` returns a comma-joined sequence of
+  printable RDN values, **not** RFC 4514. It is sufficient for the
+  substring matching `dcap_qvl::intel::pck_ca_with` performs (`"Processor"`
+  / `"Platform"`), but is not a full DN renderer. If you need stable
+  RFC 4514 output, add the formatting yourself.
+- This crate handles only `PrintableString` (`0x13`), `UTF8String`
+  (`0x0C`), and `IA5String` (`0x16`) inside RDN values. Intel's PCK certs
+  use `PrintableString`; if your corpus contains other DirectoryString
+  variants (`BMPString`, `TeletexString`, etc.), extend `STRING_TAGS`.
+- This crate is **not audited**.

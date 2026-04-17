@@ -1,0 +1,25 @@
+[package]
+name = "asn1-der-backend-example"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Downstream `Config` example: smaller-footprint X.509 / DER backend built on `asn1_der`"
+license = "MIT"
+
+[dependencies]
+dcap-qvl = { path = "../..", default-features = false, features = ["std", "ring"] }
+asn1_der = { version = "0.7", default-features = false, features = ["native_types", "std"] }
+anyhow = "1"
+
+[dev-dependencies]
+serde_json = "1"
+hex = "0.4"
+pem = "3"
+scale = { package = "parity-scale-codec", version = "3.6.12" }
+chrono = "0.4"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
