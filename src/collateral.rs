@@ -266,6 +266,10 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 
 /// Get collateral given DCAP quote and base URL of PCCS server URL.
 ///
+/// Builds a default HTTP client internally. Use [`get_collateral_with_client`]
+/// if you need to configure TLS (e.g. add custom root CAs for a local PCCS
+/// with a self-signed cert), timeouts, or other client options.
+///
 /// # Arguments
 ///
 /// * `pccs_url` - The base URL of PCCS server. (e.g. `https://pccs.example.com/sgx/certification/v4`)
@@ -275,12 +279,33 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 ///
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
-pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCollateralV3> {
-    let parsed_quote = Quote::decode(&mut quote)?;
+pub async fn get_collateral(pccs_url: &str, quote: &[u8]) -> Result<QuoteCollateralV3> {
     let client = build_http_client()?;
+    get_collateral_with_client(&client, pccs_url, quote).await
+}
+
+/// Get collateral using a caller-provided HTTP client.
+///
+/// Same as [`get_collateral`] but lets callers configure the
+/// [`reqwest::Client`] — useful for pointing at a local PCCS with a
+/// self-signed TLS cert (via `add_root_certificate` or
+/// `danger_accept_invalid_certs`), setting custom timeouts, attaching
+/// headers, or routing through a proxy.
+///
+/// # Arguments
+///
+/// * `client` - The HTTP client to use for all PCCS requests.
+/// * `pccs_url` - The base URL of the PCCS server.
+/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
+pub async fn get_collateral_with_client(
+    client: &reqwest::Client,
+    pccs_url: &str,
+    mut quote: &[u8],
+) -> Result<QuoteCollateralV3> {
+    let parsed_quote = Quote::decode(&mut quote)?;
 
     // Get PCK certificate chain (from quote or PCCS)
-    let pck_chain = get_pck_chain(&client, pccs_url, &parsed_quote)
+    let pck_chain = get_pck_chain(client, pccs_url, &parsed_quote)
         .await
         .context("Failed to get PCK certificate chain")?;
 
@@ -288,9 +313,14 @@ pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCol
     let (fmspc, ca) = extract_fmspc_and_ca(&pck_chain)?;
 
     // Fetch the rest of the collateral
-    let mut collateral =
-        get_collateral_for_fmspc_impl(&client, pccs_url, fmspc, ca, parsed_quote.header.is_sgx())
-            .await?;
+    let mut collateral = get_collateral_for_fmspc_with_client(
+        client,
+        pccs_url,
+        fmspc,
+        ca,
+        parsed_quote.header.is_sgx(),
+    )
+    .await?;
 
     // Attach the PCK certificate chain for offline verification
     collateral.pck_certificate_chain = Some(pck_chain);
@@ -299,6 +329,9 @@ pub async fn get_collateral(pccs_url: &str, mut quote: &[u8]) -> Result<QuoteCol
 }
 
 /// Get collateral for a known FMSPC (public API, builds its own HTTP client).
+///
+/// Use [`get_collateral_for_fmspc_with_client`] if you need to configure the
+/// HTTP client.
 pub async fn get_collateral_for_fmspc(
     pccs_url: &str,
     fmspc: String,
@@ -306,11 +339,11 @@ pub async fn get_collateral_for_fmspc(
     for_sgx: bool,
 ) -> Result<QuoteCollateralV3> {
     let client = build_http_client()?;
-    get_collateral_for_fmspc_impl(&client, pccs_url, fmspc, ca, for_sgx).await
+    get_collateral_for_fmspc_with_client(&client, pccs_url, fmspc, ca, for_sgx).await
 }
 
-/// Internal implementation that uses a provided HTTP client.
-async fn get_collateral_for_fmspc_impl(
+/// Get collateral for a known FMSPC using a caller-provided HTTP client.
+pub async fn get_collateral_for_fmspc_with_client(
     client: &reqwest::Client,
     pccs_url: &str,
     fmspc: String,
