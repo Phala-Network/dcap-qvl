@@ -280,6 +280,9 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 /// * `Ok(QuoteCollateralV3)` - The quote collateral
 /// * `Err(Error)` - The error
 pub async fn get_collateral(pccs_url: &str, quote: &[u8]) -> Result<QuoteCollateralV3> {
+    // Fail fast on invalid quotes before building an HTTP client — preserves
+    // the error precedence the pre-refactor version had.
+    let _ = Quote::decode(&mut &quote[..])?;
     let client = build_http_client()?;
     get_collateral_with_client(&client, pccs_url, quote).await
 }
@@ -300,8 +303,9 @@ pub async fn get_collateral(pccs_url: &str, quote: &[u8]) -> Result<QuoteCollate
 pub async fn get_collateral_with_client(
     client: &reqwest::Client,
     pccs_url: &str,
-    mut quote: &[u8],
+    quote: &[u8],
 ) -> Result<QuoteCollateralV3> {
+    let mut quote = quote;
     let parsed_quote = Quote::decode(&mut quote)?;
 
     // Get PCK certificate chain (from quote or PCCS)
