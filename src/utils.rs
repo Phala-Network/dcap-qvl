@@ -7,28 +7,19 @@ use asn1_der::{
 use rustls_pki_types::{CertificateDer, TrustAnchor, UnixTime};
 use webpki::CertRevocationList;
 use webpki::{self, OwnedCertRevocationList};
-use x509_cert::Certificate;
 
-use crate::{constants::*, oids};
+use crate::{
+    config::{Config, ParsedCert, X509Codec},
+    constants::*,
+    oids,
+};
 
-pub fn get_intel_extension(der_encoded: &[u8]) -> Result<Vec<u8>> {
-    let cert: Certificate =
-        der::Decode::from_der(der_encoded).context("Failed to decode certificate")?;
-    let mut extension_iter = cert
-        .tbs_certificate
-        .extensions
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .filter(|e| e.extn_id == oids::SGX_EXTENSION)
-        .map(|e| e.extn_value.clone());
-
-    let extension = extension_iter.next().context("Intel extension not found")?;
-    if extension_iter.next().is_some() {
-        //"There should only be one Intel extension"
-        bail!("Intel extension ambiguity");
-    }
-    Ok(extension.into_bytes())
+/// Look up the Intel SGX OID extension's OCTET STRING contents in a PCK
+/// certificate. Generic over [`Config`].
+pub fn get_intel_extension_with<C: Config>(der_encoded: &[u8]) -> Result<Vec<u8>> {
+    C::X509::from_der(der_encoded)?
+        .extension(oids::SGX_EXTENSION.as_bytes())?
+        .context("Intel extension not found")
 }
 
 pub fn find_extension(path: &[&[u8]], raw: &[u8]) -> Result<Vec<u8>> {
@@ -116,27 +107,12 @@ pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>
     Ok(certs)
 }
 
-/// Encode two 32-byte values in DER format
-/// This is meant for 256 bit ECC signatures or public keys
-/// TODO: We could use `asn1_der` crate to reimplement this, so we can remove `der` which overlaps with `asn1_der`
-pub fn encode_as_der(data: &[u8]) -> Result<Vec<u8>> {
+/// Split a 64-byte raw `r ‖ s` payload at byte 32 and DER-encode it as
+/// `Ecdsa-Sig-Value` (RFC 5480) using the [`Config::SigEncoder`] of `C`.
+pub fn encode_as_der_with<C: Config>(data: &[u8]) -> Result<Vec<u8>> {
+    use crate::config::EcdsaSigEncoder;
     let (first, second) = data.split_at_checked(32).context("Invalid key length")?;
-    let mut sequence = der::asn1::SequenceOf::<der::asn1::UintRef, 2>::new();
-    let element0 = der::asn1::UintRef::new(first).context("Failed to add first element")?;
-    sequence
-        .add(element0)
-        .context("Failed to add second element")?;
-    let element1 = der::asn1::UintRef::new(second).context("Failed to add second element")?;
-    sequence
-        .add(element1)
-        .context("Failed to add third element")?;
-    // 72 should be enough in all cases. 2 + 2 x (32 + 3)
-    let mut asn1 = alloc::vec![0u8; 72];
-    let mut writer = der::SliceWriter::new(&mut asn1);
-    writer
-        .encode(&sequence)
-        .context("Failed to encode sequence")?;
-    Ok(writer.finish().context("Failed to finish writer")?.to_vec())
+    C::SigEncoder::encode_ecdsa_sig(first, second)
 }
 
 /// Parse CRL DER bytes into CertRevocationList objects.

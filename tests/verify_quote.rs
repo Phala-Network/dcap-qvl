@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+#![cfg(feature = "default-x509")]
 
 use dcap_qvl::{quote::Quote, verify::VerifiedReport, QuoteCollateralV3};
 use der::Decode as DerDecode;

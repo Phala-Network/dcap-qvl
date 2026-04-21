@@ -13,10 +13,13 @@ use {
     alloc::vec::Vec,
 };
 
+#[cfg(feature = "default-x509")]
+use crate::configs::DefaultConfig;
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
 use crate::{
+    config::{Config, CryptoProvider},
     quote::{Report, TDAttributes},
-    utils::{encode_as_der, extract_certs, parse_crls, verify_certificate_chain},
+    utils::{encode_as_der_with, extract_certs, parse_crls, verify_certificate_chain},
 };
 use crate::{
     quote::{TDReport10, TDReport15},
@@ -24,23 +27,6 @@ use crate::{
 };
 use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "ring")]
-pub(crate) use self::ring as default_crypto;
-#[cfg(all(not(feature = "ring"), feature = "rustcrypto"))]
-pub(crate) use self::rustcrypto as default_crypto;
-
-/// Crypto backend configuration for quote verification.
-///
-/// Holds the signature verification algorithm and SHA-256 implementation
-/// needed by the verification logic. Use [`ring::backend()`] or
-/// [`rustcrypto::backend()`] to obtain a pre-configured instance.
-pub struct CryptoBackend {
-    /// ECDSA P-256 SHA-256 algorithm for certificate and raw signature verification
-    pub sig_algo: &'static dyn rustls_pki_types::SignatureVerificationAlgorithm,
-    /// SHA-256 hash function
-    pub sha256: fn(&[u8]) -> [u8; 32],
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TeeType {
@@ -95,68 +81,61 @@ pub struct VerifiedReport {
     pub platform_status: TcbStatusWithAdvisory,
 }
 
-/// Quote verifier with configurable root certificate and crypto backend.
+/// Quote verifier with a configurable root certificate.
 ///
-/// This allows using custom root certificates for testing or private deployments,
-/// and selecting between different cryptographic backends (ring or rustcrypto).
+/// All other configurable choices (X.509 parser, signature encoder, crypto
+/// primitives) are selected at the call site by passing a [`Config`] type
+/// parameter to [`Self::verify_with`] / [`Self::dangerous_verify_with_tcb_override_with`].
+/// The non-generic [`Self::verify`] / [`Self::dangerous_verify_with_tcb_override`]
+/// methods use [`DefaultConfig`].
 pub struct QuoteVerifier {
     root_ca_der: Vec<u8>,
-    backend: CryptoBackend,
 }
 
 impl QuoteVerifier {
-    /// Create a new verifier with a custom root certificate and crypto backend.
-    pub fn new(root_ca_der: Vec<u8>, backend: CryptoBackend) -> Self {
-        Self {
-            root_ca_der,
-            backend,
-        }
+    /// Create a new verifier with a custom root certificate.
+    pub fn new(root_ca_der: Vec<u8>) -> Self {
+        Self { root_ca_der }
     }
 
-    /// Create a new verifier using Intel's production root certificate with ring backend.
-    pub fn new_prod(backend: CryptoBackend) -> Self {
-        Self::new(TRUSTED_ROOT_CA_DER.to_vec(), backend)
+    /// Create a new verifier using Intel's production root certificate.
+    pub fn new_prod() -> Self {
+        Self::new(TRUSTED_ROOT_CA_DER.to_vec())
     }
 
-    /// Verify a quote with the configured root certificate
-    ///
-    /// # Arguments
-    /// * `raw_quote` - The raw quote bytes
-    /// * `collateral` - The quote collateral
-    /// * `now_secs` - Current time in seconds since UNIX epoch
-    ///
-    /// # Returns
-    /// * `Ok(VerifiedReport)` - The verified report
-    /// * `Err(Error)` - The error
+    /// Verify a quote with the configured root certificate, using
+    /// [`DefaultConfig`].
+    #[cfg(feature = "default-x509")]
     pub fn verify(
         &self,
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        verify_impl(
+        self.verify_with::<DefaultConfig>(raw_quote, collateral, now_secs)
+    }
+
+    /// Verify a quote, selecting an explicit [`Config`] for X.509 / DER /
+    /// crypto operations. Use this to plug in a custom backend.
+    pub fn verify_with<C: Config>(
+        &self,
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+    ) -> Result<VerifiedReport> {
+        verify_impl::<C>(
             raw_quote,
             collateral,
             now_secs,
             &self.root_ca_der,
-            &self.backend,
             #[cfg(feature = "danger-allow-tcb-override")]
             None::<fn(_) -> _>,
         )
     }
 
-    /// Verify a quote with the configured root certificate, passing a TCB info override
-    ///
-    /// # Arguments
-    /// * `raw_quote` - The raw quote bytes
-    /// * `collateral` - The quote collateral
-    /// * `now_secs` - Current time in seconds since UNIX epoch
-    /// * `override_tcb_info` - a function which modifies TCB info after the signature check
-    ///
-    /// # Returns
-    /// * `Ok(VerifiedReport)` - The verified report
-    /// * `Err(Error)` - The error
-    #[cfg(feature = "danger-allow-tcb-override")]
+    /// Like [`Self::verify`], but takes a closure to mutate TCB info after the
+    /// signature check passes. Uses [`DefaultConfig`].
+    #[cfg(all(feature = "default-x509", feature = "danger-allow-tcb-override"))]
     pub fn dangerous_verify_with_tcb_override(
         &self,
         raw_quote: &[u8],
@@ -164,18 +143,35 @@ impl QuoteVerifier {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        verify_impl(
+        self.dangerous_verify_with_tcb_override_with::<DefaultConfig, _>(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        )
+    }
+
+    /// Variant of [`Self::dangerous_verify_with_tcb_override`] with an explicit
+    /// [`Config`].
+    #[cfg(feature = "danger-allow-tcb-override")]
+    pub fn dangerous_verify_with_tcb_override_with<C: Config, F: FnOnce(TcbInfo) -> TcbInfo>(
+        &self,
+        raw_quote: &[u8],
+        collateral: &QuoteCollateralV3,
+        now_secs: u64,
+        override_tcb_info: F,
+    ) -> Result<VerifiedReport> {
+        verify_impl::<C>(
             raw_quote,
             collateral,
             now_secs,
             &self.root_ca_der,
-            &self.backend,
             Some(override_tcb_info),
         )
     }
 }
 
-#[cfg(all(feature = "js", feature = "_anycrypto"))]
+#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
 #[wasm_bindgen]
 pub fn js_verify(
     raw_quote: JsValue,
@@ -196,7 +192,7 @@ pub fn js_verify(
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
-#[cfg(all(feature = "js", feature = "_anycrypto"))]
+#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
 #[wasm_bindgen]
 pub fn js_verify_with_root_ca(
     raw_quote: JsValue,
@@ -210,7 +206,7 @@ pub fn js_verify_with_root_ca(
     let root_ca_der: Vec<u8> = serde_wasm_bindgen::from_value(root_ca_der)
         .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
 
-    let verifier = QuoteVerifier::new(root_ca_der, default_crypto::backend());
+    let verifier = QuoteVerifier::new(root_ca_der);
     let verified_report = verifier
         .verify(&raw_quote, &quote_collateral, now)
         .map_err(|e| {
@@ -243,12 +239,11 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 // =============================================================================
 
 /// Verify TCB Info collateral: certificate chain, signature, parsing, and expiration check
-fn verify_tcb_info_signature(
+fn verify_tcb_info_signature<C: Config>(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
-    backend: &CryptoBackend,
 ) -> Result<TcbInfo> {
     // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
@@ -278,10 +273,10 @@ fn verify_tcb_info_signature(
     verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor)?;
 
     // Verify signature
-    let asn1_signature = encode_as_der(&collateral.tcb_info_signature)?;
+    let asn1_signature = encode_as_der_with::<C>(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
-            backend.sig_algo,
+            C::Crypto::sig_algo(),
             collateral.tcb_info.as_bytes(),
             &asn1_signature,
         )
@@ -298,12 +293,11 @@ fn verify_tcb_info_signature(
 // =============================================================================
 
 /// Verify QE Identity collateral: certificate chain, signature, parsing, and expiration check
-fn verify_qe_identity_signature(
+fn verify_qe_identity_signature<C: Config>(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
-    backend: &CryptoBackend,
 ) -> Result<QeIdentity> {
     // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
@@ -333,10 +327,10 @@ fn verify_qe_identity_signature(
     verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
 
     // Verify signature
-    let qe_id_asn1_signature = encode_as_der(&collateral.qe_identity_signature)?;
+    let qe_id_asn1_signature = encode_as_der_with::<C>(&collateral.qe_identity_signature)?;
     if qe_id_leaf_cert
         .verify_signature(
-            backend.sig_algo,
+            C::Crypto::sig_algo(),
             collateral.qe_identity.as_bytes(),
             &qe_id_asn1_signature,
         )
@@ -356,7 +350,7 @@ fn verify_qe_identity_signature(
 ///
 /// Verifies the PCK certificate chain against the trusted root and CRLs.
 /// Extracts cpu_svn, pce_svn, fmspc, and ppid from the certificate.
-fn verify_pck_cert_chain(
+fn verify_pck_cert_chain<C: Config>(
     collateral: &QuoteCollateralV3,
     certification_data: &crate::quote::CertificationData,
     now: UnixTime,
@@ -385,7 +379,7 @@ fn verify_pck_cert_chain(
     verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
 
     // Extract Intel extension data from PCK cert (parsed once)
-    let pck_ext = intel::parse_pck_extension(pck_leaf)?;
+    let pck_ext = intel::parse_pck_extension_with::<C>(pck_leaf)?;
 
     Ok(PckCertChainResult {
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
@@ -410,18 +404,21 @@ struct PckCertChainResult {
 // =============================================================================
 
 /// Verify QE report signature using PCK certificate
-fn verify_qe_report_signature(
+fn verify_qe_report_signature<C: Config>(
     pck_leaf: &CertificateDer,
     auth_data: &crate::quote::AuthDataV3,
-    backend: &CryptoBackend,
 ) -> Result<EnclaveReport> {
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
 
     // Verify QE report signature (signed by PCK)
-    let qe_report_signature = encode_as_der(&auth_data.qe_report_signature)?;
+    let qe_report_signature = encode_as_der_with::<C>(&auth_data.qe_report_signature)?;
     if pck_leaf_cert
-        .verify_signature(backend.sig_algo, &auth_data.qe_report, &qe_report_signature)
+        .verify_signature(
+            C::Crypto::sig_algo(),
+            &auth_data.qe_report,
+            &qe_report_signature,
+        )
         .is_err()
     {
         bail!("Signature is invalid for qe_report in quote");
@@ -440,10 +437,9 @@ fn verify_qe_report_signature(
 // =============================================================================
 
 /// Verify QE report hash matches attestation key and auth data (panic-free)
-fn verify_qe_report_data(
+fn verify_qe_report_data<C: Config>(
     qe_report: &EnclaveReport,
     auth_data: &crate::quote::AuthDataV3,
-    backend: &CryptoBackend,
 ) -> Result<()> {
     use crate::constants::{ATTESTATION_KEY_LEN, AUTHENTICATION_DATA_LEN};
 
@@ -455,7 +451,7 @@ fn verify_qe_report_data(
     let mut qe_hash_data = [0u8; ATTESTATION_KEY_LEN + AUTHENTICATION_DATA_LEN];
     qe_hash_data[..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = (backend.sha256)(&qe_hash_data);
+    let qe_hash = C::Crypto::sha256(&qe_hash_data);
     if qe_hash[..] != qe_report.report_data[..32] {
         bail!("QE report hash mismatch");
     }
@@ -473,25 +469,23 @@ fn verify_qe_report_data(
 // =============================================================================
 
 /// Verify ISV enclave report signature using attestation key
-fn verify_isv_report_signature(
+fn verify_isv_report_signature<C: Config>(
     raw_quote: &[u8],
     quote: &Quote,
     auth_data: &crate::quote::AuthDataV3,
-    backend: &CryptoBackend,
 ) -> Result<()> {
     // Prepend 0x04 to raw public key for SEC1 uncompressed format
     let mut pub_key = [0x04u8; 65];
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
 
     // DER-encode the raw r||s signature for SignatureVerificationAlgorithm
-    let der_sig = encode_as_der(&auth_data.ecdsa_signature)?;
+    let der_sig = encode_as_der_with::<C>(&auth_data.ecdsa_signature)?;
 
     let signed_data = raw_quote
         .get(..quote.signed_length())
         .context("Failed to get signed quote scope")?;
 
-    backend
-        .sig_algo
+    C::Crypto::sig_algo()
         .verify_signature(&pub_key, signed_data, &der_sig)
         .map_err(|_| anyhow::anyhow!("ISV enclave report signature is invalid"))
 }
@@ -753,12 +747,11 @@ fn match_tdx_module_identity(
 /// 8. Match Platform TCB (PCK Cert's CPU_SVN/PCE_SVN/FMSPC vs TCB Info)
 /// 9. Match QE TCB (QE Report's ISVSVN vs QE Identity tcb_levels)
 /// 10. Merge TCB statuses
-fn verify_impl(
+fn verify_impl<C: Config>(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,
     now_secs: u64,
     root_ca_der: &[u8],
-    backend: &CryptoBackend,
     #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
         impl FnOnce(TcbInfo) -> TcbInfo,
     >,
@@ -805,7 +798,7 @@ fn verify_impl(
 
     // Step 1: Verify TCB Info signature
     let mut tcb_info =
-        verify_tcb_info_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+        verify_tcb_info_signature::<C>(collateral, now, &crls, trust_anchor.clone())?;
 
     #[cfg(feature = "danger-allow-tcb-override")]
     {
@@ -820,7 +813,7 @@ fn verify_impl(
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
-        verify_qe_identity_signature(collateral, now, &crls, trust_anchor.clone(), backend)?;
+        verify_qe_identity_signature::<C>(collateral, now, &crls, trust_anchor.clone())?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -836,7 +829,7 @@ fn verify_impl(
     }
 
     // Step 3: Verify PCK certificate chain
-    let pck_result = verify_pck_cert_chain(
+    let pck_result = verify_pck_cert_chain::<C>(
         collateral,
         &auth_data.certification_data,
         now,
@@ -846,16 +839,16 @@ fn verify_impl(
     let pck_leaf = CertificateDer::from(pck_result.pck_leaf_der.as_slice());
 
     // Step 4: Verify QE Report signature
-    let qe_report = verify_qe_report_signature(&pck_leaf, &auth_data, backend)?;
+    let qe_report = verify_qe_report_signature::<C>(&pck_leaf, &auth_data)?;
 
     // Step 5: Verify QE Report content (hash check)
-    verify_qe_report_data(&qe_report, &auth_data, backend)?;
+    verify_qe_report_data::<C>(&qe_report, &auth_data)?;
 
     // Step 6: Verify QE Report policy
     let qe_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
 
     // Step 7: Verify ISV Report signature
-    verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
+    verify_isv_report_signature::<C>(raw_quote, &quote, &auth_data)?;
 
     // Step 8: Match Platform TCB
     let platform_status = match_platform_tcb(
@@ -925,40 +918,26 @@ fn validate_attrs(report: &Report) -> Result<()> {
     }
 }
 
-/// Ring crypto backend module.
-///
-/// Provides a pre-configured [`CryptoBackend`] using ring for ECDSA P-256 and SHA-256.
-#[cfg(feature = "ring")]
+/// Convenience entry points pinning the [`crate::configs::RingConfig`]
+/// (audited cert parser + sig encoder + ring crypto). Equivalent to calling
+/// `verify_with::<RingConfig>(...)` on a default `QuoteVerifier`.
+#[cfg(all(feature = "ring", feature = "default-x509"))]
 pub mod ring {
     use super::*;
+    pub use crate::configs::RingConfig;
 
-    fn ring_sha256(data: &[u8]) -> [u8; 32] {
-        let digest = ::ring::digest::digest(&::ring::digest::SHA256, data);
-        let mut out = [0u8; 32];
-        out.copy_from_slice(digest.as_ref());
-        out
-    }
-
-    /// Returns a [`CryptoBackend`] backed by ring.
-    pub fn backend() -> CryptoBackend {
-        CryptoBackend {
-            sig_algo: webpki::ring::ECDSA_P256_SHA256,
-            sha256: ring_sha256,
-        }
-    }
-
-    /// Verify a quote using Intel's trusted root CA and ring backend.
+    /// Verify a quote using Intel's trusted root CA and the ring crypto provider.
     pub fn verify(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .verify(raw_quote, collateral, now_secs)
+        QuoteVerifier::new_prod().verify_with::<RingConfig>(raw_quote, collateral, now_secs)
     }
 
-    /// Verify a quote using Intel's trusted root CA and ring backend,
-    /// passing a function to override TCB info after the signature check
+    /// Verify a quote using Intel's trusted root CA and the ring crypto
+    /// provider, passing a function to override TCB info after the signature
+    /// check.
     #[cfg(feature = "danger-allow-tcb-override")]
     pub fn dangerous_verify_with_tcb_override(
         raw_quote: &[u8],
@@ -966,43 +945,37 @@ pub mod ring {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+        QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<RingConfig, _>(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        )
     }
 }
 
-/// RustCrypto backend module.
-///
-/// Provides a pre-configured [`CryptoBackend`] using RustCrypto (sha2 + p256) for ECDSA P-256 and SHA-256.
-#[cfg(feature = "rustcrypto")]
+/// Convenience entry points pinning the
+/// [`crate::configs::RustCryptoConfig`] (audited cert parser + sig
+/// encoder + RustCrypto crypto). Equivalent to calling
+/// `verify_with::<RustCryptoConfig>(...)` on a default `QuoteVerifier`.
+#[cfg(all(feature = "rustcrypto", feature = "default-x509"))]
 pub mod rustcrypto {
     use super::*;
+    pub use crate::configs::RustCryptoConfig;
 
-    fn rustcrypto_sha256(data: &[u8]) -> [u8; 32] {
-        use sha2::Digest;
-        sha2::Sha256::digest(data).into()
-    }
-
-    /// Returns a [`CryptoBackend`] backed by RustCrypto.
-    pub fn backend() -> CryptoBackend {
-        CryptoBackend {
-            sig_algo: webpki::rustcrypto::ECDSA_P256_SHA256,
-            sha256: rustcrypto_sha256,
-        }
-    }
-
-    /// Verify a quote using Intel's trusted root CA and RustCrypto backend.
+    /// Verify a quote using Intel's trusted root CA and the RustCrypto
+    /// crypto provider.
     pub fn verify(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .verify(raw_quote, collateral, now_secs)
+        QuoteVerifier::new_prod().verify_with::<RustCryptoConfig>(raw_quote, collateral, now_secs)
     }
 
-    /// Verify a quote using Intel's trusted root CA and RustCrypto backend,
-    /// passing a function to override TCB info after the signature check
+    /// Verify a quote using Intel's trusted root CA and the RustCrypto crypto
+    /// provider, passing a function to override TCB info after the signature
+    /// check.
     #[cfg(feature = "danger-allow-tcb-override")]
     pub fn dangerous_verify_with_tcb_override(
         raw_quote: &[u8],
@@ -1010,48 +983,77 @@ pub mod rustcrypto {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new(TRUSTED_ROOT_CA_DER.to_vec(), backend())
-            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+        QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<RustCryptoConfig, _>(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        )
     }
 }
 
-/// Verify a quote using Intel's trusted root CA (ring backend).
+/// Verify a quote using Intel's trusted root CA, with [`DefaultConfig`].
 ///
-/// This is a backwards-compatible convenience function that uses the ring backend.
-/// For rustcrypto, use [`rustcrypto::verify()`].
-///
-/// # Arguments
-///
-/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
-/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
-/// * `now` - The current time in seconds since the Unix epoch
-///
-/// # Returns
-///
-/// * `Ok(VerifiedReport)` - The verified report
-/// * `Err(Error)` - The error
-#[cfg(feature = "_anycrypto")]
-pub use self::default_crypto::verify;
+/// `DefaultConfig` selects the audited cert parser + sig encoder, plus the
+/// `ring` crypto provider when the `ring` feature is enabled, otherwise
+/// `rustcrypto`. To pin a specific config, use [`verify_with`] or one of the
+/// [`ring::verify`] / [`rustcrypto::verify`] convenience entry points.
+#[cfg(all(feature = "_anycrypto", feature = "default-x509"))]
+pub fn verify(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::new_prod().verify(raw_quote, collateral, now_secs)
+}
 
-/// Verify a quote using Intel's trusted root CA (ring backend), passing a function which modifies
-/// TCB info after the signature check.
-///
-/// This is a backwards-compatible convenience function that uses the ring backend.
-/// For rustcrypto, use [`rustcrypto::dangerous_verify_with_tcb_override()`].
-///
-/// # Arguments
-///
-/// * `raw_quote` - The raw quote to verify. Supported SGX and TDX quotes.
-/// * `quote_collateral` - The quote collateral to verify. Can be obtained from PCCS by `get_collateral`.
-/// * `now` - The current time in seconds since the Unix epoch
-/// * `override_tcb_info` - a function which modifies TCB info after the signature check
-///
-/// # Returns
-///
-/// * `Ok(VerifiedReport)` - The verified report
-/// * `Err(Error)` - The error
+/// Variant of [`verify`] with an explicit [`Config`]. Use this to plug in a
+/// custom backend.
+#[cfg(feature = "_anycrypto")]
+pub fn verify_with<C: Config>(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::new_prod().verify_with::<C>(raw_quote, collateral, now_secs)
+}
+
+/// Like [`verify`], but takes a closure to mutate TCB info after the
+/// signature check. Uses [`DefaultConfig`].
+#[cfg(all(
+    feature = "_anycrypto",
+    feature = "default-x509",
+    feature = "danger-allow-tcb-override"
+))]
+pub fn dangerous_verify_with_tcb_override(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+    override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::new_prod().dangerous_verify_with_tcb_override(
+        raw_quote,
+        collateral,
+        now_secs,
+        override_tcb_info,
+    )
+}
+
+/// Variant of [`dangerous_verify_with_tcb_override`] with an explicit [`Config`].
 #[cfg(all(feature = "_anycrypto", feature = "danger-allow-tcb-override"))]
-pub use self::default_crypto::dangerous_verify_with_tcb_override;
+pub fn dangerous_verify_with_tcb_override_with<C: Config, F: FnOnce(TcbInfo) -> TcbInfo>(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+    override_tcb_info: F,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<C, _>(
+        raw_quote,
+        collateral,
+        now_secs,
+        override_tcb_info,
+    )
+}
 
 // =============================================================================
 // Step 6 & 9: Verify QE Report policy and match QE TCB

@@ -474,14 +474,14 @@ impl PyQuote {
     }
 
     fn fmspc(&self) -> PyResult<String> {
-        match self.inner.fmspc() {
+        match intel::quote_fmspc(&self.inner) {
             Ok(fmspc) => Ok(hex::encode_upper(fmspc)),
             Err(e) => Err(PyValueError::new_err(format!("Failed to get FMSPC: {}", e))),
         }
     }
 
     fn ca(&self) -> PyResult<String> {
-        match self.inner.ca() {
+        match intel::quote_ca(&self.inner) {
             Ok(ca) => Ok(ca.to_string()),
             Err(e) => Err(PyValueError::new_err(format!("Failed to get CA: {}", e))),
         }
@@ -563,10 +563,7 @@ fn py_verify_with_root_ca(
     let quote_bytes = raw_quote.as_bytes();
     let root_ca = root_ca_der.as_bytes();
 
-    let verifier = crate::verify::QuoteVerifier::new(
-        root_ca.to_vec(),
-        crate::verify::default_crypto::backend(),
-    );
+    let verifier = crate::verify::QuoteVerifier::new(root_ca.to_vec());
     match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
         Ok(verified_report) => Ok(PyVerifiedReport {
             inner: verified_report,

@@ -25,13 +25,15 @@ chrono = { version = "0.4.42", default-features = false, features = [
     "serde",
 ] }
 const-oid = { version = "0.9.5", default-features = false }
-x509-cert = { version = "0.2.4", default-features = false }
+x509-cert = { version = "0.2.4", default-features = false, optional = true }
 byteorder = { version = "1.5.0", default-features = false }
 pem = { version = "3", default-features = false }
 asn1_der = { version = "0.7", default-features = false, features = [
     "native_types",
 ] }
-der = { version = "0.7.8", default-features = false, features = ["alloc"] }
+der = { version = "0.7.8", default-features = false, features = [
+    "alloc",
+], optional = true }
 
 log = { version = "0.4.29", default-features = false }
 
@@ -89,7 +91,7 @@ name = "dcap_qvl"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = ["std", "report", "ring", "rustcrypto"]
+default = ["std", "report", "ring", "rustcrypto", "default-x509"]
 std = [
     "serde/std",
     "scale/std",
@@ -97,7 +99,7 @@ std = [
     "const-oid/std",
     "pem/std",
     "asn1_der/std",
-    "der/std",
+    "der?/std",
     "serde_json",
     "anyhow",
     "urlencoding",
@@ -105,10 +107,24 @@ std = [
 ]
 borsh = ["dep:borsh"]
 borsh_schema = ["borsh", "borsh/unstable__schema"]
-report = ["std", "tracing", "futures", "reqwest"]
+# Audited in-tree X.509 / signature backends (`x509::X509CertBackend`,
+# `signature::DerSigEncoder`) and the configs that bundle them
+# (`configs::RingConfig` / `RustCryptoConfig` / `DefaultConfig`), plus the
+# non-generic `verify` / `intel::*` shims that pin `DefaultConfig`.
+#
+# Disabling this drops ~37 KiB on `wasm32-unknown-unknown` (`lto="fat"` +
+# `wasm-opt -O`) by removing `der` and `x509-cert`. Without it, callers
+# must supply their own `Config` impl and use the `_with::<C>` entry
+# points (see `examples/asn1-der-backend/`).
+default-x509 = ["dep:der", "dep:x509-cert"]
+# `report` (PCCS client + collateral fetch) parses CRL distribution
+# points with `x509-cert`, so it pulls in the audited backend bundle too.
+report = ["std", "tracing", "futures", "reqwest", "default-x509"]
 js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
-go = ["std", "ring", "serde_json"]
+# The `go` FFI surface concretizes on `DefaultConfig`, so it pulls in the
+# audited backend bundle.
+go = ["std", "ring", "serde_json", "default-x509"]
 ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
 _anycrypto = []
