@@ -219,7 +219,7 @@ pub fn js_verify_with_root_ca(
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
-#[cfg(feature = "js")]
+#[cfg(all(feature = "js", feature = "report"))]
 #[wasm_bindgen]
 pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<JsValue, JsValue> {
     let pccs_url: String = serde_wasm_bindgen::from_value(pccs_url)

@@ -158,13 +158,22 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
             }
         };
 
+        // Build HTTP client
+        let client = match CollateralClient::with_default_http(pccs_url) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to build HTTP client: {}", e);
+                return 2;
+            }
+        };
+
         // Fetch collateral
-        let result = async {
-            let client = CollateralClient::with_default_http(pccs_url)?;
-            let collateral = client.fetch(&quote_bytes).await?;
-            serde_json::to_string(&collateral).context("Failed to serialize collateral")
-        }
-        .await;
+        let result = client
+            .fetch(&quote_bytes)
+            .await
+            .and_then(|collateral| {
+                serde_json::to_string(&collateral).context("Failed to serialize collateral")
+            });
         match result {
             Ok(collateral) => {
                 // Output collateral JSON directly

@@ -390,10 +390,21 @@ impl<C: Config> CollateralClient<C> {
         let endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
         let client = &self.http;
 
+        // Send a GET and fail with a useful message on non-2xx, so the
+        // header / body readers below don't surface misleading errors
+        // like "missing issuer-chain header" on an HTTP 500.
+        async fn checked_get(client: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
+            let response = client.get(url).send().await?;
+            if !response.status().is_success() {
+                bail!("Failed to fetch {url}: {}", response.status());
+            }
+            Ok(response)
+        }
+
         let pck_crl_issuer_chain;
         let pck_crl;
         {
-            let response = client.get(endpoints.url_pckcrl()).send().await?;
+            let response = checked_get(client, &endpoints.url_pckcrl()).await?;
             pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
             pck_crl = response.bytes().await?.to_vec();
         };
@@ -401,7 +412,7 @@ impl<C: Config> CollateralClient<C> {
         let tcb_info_issuer_chain;
         let raw_tcb_info;
         {
-            let response = client.get(endpoints.url_tcb()).send().await?;
+            let response = checked_get(client, &endpoints.url_tcb()).await?;
             tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
                 .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
             raw_tcb_info = response.text().await?;
@@ -409,17 +420,13 @@ impl<C: Config> CollateralClient<C> {
         let qe_identity_issuer_chain;
         let raw_qe_identity;
         {
-            let response = client.get(endpoints.url_qe_identity()).send().await?;
+            let response = checked_get(client, &endpoints.url_qe_identity()).await?;
             qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
             raw_qe_identity = response.text().await?;
         };
 
         async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
-            let response = client.get(url).send().await?;
-            if !response.status().is_success() {
-                bail!("Failed to fetch {url}: {}", response.status());
-            }
-            Ok(response.bytes().await?.to_vec())
+            Ok(checked_get(client, url).await?.bytes().await?.to_vec())
         }
 
         // First try to get root CA CRL directly from the PCCS endpoint

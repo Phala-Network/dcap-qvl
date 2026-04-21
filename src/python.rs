@@ -598,19 +598,15 @@ fn get_collateral_for_fmspc_py<'py>(
     for_sgx: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     future_into_py(py, async move {
-        let result = async {
-            CollateralClient::with_default_http(pccs_url)?
-                .fetch_for_fmspc(&fmspc, &ca, for_sgx)
-                .await
-        }
-        .await;
-        match result {
-            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to get collateral for FMSPC: {}",
-                e
-            ))),
-        }
+        let client = CollateralClient::with_default_http(pccs_url)
+            .map_err(|e| PyValueError::new_err(format!("Failed to build HTTP client: {}", e)))?;
+        let collateral = client
+            .fetch_for_fmspc(&fmspc, &ca, for_sgx)
+            .await
+            .map_err(|e| {
+                PyValueError::new_err(format!("Failed to get collateral for FMSPC: {}", e))
+            })?;
+        Ok(PyQuoteCollateralV3 { inner: collateral })
     })
 }
 
