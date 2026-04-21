@@ -6,7 +6,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context as _, Result};
 use clap::{Args, Parser, Subcommand};
-use dcap_qvl::collateral::{get_collateral, PHALA_PCCS_URL};
+use dcap_qvl::collateral::{CollateralClient, PHALA_PCCS_URL};
 use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
 use dcap_qvl::verify::verify;
@@ -100,7 +100,9 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
         _ => PHALA_PCCS_URL.to_string(),
     };
     eprintln!("Getting collateral from {pccs_url}...");
-    let collateral = get_collateral(&pccs_url, &quote).await?;
+    let collateral = CollateralClient::with_default_http(pccs_url)?
+        .fetch(&quote)
+        .await?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();

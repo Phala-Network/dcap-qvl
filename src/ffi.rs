@@ -458,7 +458,11 @@ pub unsafe extern "C" fn dcap_get_collateral_cb(
         Err(e) => return emit_error(format!("Failed to create runtime: {e}"), cb, user_data),
     };
 
-    let collateral = match rt.block_on(crate::collateral::get_collateral(url, quote_slice)) {
+    let collateral = match rt.block_on(async {
+        crate::collateral::CollateralClient::with_default_http(url)?
+            .fetch(quote_slice)
+            .await
+    }) {
         Ok(c) => c,
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
@@ -502,12 +506,11 @@ pub unsafe extern "C" fn dcap_get_collateral_for_fmspc_cb(
         Err(e) => return emit_error(format!("Failed to create runtime: {e}"), cb, user_data),
     };
 
-    let collateral = match rt.block_on(crate::collateral::get_collateral_for_fmspc(
-        url_str,
-        fmspc_str.to_string(),
-        ca_str,
-        is_sgx != 0,
-    )) {
+    let collateral = match rt.block_on(async {
+        crate::collateral::CollateralClient::with_default_http(url_str)?
+            .fetch_for_fmspc(fmspc_str, ca_str, is_sgx != 0)
+            .await
+    }) {
         Ok(c) => c,
         Err(e) => return emit_error(format_error(&e), cb, user_data),
     };
