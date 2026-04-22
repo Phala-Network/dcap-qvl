@@ -69,7 +69,9 @@ async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
 
 @pytest.mark.asyncio
 async def test_get_collateral_rejects_non_bytes_quote() -> None:
-    with pytest.raises(TypeError, match="raw_quote must be bytes"):
+    # PyO3 rejects the str argument at the binding boundary with its own
+    # TypeError; we only assert it's a TypeError mentioning raw_quote.
+    with pytest.raises(TypeError, match="raw_quote"):
         await dcap_qvl.get_collateral("http://example.com", "not bytes")
 
 

@@ -46,8 +46,10 @@ class TestCollateralAPI:
     @pytest.mark.asyncio
     async def test_get_collateral_invalid_input(self):
         """Test get_collateral with invalid inputs."""
-        # Test with non-bytes input
-        with pytest.raises(TypeError, match="raw_quote must be bytes"):
+        # Test with non-bytes input — PyO3 rejects the str argument at the
+        # binding boundary with its own TypeError; we only assert that it
+        # is a TypeError mentioning the raw_quote argument.
+        with pytest.raises(TypeError, match="raw_quote"):
             await dcap_qvl.get_collateral("http://example.com", "not bytes")
 
         # Test with invalid quote (too short)

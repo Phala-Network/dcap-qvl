@@ -362,7 +362,7 @@ impl<C: Config> CollateralClient<C> {
     /// verification.
     pub async fn fetch(&self, quote: &[u8]) -> Result<QuoteCollateralV3> {
         let mut quote = quote;
-        let parsed = Quote::decode(&mut quote)?;
+        let parsed = Quote::decode(&mut quote).context("Failed to parse quote")?;
 
         let pck_chain = get_pck_chain(&self.http, &self.pccs_url, &parsed)
             .await
