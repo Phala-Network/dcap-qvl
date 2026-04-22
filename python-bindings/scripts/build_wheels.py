@@ -147,11 +147,12 @@ def build_wheel(platform: str, output_dir: Path, use_zig: bool = False) -> bool:
         str(output_dir),
     ]
 
-    # Add interpreter selection
-    if platform.startswith("windows"):
-        cmd.append("--find-interpreter")
-    else:
-        # Use Python 3.8 as minimum version (matches abi3-py38 feature)
+    # Add interpreter selection (abi3-py38 produces a single wheel for 3.8+).
+    # We avoid --find-interpreter on Windows: recent windows-latest runner
+    # images ship Python versions maturin can't introspect, and a broken
+    # uv-installed cpython probe leaks a specific-version pyo3 config that
+    # makes cargo link `pythonXY.lib` instead of abi3's `python3.lib`.
+    if not platform.startswith("windows"):
         cmd.extend(["--interpreter", "python3.8"])
 
     # Add cross-compilation flags
