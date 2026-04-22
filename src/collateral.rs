@@ -447,10 +447,10 @@ impl<C: Config> CollateralClient<C> {
             Some(crl) => crl,
             None => {
                 let certs = crate::utils::extract_certs(qe_identity_issuer_chain.as_bytes())
-                    .context("Failed to extract certificates from PCK CRL issuer chain")?;
+                    .context("Failed to extract certificates from QE identity issuer chain")?;
                 let root_cert_der = certs
                     .last()
-                    .context("No certificate found in PCK CRL issuer chain")?;
+                    .context("No certificate found in QE identity issuer chain")?;
                 let crl_url = extract_crl_url(root_cert_der)?;
                 let Some(url) = crl_url else {
                     bail!("Could not find CRL distribution point in root certificate");
