@@ -517,8 +517,10 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> PyQuoteCollateralV3
         PyQuoteCollateralV3 with full collateral data
 
     Raises:
-        ValueError: If the quote is invalid
-        RuntimeError: If network request fails
+        ValueError: If the quote is invalid, the HTTP client can't be
+            built, or the PCCS / PCS fetch fails (all Rust-side errors
+            are surfaced as ``ValueError`` for consistency with the rest
+            of this module).
     """
     ...
 
