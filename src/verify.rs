@@ -219,7 +219,7 @@ pub fn js_verify_with_root_ca(
         .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
 }
 
-#[cfg(feature = "js")]
+#[cfg(all(feature = "js", feature = "report"))]
 #[wasm_bindgen]
 pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<JsValue, JsValue> {
     let pccs_url: String = serde_wasm_bindgen::from_value(pccs_url)
@@ -227,9 +227,12 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
     let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
         .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
 
-    let collateral: QuoteCollateralV3 = crate::collateral::get_collateral(&pccs_url, &raw_quote)
-        .await
-        .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+    let collateral: QuoteCollateralV3 =
+        crate::collateral::CollateralClient::with_default_http(pccs_url)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?
+            .fetch(&raw_quote)
+            .await
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
     serde_wasm_bindgen::to_value(&collateral)
         .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
@@ -363,7 +366,7 @@ fn verify_pck_cert_chain<C: Config>(
             .context("Failed to extract PCK certificates from collateral")?
     } else {
         if certification_data.cert_type != PCK_CERT_CHAIN {
-            bail!("Unsupported DCAP PCK cert format: {}. Use get_collateral() to fetch PCK certificate.", certification_data.cert_type);
+            bail!("Unsupported DCAP PCK cert format: {}. Use CollateralClient::fetch() to obtain the PCK certificate.", certification_data.cert_type);
         }
         extract_certs(&certification_data.body.data)
             .context("Failed to extract PCK certificates from quote")?

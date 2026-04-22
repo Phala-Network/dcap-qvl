@@ -17,7 +17,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use dcap_qvl::collateral::get_collateral;
+//! use dcap_qvl::collateral::CollateralClient;
 //! use dcap_qvl::verify::verify;
 //! use dcap_qvl::PHALA_PCCS_URL;
 //!
@@ -27,7 +27,11 @@
 //!
 //!     // Use default Phala PCCS, or override with custom URL
 //!     let pccs_url = std::env::var("PCCS_URL").unwrap_or_else(|_| PHALA_PCCS_URL.to_string());
-//!     let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
+//!     let collateral = CollateralClient::with_default_http(pccs_url)
+//!         .expect("failed to build HTTP client")
+//!         .fetch(&quote)
+//!         .await
+//!         .expect("failed to get collateral");
 //!
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 //!     let report = verify(&quote, &collateral, now).expect("failed to verify quote");

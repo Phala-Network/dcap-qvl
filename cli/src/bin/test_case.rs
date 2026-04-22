@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use dcap_qvl::{collateral::get_collateral, verify::QuoteVerifier, QuoteCollateralV3};
+use dcap_qvl::{collateral::CollateralClient, verify::QuoteVerifier, QuoteCollateralV3};
 use std::fs;
 use std::path::PathBuf;
 
@@ -158,8 +158,18 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
             }
         };
 
+        // Build HTTP client
+        let client = match CollateralClient::with_default_http(pccs_url) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to build HTTP client: {}", e);
+                return 2;
+            }
+        };
+
         // Fetch collateral
-        let result = get_collateral(&pccs_url, &quote_bytes)
+        let result = client
+            .fetch(&quote_bytes)
             .await
             .and_then(|collateral| {
                 serde_json::to_string(&collateral).context("Failed to serialize collateral")

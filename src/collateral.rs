@@ -1,5 +1,6 @@
 use alloc::string::{String, ToString};
 use anyhow::{anyhow, bail, Context, Result};
+use core::marker::PhantomData;
 use der::Decode as DerDecode;
 use scale::Decode;
 use serde::Deserialize;
@@ -42,8 +43,8 @@ use core::time::Duration;
 pub const PHALA_PCCS_URL: &str = "https://pccs.phala.network";
 
 /// Intel's official PCS (Provisioning Certification Service) URL.
-/// Use `get_collateral_from_pcs()` to fetch collateral directly from Intel.
-const INTEL_PCS_URL: &str = "https://api.trustedservices.intel.com";
+/// Pass this to [`CollateralClient::with_default_http`] to fetch directly from Intel.
+pub const INTEL_PCS_URL: &str = "https://api.trustedservices.intel.com";
 
 struct PcsEndpoints {
     base_url: String,
@@ -252,8 +253,11 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
     Ok((fmspc_hex, ca))
 }
 
-/// Build HTTP client with appropriate settings.
-fn build_http_client() -> Result<reqwest::Client> {
+/// Build a `reqwest::Client` with this crate's default settings (180s
+/// timeout on non-`js` targets). Callers who need custom TLS roots,
+/// proxies, or headers should construct their own `reqwest::Client` and
+/// pass it to [`CollateralClient::new`].
+pub fn default_http_client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.timeout(Duration::from_secs(180));
@@ -274,260 +278,249 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
     }
 }
 
-/// Get collateral given DCAP quote and base URL of PCCS server URL.
+/// A PCCS / PCS client parameterized by [`Config`] for pluggable X.509 /
+/// crypto backends.
 ///
-/// Builds a default HTTP client internally. Use [`get_collateral_with_client`]
-/// if you need to configure TLS (e.g. add custom root CAs for a local PCCS
-/// with a self-signed cert), timeouts, or other client options.
+/// Bundles a `reqwest::Client` and a PCCS base URL, and exposes three
+/// fetch methods:
 ///
-/// # Arguments
+/// * [`fetch`](Self::fetch) — from a raw DCAP quote.
+/// * [`fetch_for_fmspc`](Self::fetch_for_fmspc) — when the caller already
+///   has the FMSPC / CA type (skips PCK chain extraction).
+/// * [`fetch_and_verify`](Self::fetch_and_verify) — fetch collateral and
+///   run [`verify_with`](crate::verify::verify_with) in one shot
+///   (feature-gated on `_anycrypto`).
 ///
-/// * `pccs_url` - The base URL of PCCS server. (e.g. `https://pccs.example.com/sgx/certification/v4`)
-/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
+/// # Examples
 ///
-/// # Returns
+/// ```no_run
+/// use dcap_qvl::collateral::{CollateralClient, PHALA_PCCS_URL};
+/// # async fn run(quote: Vec<u8>) -> anyhow::Result<()> {
+/// let collateral = CollateralClient::with_default_http(PHALA_PCCS_URL)?
+///     .fetch(&quote)
+///     .await?;
+/// # Ok(()) }
+/// ```
 ///
-/// * `Ok(QuoteCollateralV3)` - The quote collateral
-/// * `Err(Error)` - The error
-pub async fn get_collateral(pccs_url: &str, quote: &[u8]) -> Result<QuoteCollateralV3> {
-    get_collateral_with::<DefaultConfig>(pccs_url, quote).await
+/// With a custom `reqwest::Client` (e.g. for a local PCCS with a
+/// self-signed TLS cert) and the default config:
+///
+/// ```no_run
+/// # use dcap_qvl::collateral::CollateralClient;
+/// # async fn run(http: reqwest::Client, quote: Vec<u8>) -> anyhow::Result<()> {
+/// let client: CollateralClient = CollateralClient::new(http, "https://pccs.local:8081");
+/// let collateral = client.fetch(&quote).await?;
+/// # Ok(()) }
+/// ```
+pub struct CollateralClient<C: Config = DefaultConfig> {
+    http: reqwest::Client,
+    pccs_url: String,
+    _cfg: PhantomData<fn() -> C>,
 }
 
-/// Variant of [`get_collateral`] with an explicit [`Config`] for the cert
-/// parsing performed during FMSPC/CA extraction. Use this to plug in a custom
-/// backend.
-pub async fn get_collateral_with<C: Config>(
-    pccs_url: &str,
-    quote: &[u8],
-) -> Result<QuoteCollateralV3> {
-    // Fail fast on invalid quotes before building an HTTP client — preserves
-    // the error precedence the pre-refactor version had.
-    let _ = Quote::decode(&mut &quote[..])?;
-    let client = build_http_client()?;
-    get_collateral_with_client_inner::<C>(&client, pccs_url, quote).await
-}
-
-/// Get collateral using a caller-provided HTTP client.
-///
-/// Same as [`get_collateral`] but lets callers configure the
-/// [`reqwest::Client`] — useful for pointing at a local PCCS with a
-/// self-signed TLS cert (via `add_root_certificate` or
-/// `danger_accept_invalid_certs`), setting custom timeouts, attaching
-/// headers, or routing through a proxy.
-///
-/// # Arguments
-///
-/// * `client` - The HTTP client to use for all PCCS requests.
-/// * `pccs_url` - The base URL of the PCCS server.
-/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
-pub async fn get_collateral_with_client(
-    client: &reqwest::Client,
-    pccs_url: &str,
-    quote: &[u8],
-) -> Result<QuoteCollateralV3> {
-    get_collateral_with_client_inner::<DefaultConfig>(client, pccs_url, quote).await
-}
-
-/// Internal implementation shared by [`get_collateral_with`] and
-/// [`get_collateral_with_client`].
-async fn get_collateral_with_client_inner<C: Config>(
-    client: &reqwest::Client,
-    pccs_url: &str,
-    quote: &[u8],
-) -> Result<QuoteCollateralV3> {
-    let mut quote = quote;
-    let parsed_quote = Quote::decode(&mut quote)?;
-
-    // Get PCK certificate chain (from quote or PCCS)
-    let pck_chain = get_pck_chain(client, pccs_url, &parsed_quote)
-        .await
-        .context("Failed to get PCK certificate chain")?;
-
-    // Extract FMSPC and CA from the certificate
-    let (fmspc, ca) = extract_fmspc_and_ca_with::<C>(&pck_chain)?;
-
-    // Fetch the rest of the collateral
-    let mut collateral = get_collateral_for_fmspc_with_client(
-        client,
-        pccs_url,
-        fmspc,
-        ca,
-        parsed_quote.header.is_sgx(),
-    )
-    .await?;
-
-    // Attach the PCK certificate chain for offline verification
-    collateral.pck_certificate_chain = Some(pck_chain);
-
-    Ok(collateral)
-}
-
-/// Get collateral for a known FMSPC (public API, builds its own HTTP client).
-///
-/// Use [`get_collateral_for_fmspc_with_client`] if you need to configure the
-/// HTTP client.
-pub async fn get_collateral_for_fmspc(
-    pccs_url: &str,
-    fmspc: String,
-    ca: &str,
-    for_sgx: bool,
-) -> Result<QuoteCollateralV3> {
-    let client = build_http_client()?;
-    get_collateral_for_fmspc_with_client(&client, pccs_url, fmspc, ca, for_sgx).await
-}
-
-/// Get collateral for a known FMSPC using a caller-provided HTTP client.
-pub async fn get_collateral_for_fmspc_with_client(
-    client: &reqwest::Client,
-    pccs_url: &str,
-    fmspc: String,
-    ca: &str,
-    for_sgx: bool,
-) -> Result<QuoteCollateralV3> {
-    let endpoints = PcsEndpoints::new(pccs_url, for_sgx, fmspc, ca);
-
-    let pck_crl_issuer_chain;
-    let pck_crl;
-    {
-        let response = client.get(endpoints.url_pckcrl()).send().await?;
-        pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
-        pck_crl = response.bytes().await?.to_vec();
-    };
-
-    let tcb_info_issuer_chain;
-    let raw_tcb_info;
-    {
-        let response = client.get(endpoints.url_tcb()).send().await?;
-        tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
-            .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
-        raw_tcb_info = response.text().await?;
-    };
-    let qe_identity_issuer_chain;
-    let raw_qe_identity;
-    {
-        let response = client.get(endpoints.url_qe_identity()).send().await?;
-        qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
-        raw_qe_identity = response.text().await?;
-    };
-
-    async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
-        let response = client.get(url).send().await?;
-        if !response.status().is_success() {
-            bail!("Failed to fetch {url}: {}", response.status());
-        }
-        Ok(response.bytes().await?.to_vec())
-    }
-
-    // First try to get root CA CRL directly from the PCCS endpoint
-    let mut root_ca_crl = None;
-    if !endpoints.is_pcs() {
-        root_ca_crl = http_get(client, &endpoints.url_rootcacrl()).await.ok();
-
-        if let Some(ref crl) = root_ca_crl {
-            // PCCS returns hex-encoded CRL instead of binary DER.
-            let hex_str =
-                core::str::from_utf8(crl).context("Failed to convert hex-encoded CRL to string")?;
-            let ca_crl = hex::decode(hex_str)
-                .map_err(|_| anyhow!("Failed to decode hex-encoded root CA CRL"))?;
-            root_ca_crl = Some(ca_crl);
+impl<C: Config> Clone for CollateralClient<C> {
+    fn clone(&self) -> Self {
+        Self {
+            http: self.http.clone(),
+            pccs_url: self.pccs_url.clone(),
+            _cfg: PhantomData,
         }
     }
-    let root_ca_crl = match root_ca_crl {
-        Some(crl) => crl,
-        None => {
-            let certs = crate::utils::extract_certs(qe_identity_issuer_chain.as_bytes())
-                .context("Failed to extract certificates from PCK CRL issuer chain")?;
-            let root_cert_der = certs
-                .last()
-                .context("No certificate found in PCK CRL issuer chain")?;
-            let crl_url = extract_crl_url(root_cert_der)?;
-            let Some(url) = crl_url else {
-                bail!("Could not find CRL distribution point in root certificate");
-            };
-            http_get(client, &url).await?
+}
+
+impl<C: Config> CollateralClient<C> {
+    /// Build a client with a caller-provided `reqwest::Client`.
+    ///
+    /// Use this when you need custom TLS trust roots, timeouts, proxies,
+    /// or any other [`reqwest::ClientBuilder`] options. For the common
+    /// "just give me something that works" path see
+    /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http).
+    pub fn new(http: reqwest::Client, pccs_url: impl Into<String>) -> Self {
+        Self {
+            http,
+            pccs_url: pccs_url.into(),
+            _cfg: PhantomData,
         }
-    };
+    }
 
-    let tcb_info_resp: TcbInfoResponse =
-        serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
-    let tcb_info = tcb_info_resp.tcb_info.to_string();
-    let tcb_info_signature = hex::decode(&tcb_info_resp.signature)
-        .ok()
-        .context("TCB Info signature must be valid hex")?;
+    /// Rebind the `Config` type without rebuilding the HTTP client / URL.
+    pub fn with_config<D: Config>(self) -> CollateralClient<D> {
+        CollateralClient {
+            http: self.http,
+            pccs_url: self.pccs_url,
+            _cfg: PhantomData,
+        }
+    }
 
-    let qe_identity_resp: QeIdentityResponse =
-        serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
-    let qe_identity = qe_identity_resp.enclave_identity.to_string();
-    let qe_identity_signature = hex::decode(&qe_identity_resp.signature)
-        .ok()
-        .context("QE Identity signature must be valid hex")?;
+    /// Fetch collateral for the given raw DCAP quote.
+    ///
+    /// Decodes the quote, fetches (or extracts) the PCK certificate
+    /// chain, reads FMSPC + CA type from the leaf cert via the
+    /// configured [`X509Codec`], and then fetches the remaining
+    /// collateral items. The returned [`QuoteCollateralV3`] has the PCK
+    /// chain attached in `pck_certificate_chain` for offline
+    /// verification.
+    pub async fn fetch(&self, quote: &[u8]) -> Result<QuoteCollateralV3> {
+        let mut quote = quote;
+        let parsed = Quote::decode(&mut quote)?;
 
-    Ok(QuoteCollateralV3 {
-        pck_crl_issuer_chain,
-        root_ca_crl,
-        pck_crl,
-        tcb_info_issuer_chain,
-        tcb_info,
-        tcb_info_signature,
-        qe_identity_issuer_chain,
-        qe_identity,
-        qe_identity_signature,
-        pck_certificate_chain: None,
-    })
+        let pck_chain = get_pck_chain(&self.http, &self.pccs_url, &parsed)
+            .await
+            .context("Failed to get PCK certificate chain")?;
+
+        let (fmspc, ca) = extract_fmspc_and_ca_with::<C>(&pck_chain)?;
+
+        let mut collateral = self
+            .fetch_for_fmspc(&fmspc, ca, parsed.header.is_sgx())
+            .await?;
+
+        collateral.pck_certificate_chain = Some(pck_chain);
+        Ok(collateral)
+    }
+
+    /// Fetch collateral when FMSPC and CA type are already known (skips
+    /// PCK chain parsing). The returned [`QuoteCollateralV3`] has
+    /// `pck_certificate_chain = None`.
+    pub async fn fetch_for_fmspc(
+        &self,
+        fmspc: &str,
+        ca: &str,
+        for_sgx: bool,
+    ) -> Result<QuoteCollateralV3> {
+        let endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
+        let client = &self.http;
+
+        // Send a GET and fail with a useful message on non-2xx, so the
+        // header / body readers below don't surface misleading errors
+        // like "missing issuer-chain header" on an HTTP 500.
+        async fn checked_get(client: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
+            let response = client.get(url).send().await?;
+            if !response.status().is_success() {
+                bail!("Failed to fetch {url}: {}", response.status());
+            }
+            Ok(response)
+        }
+
+        let pck_crl_issuer_chain;
+        let pck_crl;
+        {
+            let response = checked_get(client, &endpoints.url_pckcrl()).await?;
+            pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
+            pck_crl = response.bytes().await?.to_vec();
+        };
+
+        let tcb_info_issuer_chain;
+        let raw_tcb_info;
+        {
+            let response = checked_get(client, &endpoints.url_tcb()).await?;
+            tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
+                .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
+            raw_tcb_info = response.text().await?;
+        };
+        let qe_identity_issuer_chain;
+        let raw_qe_identity;
+        {
+            let response = checked_get(client, &endpoints.url_qe_identity()).await?;
+            qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
+            raw_qe_identity = response.text().await?;
+        };
+
+        async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
+            Ok(checked_get(client, url).await?.bytes().await?.to_vec())
+        }
+
+        // First try to get root CA CRL directly from the PCCS endpoint
+        let mut root_ca_crl = None;
+        if !endpoints.is_pcs() {
+            root_ca_crl = http_get(client, &endpoints.url_rootcacrl()).await.ok();
+
+            if let Some(ref crl) = root_ca_crl {
+                // PCCS returns hex-encoded CRL instead of binary DER.
+                let hex_str = core::str::from_utf8(crl)
+                    .context("Failed to convert hex-encoded CRL to string")?;
+                let ca_crl = hex::decode(hex_str)
+                    .map_err(|_| anyhow!("Failed to decode hex-encoded root CA CRL"))?;
+                root_ca_crl = Some(ca_crl);
+            }
+        }
+        let root_ca_crl = match root_ca_crl {
+            Some(crl) => crl,
+            None => {
+                let certs = crate::utils::extract_certs(qe_identity_issuer_chain.as_bytes())
+                    .context("Failed to extract certificates from QE identity issuer chain")?;
+                let root_cert_der = certs
+                    .last()
+                    .context("No certificate found in QE identity issuer chain")?;
+                let crl_url = extract_crl_url(root_cert_der)?;
+                let Some(url) = crl_url else {
+                    bail!("Could not find CRL distribution point in root certificate");
+                };
+                http_get(client, &url).await?
+            }
+        };
+
+        let tcb_info_resp: TcbInfoResponse =
+            serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
+        let tcb_info = tcb_info_resp.tcb_info.to_string();
+        let tcb_info_signature = hex::decode(&tcb_info_resp.signature)
+            .ok()
+            .context("TCB Info signature must be valid hex")?;
+
+        let qe_identity_resp: QeIdentityResponse =
+            serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
+        let qe_identity = qe_identity_resp.enclave_identity.to_string();
+        let qe_identity_signature = hex::decode(&qe_identity_resp.signature)
+            .ok()
+            .context("QE Identity signature must be valid hex")?;
+
+        Ok(QuoteCollateralV3 {
+            pck_crl_issuer_chain,
+            root_ca_crl,
+            pck_crl,
+            tcb_info_issuer_chain,
+            tcb_info,
+            tcb_info_signature,
+            qe_identity_issuer_chain,
+            qe_identity,
+            qe_identity_signature,
+            pck_certificate_chain: None,
+        })
+    }
+
+    /// Fetch collateral and run verification in one step, using the
+    /// configured `Config`'s crypto and x509 backends.
+    #[cfg(feature = "_anycrypto")]
+    pub async fn fetch_and_verify(&self, quote: &[u8]) -> Result<crate::verify::VerifiedReport> {
+        use std::time::SystemTime;
+
+        let collateral = self.fetch(quote).await?;
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .context("Failed to get current time")?
+            .as_secs();
+        crate::verify::verify_with::<C>(quote, &collateral, now)
+    }
 }
 
-/// Get collateral given DCAP quote from Intel PCS.
-///
-/// # Arguments
-///
-/// * `quote` - The raw quote to verify. Supported SGX and TDX quotes.
-///
-/// # Returns
-///
-/// * `Ok(QuoteCollateralV3)` - The quote collateral
-/// * `Err(Error)` - The error
-pub async fn get_collateral_from_pcs(quote: &[u8]) -> Result<QuoteCollateralV3> {
-    get_collateral_from_pcs_with::<DefaultConfig>(quote).await
-}
+impl CollateralClient<DefaultConfig> {
+    /// Convenience constructor: build a default `reqwest::Client`
+    /// (180s timeout on non-`js` targets) and pair it with the given
+    /// PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert` backend).
+    pub fn with_default_http(pccs_url: impl Into<String>) -> Result<Self> {
+        Ok(Self::new(default_http_client()?, pccs_url))
+    }
 
-/// Variant of [`get_collateral_from_pcs`] with an explicit [`Config`].
-pub async fn get_collateral_from_pcs_with<C: Config>(quote: &[u8]) -> Result<QuoteCollateralV3> {
-    get_collateral_with::<C>(INTEL_PCS_URL, quote).await
-}
-
-/// Get collateral and verify the quote (uses ring backend).
-///
-/// # Arguments
-///
-/// * `quote` - The raw quote to verify.
-/// * `pccs_url` - Optional PCCS URL. Defaults to Phala PCCS if not provided.
-#[cfg(feature = "_anycrypto")]
-pub async fn get_collateral_and_verify(
-    quote: &[u8],
-    pccs_url: Option<&str>,
-) -> Result<crate::verify::VerifiedReport> {
-    get_collateral_and_verify_with::<DefaultConfig>(quote, pccs_url).await
-}
-
-/// Variant of [`get_collateral_and_verify`] with an explicit [`Config`] used
-/// for both the collateral fetch and the verification.
-#[cfg(feature = "_anycrypto")]
-pub async fn get_collateral_and_verify_with<C: Config>(
-    quote: &[u8],
-    pccs_url: Option<&str>,
-) -> Result<crate::verify::VerifiedReport> {
-    use std::time::SystemTime;
-
-    let pccs_url = pccs_url
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(PHALA_PCCS_URL);
-    let collateral = get_collateral_with::<C>(pccs_url, quote).await?;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .context("Failed to get current time")?
-        .as_secs();
-    crate::verify::verify_with::<C>(quote, &collateral, now)
+    /// Zero-arg convenience constructor: default HTTP client + PCCS URL
+    /// from the `PCCS_URL` env var (trimmed; empty is treated as unset),
+    /// falling back to [`PHALA_PCCS_URL`]. Uses [`DefaultConfig`].
+    pub fn from_env() -> Result<Self> {
+        let pccs_url = std::env::var("PCCS_URL")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| PHALA_PCCS_URL.to_owned());
+        Self::with_default_http(pccs_url)
+    }
 }
 
 #[cfg(test)]

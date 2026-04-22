@@ -5,7 +5,7 @@ use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
 
 use crate::{
-    collateral::get_collateral_for_fmspc,
+    collateral::CollateralClient,
     intel,
     quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
     verify::{verify, VerifiedReport},
@@ -598,13 +598,15 @@ fn get_collateral_for_fmspc_py<'py>(
     for_sgx: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
     future_into_py(py, async move {
-        match get_collateral_for_fmspc(&pccs_url, fmspc, &ca, for_sgx).await {
-            Ok(collateral) => Ok(PyQuoteCollateralV3 { inner: collateral }),
-            Err(e) => Err(PyValueError::new_err(format!(
-                "Failed to get collateral for FMSPC: {}",
-                e
-            ))),
-        }
+        let client = CollateralClient::with_default_http(pccs_url)
+            .map_err(|e| PyValueError::new_err(format!("Failed to build HTTP client: {}", e)))?;
+        let collateral = client
+            .fetch_for_fmspc(&fmspc, &ca, for_sgx)
+            .await
+            .map_err(|e| {
+                PyValueError::new_err(format!("Failed to get collateral for FMSPC: {}", e))
+            })?;
+        Ok(PyQuoteCollateralV3 { inner: collateral })
     })
 }
 
