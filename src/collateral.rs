@@ -509,6 +509,18 @@ impl CollateralClient<DefaultConfig> {
     pub fn with_default_http(pccs_url: impl Into<String>) -> Result<Self> {
         Ok(Self::new(default_http_client()?, pccs_url))
     }
+
+    /// Zero-arg convenience constructor: default HTTP client + PCCS URL
+    /// from the `PCCS_URL` env var (trimmed; empty is treated as unset),
+    /// falling back to [`PHALA_PCCS_URL`]. Uses [`DefaultConfig`].
+    pub fn from_env() -> Result<Self> {
+        let pccs_url = std::env::var("PCCS_URL")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| PHALA_PCCS_URL.to_owned());
+        Self::with_default_http(pccs_url)
+    }
 }
 
 #[cfg(test)]
