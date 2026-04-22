@@ -524,28 +524,3 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> PyQuoteCollateralV3
     """
     ...
 
-async def get_collateral_for_fmspc(
-    pccs_url: str, fmspc: str, ca: str, is_sgx: bool
-) -> PyQuoteCollateralV3:
-    """
-    Get collateral for a specific FMSPC from PCCS URL.
-
-    Does not return the PCK certificate chain — the caller is expected
-    to supply it (or rely on a cert_type 5 quote that embeds it) when
-    later calling `verify`. For a one-shot fetch that also returns the
-    PCK chain, use :func:`get_collateral`.
-
-    Args:
-        pccs_url: PCCS server URL
-        fmspc: FMSPC identifier as hex string
-        ca: Certificate authority identifier
-        is_sgx: True for SGX, False for TDX
-
-    Returns:
-        PyQuoteCollateralV3 with collateral data (no PCK chain)
-
-    Raises:
-        ValueError: If FMSPC is invalid
-        RuntimeError: If network request fails
-    """
-    ...

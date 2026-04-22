@@ -66,23 +66,8 @@ async def test_with_sample_quotes():
             print(f"  Is TDX: {is_tdx}")
             print(f"  Quote Type: {quote_type_str}")
 
-            # Test get_collateral_for_fmspc directly
-            print(f"\n  Testing get_collateral_for_fmspc...")
-            try:
-                collateral1 = await dcap_qvl.get_collateral_for_fmspc(
-                    pccs_url="https://api.trustedservices.intel.com",
-                    fmspc=fmspc,
-                    ca=ca,
-                    for_sgx=not is_tdx,
-                )
-                print(f"  ✓ get_collateral_for_fmspc succeeded")
-                results[f"{quote_type}_get_collateral_for_fmspc"] = True
-            except Exception as e:
-                print(f"  ✗ get_collateral_for_fmspc failed: {e}")
-                results[f"{quote_type}_get_collateral_for_fmspc"] = False
-
             # Test get_collateral with quote
-            print(f"  Testing get_collateral...")
+            print(f"\n  Testing get_collateral...")
             try:
                 collateral2 = await dcap_qvl.get_collateral(
                     "https://api.trustedservices.intel.com", quote_data
@@ -129,7 +114,6 @@ async def test_function_signatures():
     import inspect
 
     functions_to_test = [
-        "get_collateral_for_fmspc",
         "get_collateral",
         "get_collateral_from_pcs",
         "get_collateral_and_verify",

@@ -606,27 +606,6 @@ fn get_collateral_py<'py>(
     })
 }
 
-#[pyfunction(name = "get_collateral_for_fmspc")]
-fn get_collateral_for_fmspc_py<'py>(
-    py: Python<'py>,
-    pccs_url: String,
-    fmspc: String,
-    ca: String,
-    for_sgx: bool,
-) -> PyResult<Bound<'py, PyAny>> {
-    future_into_py(py, async move {
-        let client = CollateralClient::with_default_http(pccs_url)
-            .map_err(|e| PyValueError::new_err(format!("Failed to build HTTP client: {}", e)))?;
-        let collateral = client
-            .fetch_for_fmspc(&fmspc, &ca, for_sgx)
-            .await
-            .map_err(|e| {
-                PyValueError::new_err(format!("Failed to get collateral for FMSPC: {}", e))
-            })?;
-        Ok(PyQuoteCollateralV3 { inner: collateral })
-    })
-}
-
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteCollateralV3>()?;
     m.add_class::<PyVerifiedReport>()?;
@@ -641,7 +620,6 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_quote, m)?)?;
     m.add_function(wrap_pyfunction!(parse_pck_extension_from_pem, m)?)?;
     m.add_function(wrap_pyfunction!(get_collateral_py, m)?)?;
-    m.add_function(wrap_pyfunction!(get_collateral_for_fmspc_py, m)?)?;
 
     Ok(())
 }

@@ -153,54 +153,19 @@ collateral = dcap_qvl.QuoteCollateralV3.from_json(json_str)
 
 All collateral functions are asynchronous and must be awaited. They use the Rust async runtime for optimal performance.
 
-#### `async get_collateral_for_fmspc(pccs_url: str, fmspc: str, ca: str, is_sgx: bool) -> QuoteCollateralV3`
-
-Get collateral for a specific FMSPC directly from PCCS URL (Rust async export).
-
-**Parameters:**
-- `pccs_url`: PCCS URL (e.g., "https://api.trustedservices.intel.com")
-- `fmspc`: FMSPC value as hex string (e.g., "B0C06F000000")
-- `ca`: Certificate Authority ("processor" or "platform")
-- `is_sgx`: True for SGX quotes, False for TDX quotes
-
-**Returns:**
-- `QuoteCollateralV3`: Quote collateral data
-
-**Raises:**
-- `ValueError`: If FMSPC is invalid or collateral cannot be retrieved
-- `RuntimeError`: If network request fails
-
-**Example:**
-```python
-import asyncio
-import dcap_qvl
-
-async def main():
-    collateral = await dcap_qvl.get_collateral_for_fmspc(
-        pccs_url="https://api.trustedservices.intel.com",
-        fmspc="B0C06F000000",
-        ca="processor",
-        is_sgx=True
-    )
-    print(f"Got collateral: {len(collateral.tcb_info)} chars")
-
-asyncio.run(main())
-```
-
 #### `async get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3`
 
-Get collateral from a custom PCCS URL by parsing the quote.
+Fetch full collateral (PCK cert chain, TCB info, QE identity, CRLs) for a raw DCAP quote from the given PCCS / PCS URL. Handles every supported certification data type (including cert_type 2 / 3 where the PCK cert is retrieved from PCCS via encrypted PPID).
 
 **Parameters:**
 - `pccs_url`: PCCS URL (e.g., "https://api.trustedservices.intel.com")
 - `raw_quote`: Raw quote data as bytes
 
 **Returns:**
-- `QuoteCollateralV3`: Quote collateral data
+- `QuoteCollateralV3`: Quote collateral data (with PCK certificate chain attached)
 
 **Raises:**
-- `ValueError`: If quote is invalid or FMSPC cannot be extracted
-- `RuntimeError`: If network request fails
+- `ValueError`: If the quote is invalid, the HTTP client can't be built, or the PCCS / PCS fetch fails
 
 **Example:**
 ```python

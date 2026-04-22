@@ -24,21 +24,19 @@ dcap_qvl = pytest.importorskip("dcap_qvl")
 RUN_NETWORK = os.getenv("DCAP_QVL_RUN_NETWORK_TESTS") == "1"
 
 
-def test_get_collateral_for_fmspc_exported() -> None:
-    assert hasattr(dcap_qvl, "get_collateral_for_fmspc")
-    assert callable(dcap_qvl.get_collateral_for_fmspc)
+def test_get_collateral_exported() -> None:
+    assert hasattr(dcap_qvl, "get_collateral")
+    assert callable(dcap_qvl.get_collateral)
 
 
 @pytest.mark.asyncio
-async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
+async def test_get_collateral_returns_awaitable() -> None:
     # Requires a running event loop for some PyO3 async exports.
     # Use an invalid URL and await to completion so no pending task survives
     # interpreter teardown.
-    ret = dcap_qvl.get_collateral_for_fmspc(
+    ret = dcap_qvl.get_collateral(
         pccs_url="://invalid-url",
-        fmspc="000000000000",
-        ca="processor",
-        for_sgx=True,
+        raw_quote=b"short",
     )
     assert inspect.isawaitable(ret)
     with pytest.raises(ValueError):
@@ -50,13 +48,13 @@ async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
     not RUN_NETWORK,
     reason="Network test disabled (set DCAP_QVL_RUN_NETWORK_TESTS=1 to enable)",
 )
-async def test_get_collateral_for_fmspc_network_smoke() -> None:
-    # Intel PCS / PCCS
-    collateral = await dcap_qvl.get_collateral_for_fmspc(
+async def test_get_collateral_network_smoke() -> None:
+    # Intel PCS / PCCS — uses the bundled cert_type 5 SGX sample.
+    with open("sample/sgx_quote", "rb") as f:
+        raw_quote = f.read()
+    collateral = await dcap_qvl.get_collateral(
         pccs_url="https://api.trustedservices.intel.com",
-        fmspc="B0C06F000000",
-        ca="processor",
-        for_sgx=True,
+        raw_quote=raw_quote,
     )
 
     # Just sanity-check shape/types (do NOT assert exact contents)

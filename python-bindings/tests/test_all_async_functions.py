@@ -27,7 +27,6 @@ RUN_NETWORK = os.getenv("DCAP_QVL_RUN_NETWORK_TESTS") == "1"
 
 def test_async_functions_are_exported() -> None:
     expected = [
-        "get_collateral_for_fmspc",
         "get_collateral",
         "get_collateral_from_pcs",
         "get_collateral_and_verify",
@@ -36,31 +35,21 @@ def test_async_functions_are_exported() -> None:
     for name in expected:
         assert hasattr(dcap_qvl, name), f"{name} is not exported"
 
-    # get_collateral_for_fmspc may require a running event loop to even create
-    # the awaitable. We only assert its existence here and check awaitable-ness
-    # in an async test below.
-    assert callable(dcap_qvl.get_collateral_for_fmspc)
-
-    # These are Python-level async wrappers.
-    assert is_async_callable(
-        dcap_qvl.get_collateral,
-        "http://example.com",
-        b"short",
-    )
+    # get_collateral is a native PyO3 async binding; the others are
+    # Python-level async wrappers around it.
+    assert callable(dcap_qvl.get_collateral)
     assert is_async_callable(dcap_qvl.get_collateral_from_pcs, b"short")
     assert is_async_callable(dcap_qvl.get_collateral_and_verify, b"short")
 
 
 @pytest.mark.asyncio
-async def test_get_collateral_for_fmspc_returns_awaitable() -> None:
-    # In PyO3, this can be a built-in that requires a running event loop.
-    # Use an invalid URL and await to completion so no pending task survives
-    # interpreter teardown.
-    ret = dcap_qvl.get_collateral_for_fmspc(
+async def test_get_collateral_returns_awaitable() -> None:
+    # PyO3 async builtin requires a running event loop to even create the
+    # awaitable. Use an invalid URL and await to completion so no pending
+    # task survives interpreter teardown.
+    ret = dcap_qvl.get_collateral(
         pccs_url="://invalid-url",
-        fmspc="000000000000",
-        ca="processor",
-        for_sgx=True,
+        raw_quote=b"short",
     )
     assert inspect.isawaitable(ret)
     with pytest.raises(ValueError):

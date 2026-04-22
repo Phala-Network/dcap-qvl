@@ -33,7 +33,6 @@ from ._dcap_qvl import (
     parse_quote,
     parse_pck_extension_from_pem,
     get_collateral,
-    get_collateral_for_fmspc,
 )
 
 from .enums import AttestationKeyType, TeeType
@@ -112,7 +111,6 @@ __all__ = [
     "get_collateral",
     "get_collateral_from_pcs",
     "get_collateral_and_verify",
-    "get_collateral_for_fmspc",
     "parse_quote",
     "parse_pck_extension_from_pem",
     "PHALA_PCCS_URL",
