@@ -237,6 +237,223 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
         .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
 
+/// Manual JSON parsing for [`TcbInfo`] and [`QeIdentity`].
+///
+/// These structs carry `#[derive(Deserialize)]`, but the derive path
+/// instantiates a dedicated `serde_json::Deserializer::deserialize_struct<V>`
+/// for every struct and field visitor, which alone accounts for ~25 KiB of
+/// `wasm32-unknown-unknown` code size in downstream contract builds. The
+/// helpers below walk a single dynamically-typed [`serde_json::Value`] tree
+/// and construct the same structs by hand, collapsing all of those
+/// monomorphisations into one.
+///
+/// The structs' `Deserialize` derives are deliberately preserved — downstream
+/// users that serialize / deserialize these types outside the `verify_*`
+/// signature path still rely on them, and LLVM dead-code eliminates the
+/// derive-generated code when nothing reaches it from this crate.
+mod json_parse {
+    use super::{QeIdentity, TcbInfo};
+    use alloc::{format, string::String, vec::Vec};
+    use anyhow::{bail, Context, Result};
+    use serde_json::Value;
+
+    fn as_str(v: &Value, key: &str) -> Result<String> {
+        v.get(key)
+            .and_then(Value::as_str)
+            .map(String::from)
+            .with_context(|| format!("field `{key}`: missing or not a string"))
+    }
+
+    fn as_u64_field(v: &Value, key: &str) -> Result<u64> {
+        v.get(key)
+            .and_then(Value::as_u64)
+            .with_context(|| format!("field `{key}`: missing or not a non-negative integer"))
+    }
+
+    fn as_u<T>(v: &Value, key: &str) -> Result<T>
+    where
+        T: TryFrom<u64>,
+        T::Error: core::fmt::Display,
+    {
+        let n = as_u64_field(v, key)?;
+        T::try_from(n).map_err(|e| anyhow::anyhow!("field `{key}`: value {n} out of range: {e}"))
+    }
+
+    fn as_array<'a>(v: &'a Value, key: &str) -> Result<&'a [Value]> {
+        v.get(key)
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .with_context(|| format!("field `{key}`: missing or not an array"))
+    }
+
+    fn as_array_opt<'a>(v: &'a Value, key: &str) -> &'a [Value] {
+        v.get(key)
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    fn as_advisory_ids(v: &Value) -> Vec<String> {
+        as_array_opt(v, "advisoryIDs")
+            .iter()
+            .filter_map(|a| a.as_str().map(String::from))
+            .collect()
+    }
+
+    fn as_hex<const N: usize>(s: &str, key: &str) -> Result<[u8; N]> {
+        let bytes = hex::decode(s)
+            .map_err(|e| anyhow::anyhow!("field `{key}`: invalid hex: {e}"))?;
+        if bytes.len() != N {
+            bail!("field `{key}`: expected {N} hex bytes, got {}", bytes.len());
+        }
+        let mut out = [0u8; N];
+        out.copy_from_slice(&bytes);
+        Ok(out)
+    }
+
+    fn parse_tcb_status(s: &str) -> Result<crate::tcb_info::TcbStatus> {
+        use crate::tcb_info::TcbStatus;
+        Ok(match s {
+            "UpToDate" => TcbStatus::UpToDate,
+            "OutOfDate" => TcbStatus::OutOfDate,
+            "OutOfDateConfigurationNeeded" => TcbStatus::OutOfDateConfigurationNeeded,
+            "ConfigurationNeeded" => TcbStatus::ConfigurationNeeded,
+            "ConfigurationAndSWHardeningNeeded" => TcbStatus::ConfigurationAndSWHardeningNeeded,
+            "SWHardeningNeeded" => TcbStatus::SWHardeningNeeded,
+            "Revoked" => TcbStatus::Revoked,
+            _ => bail!("unknown tcbStatus: {s}"),
+        })
+    }
+
+    fn parse_tcb_component(v: &Value) -> Result<crate::tcb_info::TcbComponents> {
+        Ok(crate::tcb_info::TcbComponents {
+            svn: as_u::<u8>(v, "svn")?,
+        })
+    }
+
+    fn parse_tcb(v: &Value) -> Result<crate::tcb_info::Tcb> {
+        let sgx_components = as_array(v, "sgxtcbcomponents")?
+            .iter()
+            .map(parse_tcb_component)
+            .collect::<Result<Vec<_>>>()?;
+        let tdx_components = as_array_opt(v, "tdxtcbcomponents")
+            .iter()
+            .map(parse_tcb_component)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(crate::tcb_info::Tcb {
+            sgx_components,
+            tdx_components,
+            pce_svn: as_u::<u16>(v, "pcesvn")?,
+        })
+    }
+
+    fn parse_tcb_level(v: &Value) -> Result<crate::tcb_info::TcbLevel> {
+        let tcb = parse_tcb(v.get("tcb").context("tcbLevel: missing `tcb` field")?)?;
+        Ok(crate::tcb_info::TcbLevel {
+            tcb,
+            tcb_date: as_str(v, "tcbDate")?,
+            tcb_status: parse_tcb_status(&as_str(v, "tcbStatus")?)?,
+            advisory_ids: as_advisory_ids(v),
+        })
+    }
+
+    fn parse_tdx_module(v: &Value) -> Result<crate::tcb_info::TdxModule> {
+        Ok(crate::tcb_info::TdxModule {
+            mrsigner: as_str(v, "mrsigner")?,
+            attributes: as_str(v, "attributes")?,
+            attributes_mask: as_str(v, "attributesMask")?,
+        })
+    }
+
+    fn parse_tdx_module_tcb_level(v: &Value) -> Result<crate::tcb_info::TdxModuleTcbLevel> {
+        let tcb = v
+            .get("tcb")
+            .context("tdxModuleTcbLevel: missing `tcb` field")?;
+        Ok(crate::tcb_info::TdxModuleTcbLevel {
+            tcb: crate::tcb_info::TdxModuleTcb {
+                isvsvn: as_u::<u8>(tcb, "isvsvn")?,
+            },
+            tcb_date: as_str(v, "tcbDate")?,
+            tcb_status: parse_tcb_status(&as_str(v, "tcbStatus")?)?,
+            advisory_ids: as_advisory_ids(v),
+        })
+    }
+
+    fn parse_tdx_module_identity(v: &Value) -> Result<crate::tcb_info::TdxModuleIdentity> {
+        let tcb_levels = as_array(v, "tcbLevels")?
+            .iter()
+            .map(parse_tdx_module_tcb_level)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(crate::tcb_info::TdxModuleIdentity {
+            id: as_str(v, "id")?,
+            mrsigner: as_str(v, "mrsigner")?,
+            attributes: as_str(v, "attributes")?,
+            attributes_mask: as_str(v, "attributesMask")?,
+            tcb_levels,
+        })
+    }
+
+    pub(super) fn tcb_info(raw: &str) -> Result<TcbInfo> {
+        let root: Value = serde_json::from_str(raw).context("Failed to decode TcbInfo JSON")?;
+        let tcb_levels = as_array(&root, "tcbLevels")?
+            .iter()
+            .map(parse_tcb_level)
+            .collect::<Result<Vec<_>>>()?;
+        let tdx_module = root.get("tdxModule").map(parse_tdx_module).transpose()?;
+        let tdx_module_identities = as_array_opt(&root, "tdxModuleIdentities")
+            .iter()
+            .map(parse_tdx_module_identity)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(TcbInfo {
+            id: as_str(&root, "id")?,
+            version: as_u::<u8>(&root, "version")?,
+            issue_date: as_str(&root, "issueDate")?,
+            next_update: as_str(&root, "nextUpdate")?,
+            fmspc: as_str(&root, "fmspc")?,
+            pce_id: as_str(&root, "pceId")?,
+            tcb_type: as_u::<u32>(&root, "tcbType")?,
+            tcb_evaluation_data_number: as_u::<u32>(&root, "tcbEvaluationDataNumber")?,
+            tcb_levels,
+            tdx_module,
+            tdx_module_identities,
+        })
+    }
+
+    fn parse_qe_tcb_level(v: &Value) -> Result<crate::qe_identity::QeTcbLevel> {
+        let tcb = v.get("tcb").context("qeTcbLevel: missing `tcb` field")?;
+        Ok(crate::qe_identity::QeTcbLevel {
+            tcb: crate::qe_identity::QeTcb {
+                isvsvn: as_u::<u16>(tcb, "isvsvn")?,
+            },
+            tcb_date: as_str(v, "tcbDate")?,
+            tcb_status: parse_tcb_status(&as_str(v, "tcbStatus")?)?,
+            advisory_ids: as_advisory_ids(v),
+        })
+    }
+
+    pub(super) fn qe_identity(raw: &str) -> Result<QeIdentity> {
+        let root: Value = serde_json::from_str(raw).context("Failed to decode QeIdentity JSON")?;
+        let tcb_levels = as_array(&root, "tcbLevels")?
+            .iter()
+            .map(parse_qe_tcb_level)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(QeIdentity {
+            id: as_str(&root, "id")?,
+            version: as_u::<u8>(&root, "version")?,
+            issue_date: as_str(&root, "issueDate")?,
+            next_update: as_str(&root, "nextUpdate")?,
+            tcb_evaluation_data_number: as_u::<u32>(&root, "tcbEvaluationDataNumber")?,
+            miscselect: as_hex::<4>(&as_str(&root, "miscselect")?, "miscselect")?,
+            miscselect_mask: as_hex::<4>(&as_str(&root, "miscselectMask")?, "miscselectMask")?,
+            attributes: as_hex::<16>(&as_str(&root, "attributes")?, "attributes")?,
+            attributes_mask: as_hex::<16>(&as_str(&root, "attributesMask")?, "attributesMask")?,
+            mrsigner: as_hex::<32>(&as_str(&root, "mrsigner")?, "mrsigner")?,
+            isvprodid: as_u::<u16>(&root, "isvprodid")?,
+            tcb_levels,
+        })
+    }
+}
+
 // =============================================================================
 // Step 1: Verify TCB Info signature (Intel Root -> TCB Signing Cert -> TCB Info JSON)
 // =============================================================================
@@ -248,9 +465,11 @@ fn verify_tcb_info_signature<C: Config>(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<TcbInfo> {
-    // Parse TCB Info
-    let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
-        .context("Failed to decode TcbInfo")?;
+    // Parse TCB Info. We walk a `serde_json::Value` manually rather than
+    // using the `#[derive(Deserialize)]` path on `TcbInfo`; see the
+    // `json_parse` module for why (~25 KiB wasm footprint reduction for
+    // downstream contract builds).
+    let tcb_info = json_parse::tcb_info(&collateral.tcb_info)?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
@@ -302,9 +521,9 @@ fn verify_qe_identity_signature<C: Config>(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<QeIdentity> {
-    // Parse QE Identity
-    let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
-        .context("Failed to decode QeIdentity")?;
+    // Parse QE Identity. See `json_parse` module for why we skip the
+    // `#[derive(Deserialize)]` path.
+    let qe_identity = json_parse::qe_identity(&collateral.qe_identity)?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
