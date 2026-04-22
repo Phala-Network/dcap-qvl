@@ -475,54 +475,6 @@ pub unsafe extern "C" fn dcap_get_collateral_cb(
     emit_output(json, cb, user_data)
 }
 
-#[cfg(all(feature = "report", feature = "tokio"))]
-#[no_mangle]
-pub unsafe extern "C" fn dcap_get_collateral_for_fmspc_cb(
-    pccs_url: *const u8,
-    url_len: usize,
-    fmspc: *const u8,
-    fmspc_len: usize,
-    ca: *const u8,
-    ca_len: usize,
-    is_sgx: i32,
-    cb: OutputCallback,
-    user_data: *mut c_void,
-) -> i32 {
-    let url_str = match core::str::from_utf8(slice::from_raw_parts(pccs_url, url_len)) {
-        Ok(s) => s,
-        Err(e) => return emit_error(format!("Invalid URL: {e}"), cb, user_data),
-    };
-    let fmspc_str = match core::str::from_utf8(slice::from_raw_parts(fmspc, fmspc_len)) {
-        Ok(s) => s,
-        Err(e) => return emit_error(format!("Invalid FMSPC: {e}"), cb, user_data),
-    };
-    let ca_str = match core::str::from_utf8(slice::from_raw_parts(ca, ca_len)) {
-        Ok(s) => s,
-        Err(e) => return emit_error(format!("Invalid CA: {e}"), cb, user_data),
-    };
-
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
-        Err(e) => return emit_error(format!("Failed to create runtime: {e}"), cb, user_data),
-    };
-
-    let collateral = match rt.block_on(async {
-        crate::collateral::CollateralClient::with_default_http(url_str)?
-            .fetch_for_fmspc(fmspc_str, ca_str, is_sgx != 0)
-            .await
-    }) {
-        Ok(c) => c,
-        Err(e) => return emit_error(format_error(&e), cb, user_data),
-    };
-
-    let json = match serde_json::to_string(&collateral) {
-        Ok(j) => j,
-        Err(e) => return emit_error(format!("JSON serialization failed: {e}"), cb, user_data),
-    };
-
-    emit_output(json, cb, user_data)
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn dcap_parse_pck_extension_from_pem_cb(
     pem: *const u8,

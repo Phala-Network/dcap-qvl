@@ -362,7 +362,7 @@ impl<C: Config> CollateralClient<C> {
     /// verification.
     pub async fn fetch(&self, quote: &[u8]) -> Result<QuoteCollateralV3> {
         let mut quote = quote;
-        let parsed = Quote::decode(&mut quote)?;
+        let parsed = Quote::decode(&mut quote).context("Failed to parse quote")?;
 
         let pck_chain = get_pck_chain(&self.http, &self.pccs_url, &parsed)
             .await
@@ -378,10 +378,16 @@ impl<C: Config> CollateralClient<C> {
         Ok(collateral)
     }
 
-    /// Fetch collateral when FMSPC and CA type are already known (skips
-    /// PCK chain parsing). The returned [`QuoteCollateralV3`] has
-    /// `pck_certificate_chain = None`.
-    pub async fn fetch_for_fmspc(
+    /// Fetch the per-fmspc collateral bundle (PCK CRL, TCB info, QE
+    /// identity, root CA CRL) when FMSPC and CA type are already known.
+    ///
+    /// Internal helper called by [`fetch`](Self::fetch) after it parses
+    /// the PCK leaf. Not a standalone API — it deliberately returns a
+    /// [`QuoteCollateralV3`] with `pck_certificate_chain = None`, so
+    /// the output on its own is insufficient to verify a quote whose
+    /// certification data doesn't embed the PCK chain. Call
+    /// [`fetch`](Self::fetch) instead.
+    pub(crate) async fn fetch_for_fmspc(
         &self,
         fmspc: &str,
         ca: &str,

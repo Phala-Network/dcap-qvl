@@ -83,12 +83,9 @@ async def main():
     quote_data = open("quote.bin", "rb").read()
     collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
 
-    # Or get collateral for specific FMSPC (async)
-    collateral = await dcap_qvl.get_collateral_for_fmspc(
-        pccs_url="https://api.trustedservices.intel.com",
-        fmspc="B0C06F000000",
-        ca="processor",
-        is_sgx=True
+    # Or fetch from a custom PCCS URL
+    collateral = await dcap_qvl.get_collateral(
+        "https://pccs.phala.network", quote_data
     )
 
     # Verify quote with collateral

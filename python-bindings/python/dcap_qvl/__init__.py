@@ -32,7 +32,7 @@ from ._dcap_qvl import (
     py_verify_with_root_ca as verify_with_root_ca,
     parse_quote,
     parse_pck_extension_from_pem,
-    get_collateral_for_fmspc,
+    get_collateral,
 )
 
 from .enums import AttestationKeyType, TeeType
@@ -45,30 +45,6 @@ INTEL_PCS_URL = "https://api.trustedservices.intel.com"
 
 # Backward compatibility alias
 PCS_URL = INTEL_PCS_URL
-
-
-async def get_collateral(pccs_url: str, raw_quote: bytes) -> QuoteCollateralV3:
-    """Get collateral from PCCS URL.
-
-    Args:
-        pccs_url: PCCS server URL
-        raw_quote: Raw quote bytes
-
-    Returns:
-        QuoteCollateralV3: Quote collateral data
-
-    Raises:
-        ValueError: If quote is invalid or FMSPC cannot be extracted
-        RuntimeError: If network request fails
-    """
-    if not isinstance(raw_quote, (bytes, bytearray)):
-        raise TypeError("raw_quote must be bytes")
-
-    quote = Quote.parse(raw_quote)
-    fmspc = quote.fmspc()
-    is_sgx = quote.is_sgx()
-    ca = quote.ca()
-    return await get_collateral_for_fmspc(pccs_url, fmspc, ca, is_sgx)
 
 
 async def get_collateral_from_pcs(raw_quote: bytes) -> QuoteCollateralV3:
@@ -135,7 +111,6 @@ __all__ = [
     "get_collateral",
     "get_collateral_from_pcs",
     "get_collateral_and_verify",
-    "get_collateral_for_fmspc",
     "parse_quote",
     "parse_pck_extension_from_pem",
     "PHALA_PCCS_URL",

@@ -498,23 +498,29 @@ def parse_pck_extension_from_pem(pem_bytes: bytes) -> PyPckExtension:
     """
     ...
 
-async def get_collateral_for_fmspc(
-    pccs_url: str, fmspc: str, ca: str, is_sgx: bool
-) -> PyQuoteCollateralV3:
+async def get_collateral(pccs_url: str, raw_quote: bytes) -> PyQuoteCollateralV3:
     """
-    Get collateral for a specific FMSPC from PCCS URL.
+    Fetch collateral for a DCAP quote from a PCCS / PCS URL.
+
+    Parses the quote, retrieves (or extracts) the PCK certificate chain,
+    and fetches the remaining collateral (TCB info, QE identity, CRLs).
+    The returned collateral has the PCK certificate chain attached, so
+    it works for quotes with any supported certification data type
+    (including types 2 and 3 where the PCK cert isn't embedded in the
+    quote).
 
     Args:
         pccs_url: PCCS server URL
-        fmspc: FMSPC identifier as hex string
-        ca: Certificate authority identifier
-        is_sgx: True for SGX, False for TDX
+        raw_quote: Raw quote data as bytes (SGX or TDX format)
 
     Returns:
-        PyQuoteCollateralV3 with collateral data
+        PyQuoteCollateralV3 with full collateral data
 
     Raises:
-        ValueError: If FMSPC is invalid
-        RuntimeError: If network request fails
+        ValueError: If the quote is invalid, the HTTP client can't be
+            built, or the PCCS / PCS fetch fails (all Rust-side errors
+            are surfaced as ``ValueError`` for consistency with the rest
+            of this module).
     """
     ...
+

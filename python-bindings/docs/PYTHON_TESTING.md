@@ -50,7 +50,7 @@ Each Python version goes through the following test phases:
    - Async collateral functions with `await` syntax
 7. **Unit Tests**: Run pytest unit tests with async support (pytest-asyncio)
 8. **Async Tests**: Test async collateral functions:
-   - `get_collateral_for_fmspc`
+   - `get_collateral`
    - `get_collateral_from_pcs`
    - `get_collateral_and_verify`
 
