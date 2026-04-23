@@ -3,9 +3,9 @@
 //! Selected by [`crate::configs::RingConfig`] / [`crate::configs::RustCryptoConfig`]
 //! / [`crate::configs::DefaultConfig`].
 
-use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
+use der::{Tag, Tagged};
 
 use crate::config::{ParsedCert, X509Codec};
 
@@ -33,30 +33,54 @@ impl X509Codec for X509CertBackend {
 }
 
 impl ParsedCert for X509CertParsed {
-    fn issuer_dn(&self) -> Result<String> {
-        Ok(self.cert.tbs_certificate.issuer.to_string())
+    fn issuer_contains(&self, needle: &[u8]) -> bool {
+        if needle.is_empty() {
+            return true;
+        }
+        for rdn in self.cert.tbs_certificate.issuer.0.iter() {
+            for atv in rdn.0.iter() {
+                if matches!(
+                    atv.value.tag(),
+                    Tag::PrintableString | Tag::Utf8String | Tag::Ia5String | Tag::TeletexString
+                ) && atv.value.value().windows(needle.len()).any(|w| w == needle)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn extension(&self, oid: &[u8]) -> Result<Option<Vec<u8>>> {
-        let oid = const_oid::ObjectIdentifier::from_bytes(oid)
-            .map_err(|_| anyhow!("Invalid OID encoding"))?;
-        let mut iter = self
+        // Compare raw DER-encoded OID bodies byte-for-byte. Callers pass the
+        // body of a `const_oid`-constructed OID, so there is nothing left to
+        // validate at runtime. (The parse itself would not add footprint —
+        // `der::Decode<ObjectIdentifier>` is already reachable via cert
+        // parsing — but it is pure runtime cost for no benefit.)
+        let mut found: Option<&[u8]> = None;
+        for ext in self
             .cert
             .tbs_certificate
             .extensions
             .as_deref()
             .unwrap_or(&[])
-            .iter()
-            .filter(|e| e.extn_id == oid)
-            .map(|e| e.extn_value.clone());
-
-        let extension = match iter.next() {
-            Some(ext) => ext,
-            None => return Ok(None),
-        };
-        if iter.next().is_some() {
-            bail!("extension {} appears more than once", oid);
+        {
+            if ext.extn_id.as_bytes() == oid {
+                if found.is_some() {
+                    // NOTE: would be friendlier to include the offending OID here
+                    // (e.g. `"extension {} appears more than once", ext.extn_id`),
+                    // but using `<ObjectIdentifier as Display>` from this call
+                    // site adds ~60–100 B of format-args setup to the stripped
+                    // contract wasm (measured on wasm32 `opt-level=z` + `lto=fat`
+                    // + `wasm-opt -O -Oz`). The duplicate-extension path is only
+                    // reachable on a malformed cert, which Intel-signed chains
+                    // never produce, so the ergonomics aren't worth the binary
+                    // cost. Revisit if a maintainer pushes back.
+                    bail!("extension appears more than once");
+                }
+                found = Some(ext.extn_value.as_bytes());
+            }
         }
-        Ok(Some(extension.into_bytes()))
+        Ok(found.map(<[u8]>::to_vec))
     }
 }

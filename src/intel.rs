@@ -126,13 +126,10 @@ pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
 /// Generic over [`Config`]; the issuer DN extraction goes through the
 /// configured [`X509Codec`].
 pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<&'static str> {
-    let issuer = C::X509::from_der(cert_der)
-        .context("Failed to decode certificate")?
-        .issuer_dn()
-        .context("Failed to extract certificate issuer")?;
-    if issuer.contains(constants::PROCESSOR_ISSUER) {
+    let parsed = C::X509::from_der(cert_der).context("Failed to decode certificate")?;
+    if parsed.issuer_contains(constants::PROCESSOR_ISSUER.as_bytes()) {
         Ok(constants::PROCESSOR_ISSUER_ID)
-    } else if issuer.contains(constants::PLATFORM_ISSUER) {
+    } else if parsed.issuer_contains(constants::PLATFORM_ISSUER.as_bytes()) {
         Ok(constants::PLATFORM_ISSUER_ID)
     } else {
         // Preserve legacy fallback behavior: unknown issuer is treated as processor.

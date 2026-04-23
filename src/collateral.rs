@@ -239,12 +239,9 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
     let fmspc_hex = hex::encode_upper(fmspc);
 
     // Extract CA type from issuer (reuses parsed cert above)
-    let issuer = parsed
-        .issuer_dn()
-        .context("Failed to extract certificate issuer")?;
-    let ca = if issuer.contains(crate::constants::PROCESSOR_ISSUER) {
+    let ca = if parsed.issuer_contains(crate::constants::PROCESSOR_ISSUER.as_bytes()) {
         crate::constants::PROCESSOR_ISSUER_ID
-    } else if issuer.contains(crate::constants::PLATFORM_ISSUER) {
+    } else if parsed.issuer_contains(crate::constants::PLATFORM_ISSUER.as_bytes()) {
         crate::constants::PLATFORM_ISSUER_ID
     } else {
         crate::constants::PROCESSOR_ISSUER_ID
