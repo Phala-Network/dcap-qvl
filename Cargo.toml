@@ -128,10 +128,10 @@ go = ["std", "ring", "serde_json", "default-x509"]
 ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
 # Opt-in: parse TCB Info / QE Identity JSON via `serde-json-core` instead of
-# `serde_json`. Smaller footprint on `wasm32-unknown-unknown` at the cost of
-# `serde-json-core`'s stricter parser (no `deserialize_any`, no
-# `deserialize_bytes`) — fine for current TCB/QE schemas but a constraint
-# downstream should audit if Intel extends the schema.
+# `serde_json`. Smaller footprint on size-constrained targets (e.g.
+# `wasm32-unknown-unknown`, `no_std` / embedded, TEE enclaves) at the cost
+# of `serde-json-core`'s stricter parser (no `deserialize_any`, no
+# `deserialize_bytes`).
 json-core = ["dep:serde-json-core"]
 _anycrypto = []
 contract = ["getrandom"]

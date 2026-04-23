@@ -237,6 +237,24 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
         .map_err(|_| JsValue::from_str("Failed to encode collateral"))
 }
 
+// Parse JSON with `serde-json-core`, matching `serde_json::from_str`'s strictness:
+// `serde-json-core` returns the value plus bytes consumed and silently ignores the
+// tail, while `serde_json` rejects anything after the value except JSON whitespace
+// (` `, `\n`, `\r`, `\t`). Enforce the same here so parsing behavior stays identical
+// across the `json-core` feature flag.
+#[cfg(feature = "json-core")]
+fn from_json_core_str<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
+    let (value, consumed) =
+        serde_json_core::from_str::<T>(s).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    ensure!(
+        s[consumed..]
+            .trim_end_matches([' ', '\n', '\r', '\t'])
+            .is_empty(),
+        "trailing non-whitespace content"
+    );
+    Ok(value)
+}
+
 // =============================================================================
 // Step 1: Verify TCB Info signature (Intel Root -> TCB Signing Cert -> TCB Info JSON)
 // =============================================================================
@@ -249,15 +267,15 @@ fn verify_tcb_info_signature<C: Config>(
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<TcbInfo> {
     // Parse TCB Info. Under the `json-core` feature, route through
-    // `serde-json-core` instead of `serde_json` for a smaller
-    // `wasm32-unknown-unknown` footprint in downstream builds.
+    // `serde-json-core` instead of `serde_json` for a smaller footprint
+    // on size-constrained targets (e.g. `wasm32-unknown-unknown`,
+    // `no_std` / embedded, TEE enclaves).
     #[cfg(not(feature = "json-core"))]
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
     #[cfg(feature = "json-core")]
-    let tcb_info = serde_json_core::from_str::<TcbInfo>(&collateral.tcb_info)
-        .map(|(t, _consumed)| t)
-        .map_err(|e| anyhow::anyhow!("Failed to decode TcbInfo: {e:?}"))?;
+    let tcb_info =
+        from_json_core_str::<TcbInfo>(&collateral.tcb_info).context("Failed to decode TcbInfo")?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
@@ -314,9 +332,8 @@ fn verify_qe_identity_signature<C: Config>(
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
         .context("Failed to decode QeIdentity")?;
     #[cfg(feature = "json-core")]
-    let qe_identity = serde_json_core::from_str::<QeIdentity>(&collateral.qe_identity)
-        .map(|(t, _consumed)| t)
-        .map_err(|e| anyhow::anyhow!("Failed to decode QeIdentity: {e:?}"))?;
+    let qe_identity = from_json_core_str::<QeIdentity>(&collateral.qe_identity)
+        .context("Failed to decode QeIdentity")?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
