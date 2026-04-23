@@ -246,8 +246,11 @@ pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<
 fn from_json_core_str<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
     let (value, consumed) =
         serde_json_core::from_str::<T>(s).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    let trailing = s
+        .get(consumed..)
+        .context("serde_json_core returned an invalid consumed offset")?;
     ensure!(
-        s[consumed..]
+        trailing
             .trim_end_matches([' ', '\n', '\r', '\t'])
             .is_empty(),
         "trailing non-whitespace content"
