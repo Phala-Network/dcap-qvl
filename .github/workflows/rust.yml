@@ -21,6 +21,16 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
 
+  build-json-core:
+    name: Build & test with json-core feature
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Build
+      run: cargo build --verbose --features json-core,default-x509,ring,rustcrypto,report
+    - name: Run tests
+      run: cargo test --verbose --features json-core,default-x509,ring,rustcrypto,report
+
   python-bindings:
     name: Build & Test Python bindings (unit)
     runs-on: ubuntu-latest
