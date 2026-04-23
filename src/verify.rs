@@ -248,9 +248,16 @@ fn verify_tcb_info_signature<C: Config>(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<TcbInfo> {
-    // Parse TCB Info
+    // Parse TCB Info. Under the `json-core` feature, route through
+    // `serde-json-core` instead of `serde_json` for a smaller
+    // `wasm32-unknown-unknown` footprint in downstream builds.
+    #[cfg(not(feature = "json-core"))]
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
+    #[cfg(feature = "json-core")]
+    let tcb_info = serde_json_core::from_str::<TcbInfo>(&collateral.tcb_info)
+        .map(|(t, _consumed)| t)
+        .map_err(|e| anyhow::anyhow!("Failed to decode TcbInfo: {e:?}"))?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
@@ -302,9 +309,14 @@ fn verify_qe_identity_signature<C: Config>(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
 ) -> Result<QeIdentity> {
-    // Parse QE Identity
+    // Parse QE Identity. See TCB-Info site above for `json-core` feature.
+    #[cfg(not(feature = "json-core"))]
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
         .context("Failed to decode QeIdentity")?;
+    #[cfg(feature = "json-core")]
+    let qe_identity = serde_json_core::from_str::<QeIdentity>(&collateral.qe_identity)
+        .map(|(t, _consumed)| t)
+        .map_err(|e| anyhow::anyhow!("Failed to decode QeIdentity: {e:?}"))?;
 
     // Check validity window
     let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
