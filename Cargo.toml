@@ -55,6 +55,7 @@ serde-wasm-bindgen = { version = "0.6.5", optional = true }
 wasm-bindgen = { version = "0.2.95", optional = true }
 wasm-bindgen-futures = { version = "0.4.56" }
 serde_bytes = { package = "serde-human-bytes", version = "0.1" }
+serde-json-core = { version = "0.6", default-features = false, optional = true }
 
 # Python bindings
 pyo3 = { version = "0.25", optional = true, features = [
@@ -126,6 +127,12 @@ python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
 go = ["std", "ring", "serde_json", "default-x509"]
 ring = ["dep:ring", "dcap-qvl-webpki/ring", "_anycrypto"]
 rustcrypto = ["dep:sha2", "dep:p256", "dep:signature", "dcap-qvl-webpki/rustcrypto", "_anycrypto"]
+# Opt-in: parse TCB Info / QE Identity JSON via `serde-json-core` instead of
+# `serde_json`. Smaller footprint on size-constrained targets (e.g.
+# `wasm32-unknown-unknown`, `no_std` / embedded, TEE enclaves) at the cost
+# of `serde-json-core`'s stricter parser (no `deserialize_any`, no
+# `deserialize_bytes`).
+json-core = ["dep:serde-json-core"]
 _anycrypto = []
 contract = ["getrandom"]
 
