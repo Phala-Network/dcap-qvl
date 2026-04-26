@@ -83,6 +83,19 @@ pub mod collateral;
 #[cfg(feature = "report")]
 pub use collateral::PHALA_PCCS_URL;
 
+/// Re-export of the [`reqwest`] types used by this crate's public API.
+/// Use `dcap_qvl::reqwest::Client` when constructing a client to pass
+/// into [`collateral::CollateralClient::new`] — guarantees type
+/// compatibility regardless of which `reqwest` version the downstream
+/// workspace pins. `Certificate` is included so callers can build a
+/// trust-anchor-augmented client without a separate `reqwest` dep.
+/// `Certificate` is gated `not(target_arch = "wasm32")` to match
+/// reqwest, which only exposes it on native targets.
+#[cfg(all(feature = "reqwest", not(target_arch = "wasm32")))]
+pub use reqwest::Certificate;
+#[cfg(feature = "reqwest")]
+pub use reqwest::Client;
+
 pub mod config;
 #[cfg(feature = "default-x509")]
 pub mod configs;
