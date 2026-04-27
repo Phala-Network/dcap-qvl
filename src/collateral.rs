@@ -17,6 +17,7 @@ use crate::configs::DefaultConfig;
 use crate::constants::{
     PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN,
 };
+use crate::http::{HttpClient, HttpResponse};
 use crate::quote::{EncryptedPpidParams, Quote};
 use crate::QuoteCollateralV3;
 
@@ -94,12 +95,10 @@ impl PcsEndpoints {
     }
 }
 
-fn get_header(response: &reqwest::Response, name: &str) -> Result<String> {
+fn get_header(response: &HttpResponse, name: &str) -> Result<String> {
     let value = response
-        .headers()
-        .get(name)
-        .ok_or_else(|| anyhow!("Missing {name}"))?
-        .to_str()?;
+        .header(name)
+        .ok_or_else(|| anyhow!("Missing {name}"))?;
     let value = urlencoding::decode(value)?;
     Ok(value.into_owned())
 }
@@ -148,8 +147,8 @@ fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
 }
 
 /// Fetch PCK certificate from PCCS using encrypted PPID parameters.
-async fn fetch_pck_certificate(
-    client: &reqwest::Client,
+async fn fetch_pck_certificate<H: HttpClient>(
+    client: &H,
     pccs_url: &str,
     qeid: &[u8],
     params: &EncryptedPpidParams,
@@ -169,22 +168,19 @@ async fn fetch_pck_certificate(
     let url = format!(
         "{base_url}/sgx/certification/v4/pckcert?qeid={qeid}&encrypted_ppid={encrypted_ppid}&cpusvn={cpusvn}&pcesvn={pcesvn}&pceid={pceid}"
     );
-    let response = client.get(&url).send().await?;
+    let response = client.get(&url).await?;
 
-    if !response.status().is_success() {
+    if !response.is_success() {
         bail!(
-            "Failed to fetch PCK certificate from {}: {}",
+            "Failed to fetch PCK certificate from {}: HTTP {}",
             url,
-            response.status()
+            response.status
         );
     }
 
     // Check if Intel returned a certificate for a different TCB level
     // SGX-TCBm header format: cpusvn (16 bytes) + pcesvn (2 bytes, little-endian)
-    if let Some(tcbm) = response.headers().get("SGX-TCBm") {
-        let tcbm_str = tcbm
-            .to_str()
-            .context("SGX-TCBm header contains invalid characters")?;
+    if let Some(tcbm_str) = response.header("SGX-TCBm") {
         let tcbm_bytes =
             hex::decode(tcbm_str).map_err(|e| anyhow!("SGX-TCBm header is not valid hex: {e}"))?;
         let (matched_cpusvn, matched_pcesvn) = <([u8; 16], u16)>::decode(&mut &tcbm_bytes[..])
@@ -210,7 +206,8 @@ async fn fetch_pck_certificate(
     let pck_cert_chain = get_header(&response, "SGX-PCK-Certificate-Issuer-Chain")?;
 
     // The body is the leaf PCK certificate
-    let pck_cert = response.text().await?;
+    let pck_cert = String::from_utf8(response.body)
+        .context("PCK certificate response body is not valid UTF-8")?;
 
     // Combine into a full PEM chain (leaf first, then issuer chain)
     Ok(format!("{pck_cert}\n{pck_cert_chain}"))
@@ -267,7 +264,11 @@ pub fn default_http_client() -> Result<reqwest::Client> {
 /// Get PCK certificate chain for a quote.
 /// - cert_type 5: extracts from quote
 /// - cert_type 2/3: fetches from PCCS using encrypted PPID
-async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) -> Result<String> {
+async fn get_pck_chain<H: HttpClient>(
+    client: &H,
+    pccs_url: &str,
+    quote: &Quote,
+) -> Result<String> {
     match quote.inner_cert_type() {
         PCK_ID_PCK_CERT_CHAIN => Ok(String::from_utf8_lossy(quote.inner_cert_data()).to_string()),
         PCK_ID_ENCRYPTED_PPID_2048 | PCK_ID_ENCRYPTED_PPID_3072 => {
@@ -279,10 +280,15 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 }
 
 /// A PCCS / PCS client parameterized by [`Config`] for pluggable X.509 /
-/// crypto backends.
+/// crypto backends, and by [`HttpClient`] for the HTTP transport.
 ///
-/// Bundles a `reqwest::Client` and a PCCS base URL, and exposes three
-/// fetch methods:
+/// `H` defaults to [`reqwest::Client`] (its [`HttpClient`] impl ships
+/// with the `reqwest` feature). Implement [`HttpClient`] on your own
+/// type to plug in a different HTTP stack — useful when the workspace
+/// is on a different `reqwest` major or doesn't want a `reqwest`
+/// dependency at all.
+///
+/// Exposes three fetch methods:
 ///
 /// * [`fetch`](Self::fetch) — from a raw DCAP quote.
 /// * [`fetch_for_fmspc`](Self::fetch_for_fmspc) — when the caller already
@@ -312,13 +318,13 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 /// let collateral = client.fetch(&quote).await?;
 /// # Ok(()) }
 /// ```
-pub struct CollateralClient<C: Config = DefaultConfig> {
-    http: reqwest::Client,
+pub struct CollateralClient<C: Config = DefaultConfig, H: HttpClient = reqwest::Client> {
+    http: H,
     pccs_url: String,
     _cfg: PhantomData<fn() -> C>,
 }
 
-impl<C: Config> Clone for CollateralClient<C> {
+impl<C: Config, H: HttpClient + Clone> Clone for CollateralClient<C, H> {
     fn clone(&self) -> Self {
         Self {
             http: self.http.clone(),
@@ -328,14 +334,16 @@ impl<C: Config> Clone for CollateralClient<C> {
     }
 }
 
-impl<C: Config> CollateralClient<C> {
-    /// Build a client with a caller-provided `reqwest::Client`.
+impl<C: Config, H: HttpClient> CollateralClient<C, H> {
+    /// Build a client with a caller-provided HTTP transport.
     ///
-    /// Use this when you need custom TLS trust roots, timeouts, proxies,
-    /// or any other [`reqwest::ClientBuilder`] options. For the common
-    /// "just give me something that works" path see
+    /// Any type implementing [`HttpClient`] is accepted, including
+    /// [`reqwest::Client`] when the `reqwest` feature is on. Use this
+    /// when you need custom TLS trust roots, timeouts, proxies, or a
+    /// non-`reqwest` HTTP stack. For the common "just give me something
+    /// that works" path see
     /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http).
-    pub fn new(http: reqwest::Client, pccs_url: impl Into<String>) -> Self {
+    pub fn new(http: H, pccs_url: impl Into<String>) -> Self {
         Self {
             http,
             pccs_url: pccs_url.into(),
@@ -344,7 +352,7 @@ impl<C: Config> CollateralClient<C> {
     }
 
     /// Rebind the `Config` type without rebuilding the HTTP client / URL.
-    pub fn with_config<D: Config>(self) -> CollateralClient<D> {
+    pub fn with_config<D: Config>(self) -> CollateralClient<D, H> {
         CollateralClient {
             http: self.http,
             pccs_url: self.pccs_url,
@@ -399,10 +407,10 @@ impl<C: Config> CollateralClient<C> {
         // Send a GET and fail with a useful message on non-2xx, so the
         // header / body readers below don't surface misleading errors
         // like "missing issuer-chain header" on an HTTP 500.
-        async fn checked_get(client: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
-            let response = client.get(url).send().await?;
-            if !response.status().is_success() {
-                bail!("Failed to fetch {url}: {}", response.status());
+        async fn checked_get<H: HttpClient>(client: &H, url: &str) -> Result<HttpResponse> {
+            let response = client.get(url).await?;
+            if !response.is_success() {
+                bail!("Failed to fetch {url}: HTTP {}", response.status);
             }
             Ok(response)
         }
@@ -412,7 +420,7 @@ impl<C: Config> CollateralClient<C> {
         {
             let response = checked_get(client, &endpoints.url_pckcrl()).await?;
             pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
-            pck_crl = response.bytes().await?.to_vec();
+            pck_crl = response.body;
         };
 
         let tcb_info_issuer_chain;
@@ -421,18 +429,20 @@ impl<C: Config> CollateralClient<C> {
             let response = checked_get(client, &endpoints.url_tcb()).await?;
             tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
                 .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
-            raw_tcb_info = response.text().await?;
+            raw_tcb_info = String::from_utf8(response.body)
+                .context("TCB Info response body is not valid UTF-8")?;
         };
         let qe_identity_issuer_chain;
         let raw_qe_identity;
         {
             let response = checked_get(client, &endpoints.url_qe_identity()).await?;
             qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
-            raw_qe_identity = response.text().await?;
+            raw_qe_identity = String::from_utf8(response.body)
+                .context("QE Identity response body is not valid UTF-8")?;
         };
 
-        async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
-            Ok(checked_get(client, url).await?.bytes().await?.to_vec())
+        async fn http_get<H: HttpClient>(client: &H, url: &str) -> Result<Vec<u8>> {
+            Ok(checked_get(client, url).await?.body)
         }
 
         // First try to get root CA CRL directly from the PCCS endpoint
@@ -508,7 +518,7 @@ impl<C: Config> CollateralClient<C> {
     }
 }
 
-impl CollateralClient<DefaultConfig> {
+impl CollateralClient<DefaultConfig, reqwest::Client> {
     /// Convenience constructor: build a default `reqwest::Client`
     /// (180s timeout on non-`js` targets) and pair it with the given
     /// PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert` backend).

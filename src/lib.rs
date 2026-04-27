@@ -83,6 +83,9 @@ pub mod collateral;
 #[cfg(feature = "report")]
 pub use collateral::PHALA_PCCS_URL;
 
+#[cfg(feature = "report")]
+pub mod http;
+
 pub mod config;
 #[cfg(feature = "default-x509")]
 pub mod configs;
