@@ -1,21 +1,17 @@
 //! HTTP client abstraction used by [`crate::collateral`].
 //!
-//! `dcap-qvl` ships a default [`HttpClient`] adapter for `reqwest` —
-//! [`ReqwestHttp`] — when `feature = "reqwest"` is enabled. The trait
-//! lets downstream users avoid taking a *direct* dependency on
-//! `reqwest` (and the resulting version / type coupling on the public
-//! API boundary): they can implement [`HttpClient`] on their own type —
-//! backed by a different HTTP stack, a host-provided fetch on wasm,
-//! etc. — and pass an instance to
-//! [`CollateralClient::new`](crate::collateral::CollateralClient::new).
+//! The `HttpClient` trait keeps `reqwest` (and its types / version) out
+//! of this crate's public API surface. The default-path constructors
+//! ([`with_default_http`](crate::collateral::CollateralClient::<crate::configs::DefaultConfig>::with_default_http),
+//! [`from_env`](crate::collateral::CollateralClient::<crate::configs::DefaultConfig>::from_env))
+//! still use `reqwest` internally, but no public function signature
+//! mentions `reqwest::Client` — so a future `reqwest` major bump is an
+//! internal change, not a breaking one for downstream callers.
 //!
-//! `reqwest::Client` is intentionally bridged through a newtype rather
-//! than a direct trait impl: it mirrors the only pattern available to
-//! downstream users (the orphan rule forbids them from impl'ing
-//! [`HttpClient`] on a `reqwest::Client` from a *different* `reqwest`
-//! version), and avoids method-resolution surprises between
-//! `reqwest::Client::get` (returns a builder) and
-//! [`HttpClient::get`] (returns a future).
+//! Callers that need a custom HTTP stack (different TLS config,
+//! workspace-pinned `reqwest` major, non-`reqwest` transport, wasm host
+//! fetch, …) implement [`HttpClient`] on their own type and pass it to
+//! [`CollateralClient::new`](crate::collateral::CollateralClient::new).
 //!
 //! The trait is deliberately narrow — it covers only what
 //! [`crate::collateral`] needs: a `GET`, plus access to status, named
@@ -71,38 +67,33 @@ impl HttpResponse {
 ///
 /// The `async fn` here intentionally has no `Send` bound. Auto-traits
 /// propagate through monomorphization, so callers using a `Send` impl
-/// (e.g. the built-in [`ReqwestHttp`] adapter) get `Send` futures
-/// automatically; callers on single-threaded runtimes don't pay the
-/// `Send` bound they don't need.
+/// still get `Send` futures automatically; callers on single-threaded
+/// runtimes don't pay the `Send` bound they don't need.
 #[allow(async_fn_in_trait)]
 pub trait HttpClient {
     /// Issue a GET request and buffer the full response.
     async fn get(&self, url: &str) -> Result<HttpResponse>;
 }
 
-/// [`HttpClient`] adapter over [`reqwest::Client`].
+/// Opaque `reqwest`-backed [`HttpClient`] adapter.
 ///
-/// Modeled as a newtype rather than a direct `impl HttpClient for
-/// reqwest::Client` so that downstream users on a different `reqwest`
-/// major version can write the same shape on their side (the orphan
-/// rule blocks them from impl'ing [`HttpClient`] on a foreign
-/// `reqwest::Client` directly).
+/// The type name is `pub` only so it can sit as the default `H` on
+/// [`CollateralClient`](crate::collateral::CollateralClient); the inner
+/// `reqwest::Client` and the constructor are crate-private. Callers
+/// obtain a value only indirectly via
+/// [`with_default_http`](crate::collateral::CollateralClient::<crate::configs::DefaultConfig>::with_default_http)
+/// /
+/// [`from_env`](crate::collateral::CollateralClient::<crate::configs::DefaultConfig>::from_env)
+/// and treat it as an opaque token — `reqwest::Client` does not appear
+/// in any public signature, so a future `reqwest` major bump is an
+/// internal change.
 #[cfg(feature = "reqwest")]
-#[derive(Clone, Debug)]
-pub struct ReqwestHttp(pub reqwest::Client);
+#[derive(Clone)]
+pub struct ReqwestHttp(reqwest::Client);
 
 #[cfg(feature = "reqwest")]
 impl ReqwestHttp {
-    /// Wrap a [`reqwest::Client`] for use with
-    /// [`CollateralClient`](crate::collateral::CollateralClient).
-    pub fn new(client: reqwest::Client) -> Self {
-        Self(client)
-    }
-}
-
-#[cfg(feature = "reqwest")]
-impl From<reqwest::Client> for ReqwestHttp {
-    fn from(client: reqwest::Client) -> Self {
+    pub(crate) fn new(client: reqwest::Client) -> Self {
         Self(client)
     }
 }

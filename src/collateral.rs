@@ -251,10 +251,12 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
 }
 
 /// Build a `reqwest::Client` with this crate's default settings (180s
-/// timeout on non-`js` targets). Callers who need custom TLS roots,
-/// proxies, or headers should construct their own `reqwest::Client` and
-/// pass it to [`CollateralClient::new`].
-pub fn default_http_client() -> Result<reqwest::Client> {
+/// timeout on non-`js` targets). Crate-private on purpose: the
+/// `reqwest::Client` type is intentionally kept off the public API so
+/// that a future `reqwest` major bump is an internal change. Callers
+/// who need a custom HTTP stack implement [`HttpClient`] on their own
+/// type and pass it to [`CollateralClient::new`].
+pub(crate) fn default_http_client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.timeout(Duration::from_secs(180));
@@ -278,12 +280,14 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 /// A PCCS / PCS client parameterized by [`Config`] for pluggable X.509 /
 /// crypto backends, and by [`HttpClient`] for the HTTP transport.
 ///
-/// `H` defaults to [`ReqwestHttp`](crate::http::ReqwestHttp), the
-/// crate's bundled `reqwest` adapter (gated by `feature = "reqwest"`).
-/// Implement [`HttpClient`] on your own type to plug in a different
-/// HTTP stack — useful when the workspace is on a different `reqwest`
-/// major or wants to avoid a direct `reqwest` dependency / exposing
-/// `reqwest` types in its own API.
+/// `H` defaults to a crate-private `reqwest`-backed adapter (gated on
+/// `feature = "reqwest"`). `reqwest::Client` deliberately does **not**
+/// appear in any public function signature, so a future `reqwest`
+/// major bump is an internal change rather than a breaking one for
+/// downstream callers. To plug in a custom HTTP stack — different TLS
+/// config, workspace-pinned `reqwest` major, non-`reqwest` transport,
+/// wasm host fetch, … — implement [`HttpClient`] on your own type and
+/// hand it to [`new`](Self::new).
 ///
 /// Exposes three fetch methods:
 ///
@@ -296,6 +300,8 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 ///
 /// # Examples
 ///
+/// Default path — let the crate build a `reqwest`-backed transport:
+///
 /// ```no_run
 /// use dcap_qvl::collateral::{CollateralClient, PHALA_PCCS_URL};
 /// # async fn run(quote: Vec<u8>) -> anyhow::Result<()> {
@@ -305,15 +311,22 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 /// # Ok(()) }
 /// ```
 ///
-/// With a custom `reqwest::Client` (e.g. for a local PCCS with a
-/// self-signed TLS cert) and the default config:
+/// Custom transport — implement [`HttpClient`] on a type you own:
 ///
-/// ```no_run
-/// # use dcap_qvl::collateral::CollateralClient;
-/// # async fn run(http: reqwest::Client, quote: Vec<u8>) -> anyhow::Result<()> {
-/// let client = CollateralClient::with_reqwest(http, "https://pccs.local:8081");
-/// let collateral = client.fetch(&quote).await?;
-/// # Ok(()) }
+/// ```ignore
+/// use dcap_qvl::collateral::CollateralClient;
+/// use dcap_qvl::http::{HttpClient, HttpResponse};
+///
+/// struct MyHttp { /* your HTTP client of choice */ }
+///
+/// impl HttpClient for MyHttp {
+///     async fn get(&self, url: &str) -> anyhow::Result<HttpResponse> {
+///         /* … */
+/// #       todo!()
+///     }
+/// }
+///
+/// let client = CollateralClient::<_, MyHttp>::new(MyHttp { /* … */ }, "https://pccs.local");
 /// ```
 pub struct CollateralClient<C: Config = DefaultConfig, H: HttpClient = ReqwestHttp> {
     http: H,
@@ -334,13 +347,11 @@ impl<C: Config, H: HttpClient + Clone> Clone for CollateralClient<C, H> {
 impl<C: Config, H: HttpClient> CollateralClient<C, H> {
     /// Build a client with a caller-provided HTTP transport.
     ///
-    /// Any type implementing [`HttpClient`] is accepted. To pass a
-    /// [`reqwest::Client`], wrap it in
-    /// [`ReqwestHttp`](crate::http::ReqwestHttp) (or use the
-    /// [`with_reqwest`](CollateralClient::<DefaultConfig>::with_reqwest)
-    /// shortcut). For the common "just give me something that works"
-    /// path see
-    /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http).
+    /// Any type implementing [`HttpClient`] is accepted. For the common
+    /// "just give me something that works" path see
+    /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http);
+    /// the default-path `reqwest::Client` is intentionally not exposed
+    /// on the public API.
     pub fn new(http: H, pccs_url: impl Into<String>) -> Self {
         Self {
             http,
@@ -517,26 +528,18 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
 }
 
 impl CollateralClient<DefaultConfig, ReqwestHttp> {
-    /// Convenience constructor: build a default `reqwest::Client`
-    /// (180s timeout on non-`js` targets) and pair it with the given
-    /// PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert` backend).
+    /// Convenience constructor: build a default `reqwest`-backed
+    /// transport (180s timeout on non-`js` targets) and pair it with
+    /// the given PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert`
+    /// backend). The underlying `reqwest::Client` is intentionally not
+    /// exposed; callers who need a custom HTTP stack implement
+    /// [`HttpClient`] on their own type and use
+    /// [`CollateralClient::new`].
     pub fn with_default_http(pccs_url: impl Into<String>) -> Result<Self> {
         Ok(Self::new(
             ReqwestHttp::new(default_http_client()?),
             pccs_url,
         ))
-    }
-
-    /// Wrap a caller-provided [`reqwest::Client`] in [`ReqwestHttp`] and
-    /// pair it with the given PCCS URL. Uses [`DefaultConfig`].
-    ///
-    /// Use this for the common case of "I built my own
-    /// `reqwest::Client` (custom TLS roots, proxies, headers) and want
-    /// to plug it in." For a non-`reqwest` HTTP stack, implement
-    /// [`HttpClient`] on your own type and call
-    /// [`new`](Self::new) directly.
-    pub fn with_reqwest(client: reqwest::Client, pccs_url: impl Into<String>) -> Self {
-        Self::new(ReqwestHttp::new(client), pccs_url)
     }
 
     /// Zero-arg convenience constructor: default HTTP client + PCCS URL
