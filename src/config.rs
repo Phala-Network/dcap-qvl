@@ -71,21 +71,32 @@ pub trait X509Codec {
     fn from_der<'a>(cert_der: &'a [u8]) -> Result<Self::Parsed<'a>>;
 }
 
+/// Intel PCK certificate authority that issued a leaf cert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PckCa {
+    Processor,
+    Platform,
+}
+
+impl PckCa {
+    /// Lowercase identifier used in PCS URLs and FFI bindings
+    /// (`"processor"` / `"platform"`).
+    pub fn as_id_str(&self) -> &'static str {
+        match self {
+            PckCa::Processor => crate::constants::PROCESSOR_ISSUER_ID,
+            PckCa::Platform => crate::constants::PLATFORM_ISSUER_ID,
+        }
+    }
+}
+
 /// Read-only accessors over a parsed X.509 certificate.
 pub trait ParsedCert {
-    /// Returns `true` if any RDN component of the issuer DN whose tag is
-    /// `PrintableString`, `UTF8String`, `IA5String`, or `TeletexString`
-    /// contains `needle` as a byte substring.
+    /// Classify the issuer of an Intel PCK leaf certificate.
     ///
-    /// Wide-char `BMPString` / `UniversalString` and non-string ATVs are
-    /// skipped — an ASCII needle cannot meaningfully match those encodings,
-    /// which is also what the former `issuer_dn().to_string().contains(...)`
-    /// produced (`x509-cert`'s `Display` hex-encodes non-byte-string ATVs).
-    ///
-    /// Used by [`crate::intel::pck_ca_with`] to classify an Intel PCK leaf.
-    /// Intel PCK issuer CNs are `UTF8String`, so the skipped tags are not
-    /// reachable on the production path.
-    fn issuer_contains(&self, needle: &[u8]) -> bool;
+    /// Returns `None` when the issuer matches neither CA, or when the
+    /// backend cannot interpret the issuer DN. Callers decide how to
+    /// handle `None`.
+    fn pck_ca(&self) -> Option<PckCa>;
 
     /// Returns the OCTET STRING contents of the unique extension whose
     /// `extnID` equals `oid`, where `oid` is the DER-encoded OID body

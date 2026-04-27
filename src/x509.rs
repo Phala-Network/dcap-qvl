@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use anyhow::{bail, Context, Result};
 use der::{Tag, Tagged};
 
-use crate::config::{ParsedCert, X509Codec};
+use crate::config::{ParsedCert, PckCa, X509Codec};
 
 /// Audited default [`X509Codec`] implementation, built on `x509-cert` + `der`.
 ///
@@ -33,22 +33,34 @@ impl X509Codec for X509CertBackend {
 }
 
 impl ParsedCert for X509CertParsed {
-    fn issuer_contains(&self, needle: &[u8]) -> bool {
-        if needle.is_empty() {
-            return true;
-        }
+    fn pck_ca(&self) -> Option<PckCa> {
+        // Intel PCK issuer CNs are UTF8String; we also accept Printable / IA5 /
+        // Teletex for robustness. BMP/Universal and non-string ATVs are skipped
+        // — an ASCII substring match against wide-char encodings is meaningless,
+        // matching the historic `Display::contains` behaviour (`x509-cert`'s
+        // `Display` hex-encodes non-byte-string ATVs).
         for rdn in self.cert.tbs_certificate.issuer.0.iter() {
             for atv in rdn.0.iter() {
-                if matches!(
+                if !matches!(
                     atv.value.tag(),
                     Tag::PrintableString | Tag::Utf8String | Tag::Ia5String | Tag::TeletexString
-                ) && atv.value.value().windows(needle.len()).any(|w| w == needle)
+                ) {
+                    continue;
+                }
+                let v = atv.value.value();
+                if v.windows(b"Processor".len())
+                    .any(|w| w == b"Processor".as_slice())
                 {
-                    return true;
+                    return Some(PckCa::Processor);
+                }
+                if v.windows(b"Platform".len())
+                    .any(|w| w == b"Platform".as_slice())
+                {
+                    return Some(PckCa::Platform);
                 }
             }
         }
-        false
+        None
     }
 
     fn extension(&self, oid: &[u8]) -> Result<Option<Vec<u8>>> {

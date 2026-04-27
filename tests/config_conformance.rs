@@ -47,19 +47,11 @@ pub fn assert_config_conforms<C: Config>() {
         let default =
             <DefaultConfig as Config>::X509::from_der(&cert_der).expect("default from_der");
 
-        for needle in [
-            b"Processor".as_slice(),
-            b"Platform",
-            b"Intel SGX",
-            b"NotPresent",
-        ] {
-            assert_eq!(
-                custom.issuer_contains(needle),
-                default.issuer_contains(needle),
-                "issuer_contains output mismatch for needle {:?}",
-                core::str::from_utf8(needle).unwrap_or("<non-utf8>"),
-            );
-        }
+        assert_eq!(
+            custom.pck_ca(),
+            default.pck_ca(),
+            "pck_ca classification mismatch on PCK leaf",
+        );
 
         let custom_ext = custom.extension(SGX_EXTENSION_OID).expect("custom ext");
         let default_ext = default.extension(SGX_EXTENSION_OID).expect("default ext");

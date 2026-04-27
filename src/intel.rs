@@ -7,7 +7,7 @@ use asn1_der::{
 #[cfg(feature = "default-x509")]
 use crate::configs::DefaultConfig;
 use crate::{
-    config::{Config, ParsedCert, X509Codec},
+    config::{Config, ParsedCert, PckCa, X509Codec},
     constants::{self, CpuSvn, Fmspc, Svn},
     oids,
     quote::{AuthData, Quote},
@@ -120,26 +120,22 @@ pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
 }
 
 /// Classify the PCK certificate authority of a leaf cert as
-/// [`crate::constants::PROCESSOR_ISSUER_ID`] or
-/// [`crate::constants::PLATFORM_ISSUER_ID`] by inspecting the issuer DN.
+/// [`PckCa::Processor`] or [`PckCa::Platform`] by inspecting the issuer DN.
 ///
-/// Generic over [`Config`]; the issuer DN extraction goes through the
-/// configured [`X509Codec`].
-pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<&'static str> {
+/// Generic over [`Config`]; the classification goes through the
+/// configured [`X509Codec`]. An unrecognised issuer is reported as
+/// [`PckCa::Processor`] for backwards compatibility — see comment.
+pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<PckCa> {
     let parsed = C::X509::from_der(cert_der).context("Failed to decode certificate")?;
-    if parsed.issuer_contains(constants::PROCESSOR_ISSUER.as_bytes()) {
-        Ok(constants::PROCESSOR_ISSUER_ID)
-    } else if parsed.issuer_contains(constants::PLATFORM_ISSUER.as_bytes()) {
-        Ok(constants::PLATFORM_ISSUER_ID)
-    } else {
-        // Preserve legacy fallback behavior: unknown issuer is treated as processor.
-        Ok(constants::PROCESSOR_ISSUER_ID)
-    }
+    // Legacy fallback: an unrecognised issuer is treated as Processor. This
+    // policy lives at the call site, not in the backend, so future callers
+    // can opt to error or log on `None` without needing trait changes.
+    Ok(parsed.pck_ca().unwrap_or(PckCa::Processor))
 }
 
 /// [`pck_ca_with`] under the audited [`DefaultConfig`].
 #[cfg(feature = "default-x509")]
-pub fn pck_ca(cert_der: &[u8]) -> Result<&'static str> {
+pub fn pck_ca(cert_der: &[u8]) -> Result<PckCa> {
     pck_ca_with::<DefaultConfig>(cert_der)
 }
 
@@ -162,7 +158,7 @@ pub fn quote_fmspc(quote: &Quote) -> Result<Fmspc> {
 /// Return the PCK CA classification of a quote's PCK leaf certificate.
 ///
 /// Generic over [`Config`].
-pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<&'static str> {
+pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<PckCa> {
     let chain = extract_cert_chain(quote)?;
     let leaf = chain.first().context("Empty PCK certificate chain")?;
     pck_ca_with::<C>(leaf)
@@ -170,7 +166,7 @@ pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<&'static str> {
 
 /// [`quote_ca_with`] under the audited [`DefaultConfig`].
 #[cfg(feature = "default-x509")]
-pub fn quote_ca(quote: &Quote) -> Result<&'static str> {
+pub fn quote_ca(quote: &Quote) -> Result<PckCa> {
     quote_ca_with::<DefaultConfig>(quote)
 }
 
