@@ -1,13 +1,21 @@
 //! HTTP client abstraction used by [`crate::collateral`].
 //!
-//! `dcap-qvl` ships a default [`HttpClient`] impl for [`reqwest::Client`]
-//! when `feature = "reqwest"` is enabled. The trait lets downstream users
-//! avoid taking a *direct* dependency on `reqwest` (and the resulting
-//! version / type coupling on the public API boundary): they can
-//! implement [`HttpClient`] on their own type — backed by a different
-//! HTTP stack, a host-provided fetch on wasm, etc. — and pass an
-//! instance to
+//! `dcap-qvl` ships a default [`HttpClient`] adapter for `reqwest` —
+//! [`ReqwestHttp`] — when `feature = "reqwest"` is enabled. The trait
+//! lets downstream users avoid taking a *direct* dependency on
+//! `reqwest` (and the resulting version / type coupling on the public
+//! API boundary): they can implement [`HttpClient`] on their own type —
+//! backed by a different HTTP stack, a host-provided fetch on wasm,
+//! etc. — and pass an instance to
 //! [`CollateralClient::new`](crate::collateral::CollateralClient::new).
+//!
+//! `reqwest::Client` is intentionally bridged through a newtype rather
+//! than a direct trait impl: it mirrors the only pattern available to
+//! downstream users (the orphan rule forbids them from impl'ing
+//! [`HttpClient`] on a `reqwest::Client` from a *different* `reqwest`
+//! version), and avoids method-resolution surprises between
+//! `reqwest::Client::get` (returns a builder) and
+//! [`HttpClient::get`] (returns a future).
 //!
 //! The trait is deliberately narrow — it covers only what
 //! [`crate::collateral`] needs: a `GET`, plus access to status, named
@@ -63,7 +71,7 @@ impl HttpResponse {
 ///
 /// The `async fn` here intentionally has no `Send` bound. Auto-traits
 /// propagate through monomorphization, so callers using a `Send` impl
-/// (e.g. the built-in [`reqwest::Client`] adapter) get `Send` futures
+/// (e.g. the built-in [`ReqwestHttp`] adapter) get `Send` futures
 /// automatically; callers on single-threaded runtimes don't pay the
 /// `Send` bound they don't need.
 #[allow(async_fn_in_trait)]
@@ -72,10 +80,37 @@ pub trait HttpClient {
     async fn get(&self, url: &str) -> Result<HttpResponse>;
 }
 
+/// [`HttpClient`] adapter over [`reqwest::Client`].
+///
+/// Modeled as a newtype rather than a direct `impl HttpClient for
+/// reqwest::Client` so that downstream users on a different `reqwest`
+/// major version can write the same shape on their side (the orphan
+/// rule blocks them from impl'ing [`HttpClient`] on a foreign
+/// `reqwest::Client` directly).
 #[cfg(feature = "reqwest")]
-impl HttpClient for reqwest::Client {
+#[derive(Clone, Debug)]
+pub struct ReqwestHttp(pub reqwest::Client);
+
+#[cfg(feature = "reqwest")]
+impl ReqwestHttp {
+    /// Wrap a [`reqwest::Client`] for use with
+    /// [`CollateralClient`](crate::collateral::CollateralClient).
+    pub fn new(client: reqwest::Client) -> Self {
+        Self(client)
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl From<reqwest::Client> for ReqwestHttp {
+    fn from(client: reqwest::Client) -> Self {
+        Self(client)
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl HttpClient for ReqwestHttp {
     async fn get(&self, url: &str) -> Result<HttpResponse> {
-        let resp = reqwest::Client::get(self, url).send().await?;
+        let resp = self.0.get(url).send().await?;
         let status = resp.status().as_u16();
         let headers = resp
             .headers()
