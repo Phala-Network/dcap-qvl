@@ -41,7 +41,6 @@ anyhow = { version = "1.0.102", default-features = false }
 
 reqwest = { version = "0.13.2", optional = true, default-features = false, features = [
     "rustls",
-    "blocking",
     "hickory-dns",
 ] }
 urlencoding = { version = "2", optional = true }
