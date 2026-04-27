@@ -31,7 +31,7 @@ pem = { version = "3", default-features = false }
 asn1_der = { version = "0.7", default-features = false, features = [
     "native_types",
 ] }
-der = { version = "0.7.10", default-features = false, features = [
+der = { version = "0.8.0", default-features = false, features = [
     "alloc",
 ], optional = true }
 
@@ -39,7 +39,7 @@ log = { version = "0.4.29", default-features = false }
 
 anyhow = { version = "1.0.102", default-features = false }
 
-reqwest = { version = "0.13.2", optional = true, default-features = false, features = [
+reqwest = { version = "0.13.3", optional = true, default-features = false, features = [
     "rustls",
     "hickory-dns",
 ] }
@@ -72,7 +72,7 @@ rustls-pki-types = { version = "1.14", default-features = false }
 
 # Crypto backends (choose one via features: "ring" or "rustcrypto")
 ring = { version = "0.17", default-features = false, features = ["alloc"], optional = true }
-sha2 = { version = "0.10", default-features = false, optional = true }
+sha2 = { version = "0.11", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
 signature = { version = "2.2", default-features = false, optional = true }
 
@@ -82,7 +82,7 @@ dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 [dev-dependencies]
 hex-literal = "1.1.0"
 insta = "1.47.2"
-reqwest = "0.13.2"
+reqwest = "0.13.3"
 serde_json = "1.0.149"
 tokio = { version = "1.52.1", features = ["full"] }
 
