@@ -264,11 +264,7 @@ pub fn default_http_client() -> Result<reqwest::Client> {
 /// Get PCK certificate chain for a quote.
 /// - cert_type 5: extracts from quote
 /// - cert_type 2/3: fetches from PCCS using encrypted PPID
-async fn get_pck_chain<H: HttpClient>(
-    client: &H,
-    pccs_url: &str,
-    quote: &Quote,
-) -> Result<String> {
+async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote) -> Result<String> {
     match quote.inner_cert_type() {
         PCK_ID_PCK_CERT_CHAIN => Ok(String::from_utf8_lossy(quote.inner_cert_data()).to_string()),
         PCK_ID_ENCRYPTED_PPID_2048 | PCK_ID_ENCRYPTED_PPID_3072 => {
@@ -285,8 +281,8 @@ async fn get_pck_chain<H: HttpClient>(
 /// `H` defaults to [`reqwest::Client`] (its [`HttpClient`] impl ships
 /// with the `reqwest` feature). Implement [`HttpClient`] on your own
 /// type to plug in a different HTTP stack — useful when the workspace
-/// is on a different `reqwest` major or doesn't want a `reqwest`
-/// dependency at all.
+/// is on a different `reqwest` major or wants to avoid a direct
+/// `reqwest` dependency / exposing `reqwest` types in its own API.
 ///
 /// Exposes three fetch methods:
 ///
