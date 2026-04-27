@@ -17,6 +17,7 @@ use crate::configs::DefaultConfig;
 use crate::constants::{
     PCK_ID_ENCRYPTED_PPID_2048, PCK_ID_ENCRYPTED_PPID_3072, PCK_ID_PCK_CERT_CHAIN,
 };
+use crate::http::{HttpClient, HttpResponse, ReqwestHttp};
 use crate::quote::{EncryptedPpidParams, Quote};
 use crate::QuoteCollateralV3;
 
@@ -94,12 +95,10 @@ impl PcsEndpoints {
     }
 }
 
-fn get_header(response: &reqwest::Response, name: &str) -> Result<String> {
+fn get_header(response: &HttpResponse, name: &str) -> Result<String> {
     let value = response
-        .headers()
-        .get(name)
-        .ok_or_else(|| anyhow!("Missing {name}"))?
-        .to_str()?;
+        .header(name)
+        .ok_or_else(|| anyhow!("Missing {name}"))?;
     let value = urlencoding::decode(value)?;
     Ok(value.into_owned())
 }
@@ -148,8 +147,8 @@ fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
 }
 
 /// Fetch PCK certificate from PCCS using encrypted PPID parameters.
-async fn fetch_pck_certificate(
-    client: &reqwest::Client,
+async fn fetch_pck_certificate<H: HttpClient>(
+    client: &H,
     pccs_url: &str,
     qeid: &[u8],
     params: &EncryptedPpidParams,
@@ -169,22 +168,19 @@ async fn fetch_pck_certificate(
     let url = format!(
         "{base_url}/sgx/certification/v4/pckcert?qeid={qeid}&encrypted_ppid={encrypted_ppid}&cpusvn={cpusvn}&pcesvn={pcesvn}&pceid={pceid}"
     );
-    let response = client.get(&url).send().await?;
+    let response = client.get(&url).await?;
 
-    if !response.status().is_success() {
+    if !response.is_success() {
         bail!(
-            "Failed to fetch PCK certificate from {}: {}",
+            "Failed to fetch PCK certificate from {}: HTTP {}",
             url,
-            response.status()
+            response.status
         );
     }
 
     // Check if Intel returned a certificate for a different TCB level
     // SGX-TCBm header format: cpusvn (16 bytes) + pcesvn (2 bytes, little-endian)
-    if let Some(tcbm) = response.headers().get("SGX-TCBm") {
-        let tcbm_str = tcbm
-            .to_str()
-            .context("SGX-TCBm header contains invalid characters")?;
+    if let Some(tcbm_str) = response.header("SGX-TCBm") {
         let tcbm_bytes =
             hex::decode(tcbm_str).map_err(|e| anyhow!("SGX-TCBm header is not valid hex: {e}"))?;
         let (matched_cpusvn, matched_pcesvn) = <([u8; 16], u16)>::decode(&mut &tcbm_bytes[..])
@@ -210,7 +206,8 @@ async fn fetch_pck_certificate(
     let pck_cert_chain = get_header(&response, "SGX-PCK-Certificate-Issuer-Chain")?;
 
     // The body is the leaf PCK certificate
-    let pck_cert = response.text().await?;
+    let pck_cert = String::from_utf8(response.body)
+        .context("PCK certificate response body is not valid UTF-8")?;
 
     // Combine into a full PEM chain (leaf first, then issuer chain)
     Ok(format!("{pck_cert}\n{pck_cert_chain}"))
@@ -254,10 +251,12 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
 }
 
 /// Build a `reqwest::Client` with this crate's default settings (180s
-/// timeout on non-`js` targets). Callers who need custom TLS roots,
-/// proxies, or headers should construct their own `reqwest::Client` and
-/// pass it to [`CollateralClient::new`].
-pub fn default_http_client() -> Result<reqwest::Client> {
+/// timeout on non-`js` targets). Crate-private on purpose: the
+/// `reqwest::Client` type is intentionally kept off the public API so
+/// that a future `reqwest` major bump is an internal change. Callers
+/// who need a custom HTTP stack implement [`HttpClient`] on their own
+/// type and pass it to [`CollateralClient::new`].
+pub(crate) fn default_http_client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
     let builder = builder.timeout(Duration::from_secs(180));
@@ -267,7 +266,7 @@ pub fn default_http_client() -> Result<reqwest::Client> {
 /// Get PCK certificate chain for a quote.
 /// - cert_type 5: extracts from quote
 /// - cert_type 2/3: fetches from PCCS using encrypted PPID
-async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) -> Result<String> {
+async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote) -> Result<String> {
     match quote.inner_cert_type() {
         PCK_ID_PCK_CERT_CHAIN => Ok(String::from_utf8_lossy(quote.inner_cert_data()).to_string()),
         PCK_ID_ENCRYPTED_PPID_2048 | PCK_ID_ENCRYPTED_PPID_3072 => {
@@ -279,10 +278,18 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 }
 
 /// A PCCS / PCS client parameterized by [`Config`] for pluggable X.509 /
-/// crypto backends.
+/// crypto backends, and by [`HttpClient`] for the HTTP transport.
 ///
-/// Bundles a `reqwest::Client` and a PCCS base URL, and exposes three
-/// fetch methods:
+/// `H` defaults to a crate-private `reqwest`-backed adapter (gated on
+/// `feature = "reqwest"`). `reqwest::Client` deliberately does **not**
+/// appear in any public function signature, so a future `reqwest`
+/// major bump is an internal change rather than a breaking one for
+/// downstream callers. To plug in a custom HTTP stack — different TLS
+/// config, workspace-pinned `reqwest` major, non-`reqwest` transport,
+/// wasm host fetch, … — implement [`HttpClient`] on your own type and
+/// hand it to [`new`](Self::new).
+///
+/// Exposes three fetch methods:
 ///
 /// * [`fetch`](Self::fetch) — from a raw DCAP quote.
 /// * [`fetch_for_fmspc`](Self::fetch_for_fmspc) — when the caller already
@@ -293,6 +300,8 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 ///
 /// # Examples
 ///
+/// Default path — let the crate build a `reqwest`-backed transport:
+///
 /// ```no_run
 /// use dcap_qvl::collateral::{CollateralClient, PHALA_PCCS_URL};
 /// # async fn run(quote: Vec<u8>) -> anyhow::Result<()> {
@@ -302,23 +311,30 @@ async fn get_pck_chain(client: &reqwest::Client, pccs_url: &str, quote: &Quote) 
 /// # Ok(()) }
 /// ```
 ///
-/// With a custom `reqwest::Client` (e.g. for a local PCCS with a
-/// self-signed TLS cert) and the default config:
+/// Custom transport — implement [`HttpClient`] on a type you own:
 ///
-/// ```no_run
-/// # use dcap_qvl::collateral::CollateralClient;
-/// # async fn run(http: reqwest::Client, quote: Vec<u8>) -> anyhow::Result<()> {
-/// let client: CollateralClient = CollateralClient::new(http, "https://pccs.local:8081");
-/// let collateral = client.fetch(&quote).await?;
-/// # Ok(()) }
+/// ```ignore
+/// use dcap_qvl::collateral::CollateralClient;
+/// use dcap_qvl::http::{HttpClient, HttpResponse};
+///
+/// struct MyHttp { /* your HTTP client of choice */ }
+///
+/// impl HttpClient for MyHttp {
+///     async fn get(&self, url: &str) -> anyhow::Result<HttpResponse> {
+///         /* … */
+/// #       todo!()
+///     }
+/// }
+///
+/// let client = CollateralClient::<_, MyHttp>::new(MyHttp { /* … */ }, "https://pccs.local");
 /// ```
-pub struct CollateralClient<C: Config = DefaultConfig> {
-    http: reqwest::Client,
+pub struct CollateralClient<C: Config = DefaultConfig, H: HttpClient = ReqwestHttp> {
+    http: H,
     pccs_url: String,
     _cfg: PhantomData<fn() -> C>,
 }
 
-impl<C: Config> Clone for CollateralClient<C> {
+impl<C: Config, H: HttpClient + Clone> Clone for CollateralClient<C, H> {
     fn clone(&self) -> Self {
         Self {
             http: self.http.clone(),
@@ -328,14 +344,15 @@ impl<C: Config> Clone for CollateralClient<C> {
     }
 }
 
-impl<C: Config> CollateralClient<C> {
-    /// Build a client with a caller-provided `reqwest::Client`.
+impl<C: Config, H: HttpClient> CollateralClient<C, H> {
+    /// Build a client with a caller-provided HTTP transport.
     ///
-    /// Use this when you need custom TLS trust roots, timeouts, proxies,
-    /// or any other [`reqwest::ClientBuilder`] options. For the common
+    /// Any type implementing [`HttpClient`] is accepted. For the common
     /// "just give me something that works" path see
-    /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http).
-    pub fn new(http: reqwest::Client, pccs_url: impl Into<String>) -> Self {
+    /// [`with_default_http`](CollateralClient::<DefaultConfig>::with_default_http);
+    /// the default-path `reqwest::Client` is intentionally not exposed
+    /// on the public API.
+    pub fn new(http: H, pccs_url: impl Into<String>) -> Self {
         Self {
             http,
             pccs_url: pccs_url.into(),
@@ -344,7 +361,7 @@ impl<C: Config> CollateralClient<C> {
     }
 
     /// Rebind the `Config` type without rebuilding the HTTP client / URL.
-    pub fn with_config<D: Config>(self) -> CollateralClient<D> {
+    pub fn with_config<D: Config>(self) -> CollateralClient<D, H> {
         CollateralClient {
             http: self.http,
             pccs_url: self.pccs_url,
@@ -399,10 +416,10 @@ impl<C: Config> CollateralClient<C> {
         // Send a GET and fail with a useful message on non-2xx, so the
         // header / body readers below don't surface misleading errors
         // like "missing issuer-chain header" on an HTTP 500.
-        async fn checked_get(client: &reqwest::Client, url: &str) -> Result<reqwest::Response> {
-            let response = client.get(url).send().await?;
-            if !response.status().is_success() {
-                bail!("Failed to fetch {url}: {}", response.status());
+        async fn checked_get<H: HttpClient>(client: &H, url: &str) -> Result<HttpResponse> {
+            let response = client.get(url).await?;
+            if !response.is_success() {
+                bail!("Failed to fetch {url}: HTTP {}", response.status);
             }
             Ok(response)
         }
@@ -412,7 +429,7 @@ impl<C: Config> CollateralClient<C> {
         {
             let response = checked_get(client, &endpoints.url_pckcrl()).await?;
             pck_crl_issuer_chain = get_header(&response, "SGX-PCK-CRL-Issuer-Chain")?;
-            pck_crl = response.bytes().await?.to_vec();
+            pck_crl = response.body;
         };
 
         let tcb_info_issuer_chain;
@@ -421,18 +438,20 @@ impl<C: Config> CollateralClient<C> {
             let response = checked_get(client, &endpoints.url_tcb()).await?;
             tcb_info_issuer_chain = get_header(&response, "SGX-TCB-Info-Issuer-Chain")
                 .or(get_header(&response, "TCB-Info-Issuer-Chain"))?;
-            raw_tcb_info = response.text().await?;
+            raw_tcb_info = String::from_utf8(response.body)
+                .context("TCB Info response body is not valid UTF-8")?;
         };
         let qe_identity_issuer_chain;
         let raw_qe_identity;
         {
             let response = checked_get(client, &endpoints.url_qe_identity()).await?;
             qe_identity_issuer_chain = get_header(&response, "SGX-Enclave-Identity-Issuer-Chain")?;
-            raw_qe_identity = response.text().await?;
+            raw_qe_identity = String::from_utf8(response.body)
+                .context("QE Identity response body is not valid UTF-8")?;
         };
 
-        async fn http_get(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
-            Ok(checked_get(client, url).await?.bytes().await?.to_vec())
+        async fn http_get<H: HttpClient>(client: &H, url: &str) -> Result<Vec<u8>> {
+            Ok(checked_get(client, url).await?.body)
         }
 
         // First try to get root CA CRL directly from the PCCS endpoint
@@ -508,12 +527,19 @@ impl<C: Config> CollateralClient<C> {
     }
 }
 
-impl CollateralClient<DefaultConfig> {
-    /// Convenience constructor: build a default `reqwest::Client`
-    /// (180s timeout on non-`js` targets) and pair it with the given
-    /// PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert` backend).
+impl CollateralClient<DefaultConfig, ReqwestHttp> {
+    /// Convenience constructor: build a default `reqwest`-backed
+    /// transport (180s timeout on non-`js` targets) and pair it with
+    /// the given PCCS URL. Uses [`DefaultConfig`] (audited `x509-cert`
+    /// backend). The underlying `reqwest::Client` is intentionally not
+    /// exposed; callers who need a custom HTTP stack implement
+    /// [`HttpClient`] on their own type and use
+    /// [`CollateralClient::new`].
     pub fn with_default_http(pccs_url: impl Into<String>) -> Result<Self> {
-        Ok(Self::new(default_http_client()?, pccs_url))
+        Ok(Self::new(
+            ReqwestHttp::new(default_http_client()?),
+            pccs_url,
+        ))
     }
 
     /// Zero-arg convenience constructor: default HTTP client + PCCS URL
