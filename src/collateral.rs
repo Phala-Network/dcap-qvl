@@ -235,17 +235,12 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
     let fmspc = crate::utils::get_fmspc(&extension)?;
     let fmspc_hex = hex::encode_upper(fmspc);
 
-    // Extract CA type from issuer (reuses parsed cert above)
-    let issuer = parsed
-        .issuer_dn()
-        .context("Failed to extract certificate issuer")?;
-    let ca = if issuer.contains(crate::constants::PROCESSOR_ISSUER) {
-        crate::constants::PROCESSOR_ISSUER_ID
-    } else if issuer.contains(crate::constants::PLATFORM_ISSUER) {
-        crate::constants::PLATFORM_ISSUER_ID
-    } else {
-        crate::constants::PROCESSOR_ISSUER_ID
-    };
+    // Extract CA type from issuer (reuses parsed cert above). Legacy
+    // fallback: an unrecognised issuer is treated as Processor.
+    let ca = parsed
+        .pck_ca()
+        .unwrap_or(crate::config::PckCa::Processor)
+        .as_id_str();
 
     Ok((fmspc_hex, ca))
 }

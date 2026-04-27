@@ -46,7 +46,6 @@
 //! that owns or borrows the parsed data, so multiple field accesses share a
 //! single parse.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use anyhow::Result;
 
@@ -72,21 +71,46 @@ pub trait X509Codec {
     fn from_der<'a>(cert_der: &'a [u8]) -> Result<Self::Parsed<'a>>;
 }
 
+/// Intel PCK certificate authority that issued a leaf cert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PckCa {
+    Processor,
+    Platform,
+}
+
+impl PckCa {
+    /// Lowercase identifier used in PCS URLs and FFI bindings
+    /// (`"processor"` / `"platform"`).
+    pub fn as_id_str(&self) -> &'static str {
+        match self {
+            PckCa::Processor => crate::constants::PROCESSOR_ISSUER_ID,
+            PckCa::Platform => crate::constants::PLATFORM_ISSUER_ID,
+        }
+    }
+}
+
 /// Read-only accessors over a parsed X.509 certificate.
 pub trait ParsedCert {
-    /// Returns the issuer Distinguished Name as a human-readable string in
-    /// RFC 4514 form (e.g. `"CN=Foo,O=Bar"`).
+    /// Classify the issuer of an Intel PCK leaf certificate.
     ///
-    /// The string is consumed by `intel::quote_ca` for substring matching, so
-    /// a stable, conventional representation is required.
-    fn issuer_dn(&self) -> Result<String>;
+    /// Returns `None` when the issuer matches neither CA, or when the
+    /// backend cannot interpret the issuer DN. Callers decide how to
+    /// handle `None`.
+    fn pck_ca(&self) -> Option<PckCa>;
 
     /// Returns the OCTET STRING contents of the unique extension whose
     /// `extnID` equals `oid`, where `oid` is the DER-encoded OID body
-    /// (no tag/length).
+    /// (no tag/length). Callers SHOULD construct `oid` from a
+    /// [`const_oid::ObjectIdentifier`] and pass `.as_bytes()`.
     ///
     /// * `Ok(Some(value))` — exactly one matching extension was found.
-    /// * `Ok(None)` — no matching extension.
+    /// * `Ok(None)` — no matching extension, *including* when `oid` is not a
+    ///   well-formed OID body: a malformed needle cannot equal any cert's
+    ///   `extnID` (which was DER-validated during [`X509Codec::from_der`]),
+    ///   so "not found" is vacuously correct. Implementations are not
+    ///   required to reject malformed `oid` inputs — runtime validation
+    ///   would be pure overhead for callers that supply
+    ///   `const_oid`-constructed OIDs.
     /// * `Err(_)` — the extension was found more than once, or the certificate
     ///   is malformed.
     fn extension(&self, oid: &[u8]) -> Result<Option<Vec<u8>>>;

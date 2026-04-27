@@ -48,9 +48,9 @@ pub fn assert_config_conforms<C: Config>() {
             <DefaultConfig as Config>::X509::from_der(&cert_der).expect("default from_der");
 
         assert_eq!(
-            custom.issuer_dn().expect("custom issuer_dn"),
-            default.issuer_dn().expect("default issuer_dn"),
-            "issuer_dn output mismatch"
+            custom.pck_ca(),
+            default.pck_ca(),
+            "pck_ca classification mismatch on PCK leaf",
         );
 
         let custom_ext = custom.extension(SGX_EXTENSION_OID).expect("custom ext");
