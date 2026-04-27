@@ -46,7 +46,6 @@
 //! that owns or borrows the parsed data, so multiple field accesses share a
 //! single parse.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use anyhow::Result;
 
@@ -74,19 +73,33 @@ pub trait X509Codec {
 
 /// Read-only accessors over a parsed X.509 certificate.
 pub trait ParsedCert {
-    /// Returns the issuer Distinguished Name as a human-readable string in
-    /// RFC 4514 form (e.g. `"CN=Foo,O=Bar"`).
+    /// Returns `true` if any RDN component of the issuer DN whose tag is
+    /// `PrintableString`, `UTF8String`, `IA5String`, or `TeletexString`
+    /// contains `needle` as a byte substring.
     ///
-    /// The string is consumed by `intel::quote_ca` for substring matching, so
-    /// a stable, conventional representation is required.
-    fn issuer_dn(&self) -> Result<String>;
+    /// Wide-char `BMPString` / `UniversalString` and non-string ATVs are
+    /// skipped — an ASCII needle cannot meaningfully match those encodings,
+    /// which is also what the former `issuer_dn().to_string().contains(...)`
+    /// produced (`x509-cert`'s `Display` hex-encodes non-byte-string ATVs).
+    ///
+    /// Used by [`crate::intel::pck_ca_with`] to classify an Intel PCK leaf.
+    /// Intel PCK issuer CNs are `UTF8String`, so the skipped tags are not
+    /// reachable on the production path.
+    fn issuer_contains(&self, needle: &[u8]) -> bool;
 
     /// Returns the OCTET STRING contents of the unique extension whose
     /// `extnID` equals `oid`, where `oid` is the DER-encoded OID body
-    /// (no tag/length).
+    /// (no tag/length). Callers SHOULD construct `oid` from a
+    /// [`const_oid::ObjectIdentifier`] and pass `.as_bytes()`.
     ///
     /// * `Ok(Some(value))` — exactly one matching extension was found.
-    /// * `Ok(None)` — no matching extension.
+    /// * `Ok(None)` — no matching extension, *including* when `oid` is not a
+    ///   well-formed OID body: a malformed needle cannot equal any cert's
+    ///   `extnID` (which was DER-validated during [`X509Codec::from_der`]),
+    ///   so "not found" is vacuously correct. Implementations are not
+    ///   required to reject malformed `oid` inputs — runtime validation
+    ///   would be pure overhead for callers that supply
+    ///   `const_oid`-constructed OIDs.
     /// * `Err(_)` — the extension was found more than once, or the certificate
     ///   is malformed.
     fn extension(&self, oid: &[u8]) -> Result<Option<Vec<u8>>>;
