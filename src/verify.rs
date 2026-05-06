@@ -96,7 +96,10 @@ pub struct QuoteVerifier {
 impl QuoteVerifier {
     /// Create a new verifier with a custom root certificate.
     pub fn new(root_ca_der: Vec<u8>) -> Self {
-        Self { root_ca_der, allow_service_td: false }
+        Self {
+            root_ca_der,
+            allow_service_td: false,
+        }
     }
 
     /// Create a new verifier using Intel's production root certificate.
