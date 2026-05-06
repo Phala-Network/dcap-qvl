@@ -570,8 +570,15 @@ fn match_platform_tcb(
         }
 
         let sgx_components: Vec<u8> = tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
-        if sgx_components.is_empty() {
-            bail!("No SGX components in the TCB info");
+        // Reject mismatched component count so `.zip()` below cannot
+        // silently truncate a comparison and accept a platform whose
+        // unchecked SVN bytes are below the required level.
+        if sgx_components.len() != cpu_svn.len() {
+            bail!(
+                "SGX component count mismatch: expected {}, got {}",
+                cpu_svn.len(),
+                sgx_components.len()
+            );
         }
 
         // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
@@ -587,8 +594,12 @@ fn match_platform_tcb(
                 .context("Failed to get TD10 report")?;
             let tdx_components: Vec<u8> =
                 tcb_level.tcb.tdx_components.iter().map(|c| c.svn).collect();
-            if tdx_components.is_empty() {
-                bail!("No TDX components in the TCB info");
+            if tdx_components.len() != td_report.tee_tcb_svn.len() {
+                bail!(
+                    "TDX component count mismatch: expected {}, got {}",
+                    td_report.tee_tcb_svn.len(),
+                    tdx_components.len()
+                );
             }
             // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i]
             if td_report

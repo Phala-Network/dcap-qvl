@@ -175,6 +175,58 @@ mod tests {
     }
 
     #[test]
+    fn truncated_sgx_components_are_rejected() {
+        let raw_quote = include_bytes!("../sample/tdx_quote");
+        let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
+        let quote_collateral: QuoteCollateralV3 =
+            serde_json::from_slice(raw_quote_collateral).unwrap();
+        let now = now_from_collateral(&quote_collateral);
+
+        let err = dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            |mut tcb_info| {
+                for level in &mut tcb_info.tcb_levels {
+                    level.tcb.sgx_components.truncate(8);
+                }
+                tcb_info
+            },
+        )
+        .expect_err("verification must fail when sgx_components count mismatches cpu_svn");
+        assert!(
+            err.to_string().contains("SGX component count mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn truncated_tdx_components_are_rejected() {
+        let raw_quote = include_bytes!("../sample/tdx_quote");
+        let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
+        let quote_collateral: QuoteCollateralV3 =
+            serde_json::from_slice(raw_quote_collateral).unwrap();
+        let now = now_from_collateral(&quote_collateral);
+
+        let err = dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            |mut tcb_info| {
+                for level in &mut tcb_info.tcb_levels {
+                    level.tcb.tdx_components.truncate(8);
+                }
+                tcb_info
+            },
+        )
+        .expect_err("verification must fail when tdx_components count mismatches tee_tcb_svn");
+        assert!(
+            err.to_string().contains("TDX component count mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn outdated_fixture_with_override_matches_expected_status() {
         let raw_quote = include_bytes!("../sample/tdx_quote_outdated");
         let raw_quote_collateral = include_bytes!("../sample/tdx_quote_outdated_collateral.json");
