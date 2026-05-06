@@ -174,8 +174,7 @@ mod tests {
         assert_eq!(parity_overridden.status, "OutOfDate");
     }
 
-    #[test]
-    fn truncated_sgx_components_are_rejected() {
+    fn assert_sgx_count_mismatch_rejected(mutate: impl Fn(&mut Vec<TcbComponents>) + Copy) {
         let raw_quote = include_bytes!("../sample/tdx_quote");
         let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
         let quote_collateral: QuoteCollateralV3 =
@@ -188,7 +187,7 @@ mod tests {
             now,
             |mut tcb_info| {
                 for level in &mut tcb_info.tcb_levels {
-                    level.tcb.sgx_components.truncate(8);
+                    mutate(&mut level.tcb.sgx_components);
                 }
                 tcb_info
             },
@@ -200,8 +199,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn truncated_tdx_components_are_rejected() {
+    fn assert_tdx_count_mismatch_rejected(mutate: impl Fn(&mut Vec<TcbComponents>) + Copy) {
         let raw_quote = include_bytes!("../sample/tdx_quote");
         let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
         let quote_collateral: QuoteCollateralV3 =
@@ -214,7 +212,7 @@ mod tests {
             now,
             |mut tcb_info| {
                 for level in &mut tcb_info.tcb_levels {
-                    level.tcb.tdx_components.truncate(8);
+                    mutate(&mut level.tcb.tdx_components);
                 }
                 tcb_info
             },
@@ -224,6 +222,26 @@ mod tests {
             err.to_string().contains("TDX component count mismatch"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn truncated_sgx_components_are_rejected() {
+        assert_sgx_count_mismatch_rejected(|c| c.truncate(8));
+    }
+
+    #[test]
+    fn overlong_sgx_components_are_rejected() {
+        assert_sgx_count_mismatch_rejected(|c| c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4)));
+    }
+
+    #[test]
+    fn truncated_tdx_components_are_rejected() {
+        assert_tdx_count_mismatch_rejected(|c| c.truncate(8));
+    }
+
+    #[test]
+    fn overlong_tdx_components_are_rejected() {
+        assert_tdx_count_mismatch_rejected(|c| c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4)));
     }
 
     #[test]
