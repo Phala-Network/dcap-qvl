@@ -231,7 +231,9 @@ mod tests {
 
     #[test]
     fn overlong_sgx_components_are_rejected() {
-        assert_sgx_count_mismatch_rejected(|c| c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4)));
+        assert_sgx_count_mismatch_rejected(|c| {
+            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+        });
     }
 
     #[test]
@@ -241,7 +243,9 @@ mod tests {
 
     #[test]
     fn overlong_tdx_components_are_rejected() {
-        assert_tdx_count_mismatch_rejected(|c| c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4)));
+        assert_tdx_count_mismatch_rejected(|c| {
+            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+        });
     }
 
     #[test]
