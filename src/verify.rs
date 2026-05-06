@@ -90,17 +90,28 @@ pub struct VerifiedReport {
 /// methods use [`DefaultConfig`].
 pub struct QuoteVerifier {
     root_ca_der: Vec<u8>,
+    allow_service_td: bool,
 }
 
 impl QuoteVerifier {
     /// Create a new verifier with a custom root certificate.
     pub fn new(root_ca_der: Vec<u8>) -> Self {
-        Self { root_ca_der }
+        Self {
+            root_ca_der,
+            allow_service_td: false,
+        }
     }
 
     /// Create a new verifier using Intel's production root certificate.
     pub fn new_prod() -> Self {
         Self::new(TRUSTED_ROOT_CA_DER.to_vec())
+    }
+
+    /// Allow non-zero `mr_service_td` in TDX 1.5 quotes (opt-in).
+    /// Default is `false` — existing callers are unaffected.
+    pub fn allow_service_td(mut self, allow: bool) -> Self {
+        self.allow_service_td = allow;
+        self
     }
 
     /// Verify a quote with the configured root certificate, using
@@ -128,6 +139,7 @@ impl QuoteVerifier {
             collateral,
             now_secs,
             &self.root_ca_der,
+            self.allow_service_td,
             #[cfg(feature = "danger-allow-tcb-override")]
             None::<fn(_) -> _>,
         )
@@ -166,6 +178,7 @@ impl QuoteVerifier {
             collateral,
             now_secs,
             &self.root_ca_der,
+            self.allow_service_td,
             Some(override_tcb_info),
         )
     }
@@ -798,6 +811,7 @@ fn verify_impl<C: Config>(
     collateral: &QuoteCollateralV3,
     now_secs: u64,
     root_ca_der: &[u8],
+    allow_service_td: bool,
     #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
         impl FnOnce(TcbInfo) -> TcbInfo,
     >,
@@ -913,7 +927,7 @@ fn verify_impl<C: Config>(
     }
 
     // Validate report attributes (debug mode check, etc.)
-    validate_attrs(&quote.report)?;
+    validate_attrs(&quote.report, allow_service_td)?;
 
     Ok(VerifiedReport {
         status: final_status.status.to_string(),
@@ -933,7 +947,7 @@ fn validate_sgx_attrs(report: &EnclaveReport) -> Result<()> {
     Ok(())
 }
 
-fn validate_attrs(report: &Report) -> Result<()> {
+fn validate_attrs(report: &Report, allow_service_td: bool) -> Result<()> {
     fn validate_td10(report: &TDReport10) -> Result<()> {
         let td_attrs =
             TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
@@ -951,14 +965,14 @@ fn validate_attrs(report: &Report) -> Result<()> {
         }
         Ok(())
     }
-    fn validate_td15(report: &TDReport15) -> Result<()> {
-        if report.mr_service_td != [0u8; 48] {
+    fn validate_td15(report: &TDReport15, allow_service_td: bool) -> Result<()> {
+        if !allow_service_td && report.mr_service_td != [0u8; 48] {
             bail!("Invalid MR service TD");
         }
         validate_td10(&report.base)
     }
     match &report {
-        Report::TD15(report) => validate_td15(report),
+        Report::TD15(report) => validate_td15(report, allow_service_td),
         Report::TD10(report) => validate_td10(report),
         Report::SgxEnclave(report) => validate_sgx_attrs(report),
     }
