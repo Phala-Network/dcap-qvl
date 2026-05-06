@@ -174,6 +174,80 @@ mod tests {
         assert_eq!(parity_overridden.status, "OutOfDate");
     }
 
+    fn assert_sgx_count_mismatch_rejected(mutate: impl Fn(&mut Vec<TcbComponents>) + Copy) {
+        let raw_quote = include_bytes!("../sample/tdx_quote");
+        let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
+        let quote_collateral: QuoteCollateralV3 =
+            serde_json::from_slice(raw_quote_collateral).unwrap();
+        let now = now_from_collateral(&quote_collateral);
+
+        let err = dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            |mut tcb_info| {
+                for level in &mut tcb_info.tcb_levels {
+                    mutate(&mut level.tcb.sgx_components);
+                }
+                tcb_info
+            },
+        )
+        .expect_err("verification must fail when sgx_components count mismatches cpu_svn");
+        assert!(
+            err.to_string().contains("SGX component count mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn assert_tdx_count_mismatch_rejected(mutate: impl Fn(&mut Vec<TcbComponents>) + Copy) {
+        let raw_quote = include_bytes!("../sample/tdx_quote");
+        let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
+        let quote_collateral: QuoteCollateralV3 =
+            serde_json::from_slice(raw_quote_collateral).unwrap();
+        let now = now_from_collateral(&quote_collateral);
+
+        let err = dangerous_verify_with_tcb_override(
+            raw_quote,
+            &quote_collateral,
+            now,
+            |mut tcb_info| {
+                for level in &mut tcb_info.tcb_levels {
+                    mutate(&mut level.tcb.tdx_components);
+                }
+                tcb_info
+            },
+        )
+        .expect_err("verification must fail when tdx_components count mismatches tee_tcb_svn");
+        assert!(
+            err.to_string().contains("TDX component count mismatch"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn truncated_sgx_components_are_rejected() {
+        assert_sgx_count_mismatch_rejected(|c| c.truncate(8));
+    }
+
+    #[test]
+    fn overlong_sgx_components_are_rejected() {
+        assert_sgx_count_mismatch_rejected(|c| {
+            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+        });
+    }
+
+    #[test]
+    fn truncated_tdx_components_are_rejected() {
+        assert_tdx_count_mismatch_rejected(|c| c.truncate(8));
+    }
+
+    #[test]
+    fn overlong_tdx_components_are_rejected() {
+        assert_tdx_count_mismatch_rejected(|c| {
+            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+        });
+    }
+
     #[test]
     fn outdated_fixture_with_override_matches_expected_status() {
         let raw_quote = include_bytes!("../sample/tdx_quote_outdated");

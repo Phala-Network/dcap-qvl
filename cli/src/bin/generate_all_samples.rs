@@ -738,7 +738,7 @@ fn main() -> Result<()> {
         name: "tdx_missing_components".to_string(),
         description: "TDX quote with missing tdxtcbcomponents in TCB info".to_string(),
         should_succeed: false,
-        expected_error: Some("No TDX components in the TCB info".to_string()),
+        expected_error: Some("TDX component count mismatch".to_string()),
         quote_generator: Box::new(generate_tdx_quote_v4),
         collateral_modifier: Some(Box::new(|collateral| {
             // TDX TCB info without tdxtcbcomponents
