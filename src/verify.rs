@@ -91,6 +91,7 @@ pub struct VerifiedReport {
 pub struct QuoteVerifier {
     root_ca_der: Vec<u8>,
     allow_service_td: bool,
+    allow_debug: bool,
 }
 
 impl QuoteVerifier {
@@ -99,6 +100,7 @@ impl QuoteVerifier {
         Self {
             root_ca_der,
             allow_service_td: false,
+            allow_debug: false,
         }
     }
 
@@ -111,6 +113,12 @@ impl QuoteVerifier {
     /// Default is `false` — existing callers are unaffected.
     pub fn allow_service_td(mut self, allow: bool) -> Self {
         self.allow_service_td = allow;
+        self
+    }
+
+    /// Allow debug-mode enclaves (SGX debug bit, TDX `TUD.DEBUG`). Default `false`.
+    pub fn allow_debug(mut self, allow: bool) -> Self {
+        self.allow_debug = allow;
         self
     }
 
@@ -140,6 +148,7 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             self.allow_service_td,
+            self.allow_debug,
             #[cfg(feature = "danger-allow-tcb-override")]
             None::<fn(_) -> _>,
         )
@@ -179,6 +188,7 @@ impl QuoteVerifier {
             now_secs,
             &self.root_ca_der,
             self.allow_service_td,
+            self.allow_debug,
             Some(override_tcb_info),
         )
     }
@@ -812,6 +822,7 @@ fn verify_impl<C: Config>(
     now_secs: u64,
     root_ca_der: &[u8],
     allow_service_td: bool,
+    allow_debug: bool,
     #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
         impl FnOnce(TcbInfo) -> TcbInfo,
     >,
@@ -927,7 +938,7 @@ fn verify_impl<C: Config>(
     }
 
     // Validate report attributes (debug mode check, etc.)
-    validate_attrs(&quote.report, allow_service_td)?;
+    validate_attrs(&quote.report, allow_service_td, allow_debug)?;
 
     Ok(VerifiedReport {
         status: final_status.status.to_string(),
@@ -939,19 +950,19 @@ fn verify_impl<C: Config>(
     })
 }
 
-fn validate_sgx_attrs(report: &EnclaveReport) -> Result<()> {
+fn validate_sgx_attrs(report: &EnclaveReport, allow_debug: bool) -> Result<()> {
     let is_debug = report.attributes[0] & 0x02 != 0;
-    if is_debug {
+    if is_debug && !allow_debug {
         bail!("Debug mode is enabled");
     }
     Ok(())
 }
 
-fn validate_attrs(report: &Report, allow_service_td: bool) -> Result<()> {
-    fn validate_td10(report: &TDReport10) -> Result<()> {
+fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) -> Result<()> {
+    fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
         let td_attrs =
             TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
-        if td_attrs.tud != 0 {
+        if td_attrs.tud != 0 && !allow_debug {
             bail!("Debug mode is enabled");
         }
         if td_attrs.sec.reserved_lower != 0
@@ -965,16 +976,16 @@ fn validate_attrs(report: &Report, allow_service_td: bool) -> Result<()> {
         }
         Ok(())
     }
-    fn validate_td15(report: &TDReport15, allow_service_td: bool) -> Result<()> {
+    fn validate_td15(report: &TDReport15, allow_service_td: bool, allow_debug: bool) -> Result<()> {
         if !allow_service_td && report.mr_service_td != [0u8; 48] {
             bail!("Invalid MR service TD");
         }
-        validate_td10(&report.base)
+        validate_td10(&report.base, allow_debug)
     }
     match &report {
-        Report::TD15(report) => validate_td15(report, allow_service_td),
-        Report::TD10(report) => validate_td10(report),
-        Report::SgxEnclave(report) => validate_sgx_attrs(report),
+        Report::TD15(report) => validate_td15(report, allow_service_td, allow_debug),
+        Report::TD10(report) => validate_td10(report, allow_debug),
+        Report::SgxEnclave(report) => validate_sgx_attrs(report, allow_debug),
     }
 }
 
@@ -1142,7 +1153,8 @@ fn verify_qe_identity_policy(
         );
     }
 
-    validate_sgx_attrs(qe_report).context("QE report validation failed")?;
+    // QE must always be production-mode; `allow_debug` only governs the workload.
+    validate_sgx_attrs(qe_report, false).context("QE report validation failed")?;
 
     // Verify ISVPRODID
     if qe_report.isv_prod_id != qe_identity.isvprodid {
