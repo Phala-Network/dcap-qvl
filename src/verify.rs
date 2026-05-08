@@ -962,7 +962,11 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
         let td_attrs =
             TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
-        if td_attrs.tud != 0 && !allow_debug {
+        // TUD bit 0 is DEBUG; bits 7:1 are reserved and must always be zero.
+        if td_attrs.tud & !0x01 != 0 {
+            bail!("Reserved bits in TD attributes are set");
+        }
+        if td_attrs.tud & 0x01 != 0 && !allow_debug {
             bail!("Debug mode is enabled");
         }
         if td_attrs.sec.reserved_lower != 0
@@ -1478,5 +1482,83 @@ mod tests {
         // Should match level with isvsvn=6 (7 >= 6)
         assert_eq!(status.status, OutOfDate);
         assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
+    }
+
+    fn make_sgx_report(attributes_byte0: u8) -> EnclaveReport {
+        let mut report = make_test_qe_report();
+        report.attributes[0] = attributes_byte0;
+        report
+    }
+
+    fn make_td10_report(td_attributes: [u8; 8]) -> TDReport10 {
+        TDReport10 {
+            tee_tcb_svn: [0u8; 16],
+            mr_seam: [0u8; 48],
+            mr_signer_seam: [0u8; 48],
+            seam_attributes: [0u8; 8],
+            td_attributes,
+            xfam: [0u8; 8],
+            mr_td: [0u8; 48],
+            mr_config_id: [0u8; 48],
+            mr_owner: [0u8; 48],
+            mr_owner_config: [0u8; 48],
+            rt_mr0: [0u8; 48],
+            rt_mr1: [0u8; 48],
+            rt_mr2: [0u8; 48],
+            rt_mr3: [0u8; 48],
+            report_data: [0u8; 64],
+        }
+    }
+
+    #[test]
+    fn test_sgx_debug_rejected_by_default() {
+        // SGX attributes byte 0 bit 1 (0x02) is the DEBUG flag.
+        let report = make_sgx_report(0x02);
+        let err = validate_sgx_attrs(&report, false).unwrap_err();
+        assert!(err.to_string().contains("Debug mode is enabled"));
+    }
+
+    #[test]
+    fn test_sgx_debug_allowed_when_opted_in() {
+        let report = make_sgx_report(0x02);
+        validate_sgx_attrs(&report, true).unwrap();
+    }
+
+    #[test]
+    fn test_sgx_non_debug_passes_regardless() {
+        let report = make_sgx_report(0x00);
+        validate_sgx_attrs(&report, false).unwrap();
+        validate_sgx_attrs(&report, true).unwrap();
+    }
+
+    #[test]
+    fn test_td10_debug_rejected_by_default() {
+        // TUD bit 0 = DEBUG, byte 3 bit 4 (0x10) = SEPT_VE_DISABLE (required).
+        let report = Report::TD10(make_td10_report([0x01, 0, 0, 0x10, 0, 0, 0, 0]));
+        let err = validate_attrs(&report, false, false).unwrap_err();
+        assert!(err.to_string().contains("Debug mode is enabled"));
+    }
+
+    #[test]
+    fn test_td10_debug_allowed_when_opted_in() {
+        let report = Report::TD10(make_td10_report([0x01, 0, 0, 0x10, 0, 0, 0, 0]));
+        validate_attrs(&report, false, true).unwrap();
+    }
+
+    #[test]
+    fn test_td10_reserved_tud_bits_always_rejected() {
+        // Bit 1 of TUD is reserved and must remain zero even with allow_debug.
+        let report = Report::TD10(make_td10_report([0x02, 0, 0, 0x10, 0, 0, 0, 0]));
+        let err_default = validate_attrs(&report, false, false).unwrap_err();
+        assert!(err_default.to_string().contains("Reserved bits"));
+        let err_allowed = validate_attrs(&report, false, true).unwrap_err();
+        assert!(err_allowed.to_string().contains("Reserved bits"));
+    }
+
+    #[test]
+    fn test_td10_clean_attrs_pass() {
+        let report = Report::TD10(make_td10_report([0x00, 0, 0, 0x10, 0, 0, 0, 0]));
+        validate_attrs(&report, false, false).unwrap();
+        validate_attrs(&report, false, true).unwrap();
     }
 }
