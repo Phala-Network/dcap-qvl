@@ -281,6 +281,11 @@ export class QuoteVerifier {
   allowDebug(allow: boolean): QuoteVerifier;
 
   /**
+   * Allow non-zero `mr_service_td` in TDX 1.5 quotes (opt-in). Default false.
+   */
+  allowServiceTd(allow: boolean): QuoteVerifier;
+
+  /**
    * Verify a quote
    * @param rawQuote - Raw quote bytes
    * @param collateral - Quote collateral

@@ -33,6 +33,7 @@ class QuoteVerifier {
     constructor(rootCaDer) {
         this.rootCaDer = rootCaDer || TRUSTED_ROOT_CA_DER;
         this.allowDebugFlag = false;
+        this.allowServiceTdFlag = false;
     }
 
     static newProd() {
@@ -49,12 +50,25 @@ class QuoteVerifier {
         return this;
     }
 
+    // Allow non-zero mr_service_td in TDX 1.5 quotes (opt-in). Default false.
+    allowServiceTd(allow) {
+        this.allowServiceTdFlag = !!allow;
+        return this;
+    }
+
     verify(rawQuote, collateral, nowSecs) {
-        return verifyImpl(rawQuote, collateral, nowSecs, this.rootCaDer, this.allowDebugFlag);
+        return verifyImpl(
+            rawQuote,
+            collateral,
+            nowSecs,
+            this.rootCaDer,
+            this.allowDebugFlag,
+            this.allowServiceTdFlag,
+        );
     }
 }
 
-function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false) {
+function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false, allowServiceTd = false) {
     const now = new Date(nowSecs * 1000);
 
     // Parse quote
@@ -338,7 +352,7 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
     }
 
     // Validate attributes
-    validateAttrs(quote.report, allowDebug);
+    validateAttrs(quote.report, allowDebug, allowServiceTd);
 
     return new VerifiedReport(finalStatus.status, finalStatus.advisoryIds, quote.report, ppid);
 }
@@ -465,13 +479,13 @@ function compareSvnArrays(actual, required) {
 }
 
 // Validate report attributes
-function validateAttrs(report, allowDebug = false) {
+function validateAttrs(report, allowDebug = false, allowServiceTd = false) {
     if (report.type === 'sgx') {
         validateSgx(report.data, allowDebug);
     } else if (report.type === 'td10') {
         validateTd10(report.data, allowDebug);
     } else if (report.type === 'td15') {
-        validateTd15(report.data, allowDebug);
+        validateTd15(report.data, allowDebug, allowServiceTd);
     }
 }
 
@@ -503,11 +517,12 @@ function validateTd10(report, allowDebug = false) {
     }
 }
 
-function validateTd15(report, allowDebug = false) {
-    // Check mr_service_td is all zeros
-    const allZero = report.mrServiceTd.every(b => b === 0);
-    if (!allZero) {
-        throw new Error('Invalid mr service td');
+function validateTd15(report, allowDebug = false, allowServiceTd = false) {
+    if (!allowServiceTd) {
+        const allZero = report.mrServiceTd.every(b => b === 0);
+        if (!allZero) {
+            throw new Error('Invalid mr service td');
+        }
     }
 
     validateTd10(report.base, allowDebug);
