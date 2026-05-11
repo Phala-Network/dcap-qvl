@@ -32,6 +32,7 @@ class VerifiedReport {
 class QuoteVerifier {
     constructor(rootCaDer) {
         this.rootCaDer = rootCaDer || TRUSTED_ROOT_CA_DER;
+        this.allowDebugFlag = false;
     }
 
     static newProd() {
@@ -42,12 +43,18 @@ class QuoteVerifier {
         return new QuoteVerifier(rootCaDer);
     }
 
+    // Allow debug-mode enclaves (SGX debug bit, TDX TUD.DEBUG). Default false.
+    allowDebug(allow) {
+        this.allowDebugFlag = !!allow;
+        return this;
+    }
+
     verify(rawQuote, collateral, nowSecs) {
-        return verifyImpl(rawQuote, collateral, nowSecs, this.rootCaDer);
+        return verifyImpl(rawQuote, collateral, nowSecs, this.rootCaDer, this.allowDebugFlag);
     }
 }
 
-function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
+function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false) {
     const now = new Date(nowSecs * 1000);
 
     // Parse quote
@@ -331,7 +338,7 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer) {
     }
 
     // Validate attributes
-    validateAttrs(quote.report);
+    validateAttrs(quote.report, allowDebug);
 
     return new VerifiedReport(finalStatus.status, finalStatus.advisoryIds, quote.report, ppid);
 }
@@ -391,8 +398,8 @@ function verifyQeIdentityPolicy(qeReport, qeIdentity) {
         throw new Error(`QE ISVPRODID mismatch: expected ${qeIdentity.isvprodid}, got ${qeReport.isvProdId}`);
     }
 
-    // Validate QE report attributes (debug mode check)
-    validateSgx(qeReport);
+    // QE must always be production-mode; allow_debug only governs the workload.
+    validateSgx(qeReport, false);
 
     // Verify MISCSELECT with mask
     const expectedMiscselect = Buffer.from(qeIdentity.miscselect, 'hex');
@@ -458,28 +465,32 @@ function compareSvnArrays(actual, required) {
 }
 
 // Validate report attributes
-function validateAttrs(report) {
+function validateAttrs(report, allowDebug = false) {
     if (report.type === 'sgx') {
-        validateSgx(report.data);
+        validateSgx(report.data, allowDebug);
     } else if (report.type === 'td10') {
-        validateTd10(report.data);
+        validateTd10(report.data, allowDebug);
     } else if (report.type === 'td15') {
-        validateTd15(report.data);
+        validateTd15(report.data, allowDebug);
     }
 }
 
-function validateSgx(report) {
+function validateSgx(report, allowDebug = false) {
     // Check if debug mode is enabled (bit 1 of attributes[0])
     const isDebug = (report.attributes[0] & 0x02) !== 0;
-    if (isDebug) {
+    if (isDebug && !allowDebug) {
         throw new Error('Debug mode is enabled');
     }
 }
 
-function validateTd10(report) {
+function validateTd10(report, allowDebug = false) {
     const tdAttrs = parseTdAttributes(report.tdAttributes);
 
-    if (tdAttrs.tud !== 0) {
+    // TUD bit 0 is DEBUG; bits 7:1 are reserved and must always be zero.
+    if ((tdAttrs.tud & ~0x01) !== 0) {
+        throw new Error('Reserved bits in TD attributes are set');
+    }
+    if ((tdAttrs.tud & 0x01) !== 0 && !allowDebug) {
         throw new Error('Debug mode is enabled');
     }
 
@@ -492,14 +503,14 @@ function validateTd10(report) {
     }
 }
 
-function validateTd15(report) {
+function validateTd15(report, allowDebug = false) {
     // Check mr_service_td is all zeros
     const allZero = report.mrServiceTd.every(b => b === 0);
     if (!allZero) {
         throw new Error('Invalid mr service td');
     }
 
-    validateTd10(report.base);
+    validateTd10(report.base, allowDebug);
 }
 
 function parseTdAttributes(input) {

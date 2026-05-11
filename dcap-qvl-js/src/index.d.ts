@@ -276,6 +276,11 @@ export class QuoteVerifier {
   static newWithRootCa(rootCaDer: Buffer): QuoteVerifier;
 
   /**
+   * Allow debug-mode enclaves (SGX debug bit, TDX TUD.DEBUG). Default false.
+   */
+  allowDebug(allow: boolean): QuoteVerifier;
+
+  /**
    * Verify a quote
    * @param rawQuote - Raw quote bytes
    * @param collateral - Quote collateral
