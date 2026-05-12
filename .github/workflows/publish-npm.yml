@@ -124,10 +124,14 @@ jobs:
         working-directory: dcap-qvl-js
         run: |
           VERSION="${{ steps.npm-meta.outputs.version }}"
-          echo "Updating package.json version to $VERSION"
-          npm version "$VERSION" --no-git-tag-version
-          echo "Updated version:"
-          node -e "console.log(require('./package.json').version)"
+          CURRENT=$(node -e "console.log(require('./package.json').version)")
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "package.json already at $VERSION — skipping npm version bump"
+          else
+            echo "Updating package.json version: $CURRENT -> $VERSION"
+            npm version "$VERSION" --no-git-tag-version
+          fi
+          echo "Final version: $(node -e "console.log(require('./package.json').version)")"
 
       - name: Publish to npm (Dry Run)
         if: steps.npm-meta.outputs.dry_run == 'true'
@@ -188,8 +192,12 @@ jobs:
             echo "Current branch: $CURRENT_BRANCH"
           fi
 
-          # Commit and push
+          # Commit and push (skip if package.json was already at $VERSION on the target branch)
           git add dcap-qvl-js/package.json dcap-qvl-js/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No version changes to commit — package.json already at $VERSION"
+            exit 0
+          fi
           git commit -m "chore(npm): bump version to $VERSION" \
             -m "Published @phala/dcap-qvl@$VERSION to npm" \
             -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
