@@ -192,6 +192,15 @@ jobs:
             echo "Current branch: $CURRENT_BRANCH"
           fi
 
+          # Ensure the target branch's package.json reflects $VERSION, in case the
+          # tag commit had been pre-bumped (and the bump on the tag commit's tree
+          # didn't carry over because we skipped `npm version`).
+          TARGET_CURRENT=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+          if [ "$TARGET_CURRENT" != "$VERSION" ]; then
+            echo "Target branch package.json at $TARGET_CURRENT — bumping to $VERSION"
+            (cd dcap-qvl-js && npm version "$VERSION" --no-git-tag-version)
+          fi
+
           # Commit and push (skip if package.json was already at $VERSION on the target branch)
           git add dcap-qvl-js/package.json dcap-qvl-js/package-lock.json
           if git diff --cached --quiet; then
