@@ -21,11 +21,17 @@ IOS_DIR="$CRATE_DIR/ios"
 SOURCES_DIR="$IOS_DIR/Sources/DcapQvl"
 XCFRAMEWORK="$IOS_DIR/DcapQvlFFI.xcframework"
 
-# Targets: device + simulator (arm64 + x86_64 lipo'd into a single sim slice).
+# Targets: iOS device + iOS simulator (arm64 + x86_64 lipo'd into a sim slice)
+# + macOS (arm64 + x86_64 lipo'd into a mac slice). The macOS slice is what
+# `swift test` actually consumes when the test host is a Mac — without it
+# SwiftPM can't resolve the binary-target module and the generated Swift fails
+# with "cannot find type 'RustBuffer'".
 TARGETS=(
     aarch64-apple-ios
     aarch64-apple-ios-sim
     x86_64-apple-ios
+    aarch64-apple-darwin
+    x86_64-apple-darwin
 )
 
 echo "==> Installing Rust targets"
@@ -46,6 +52,14 @@ lipo -create \
     "$CRATE_DIR/target/aarch64-apple-ios-sim/release/libdcap_qvl_mobile.a" \
     "$CRATE_DIR/target/x86_64-apple-ios/release/libdcap_qvl_mobile.a" \
     -output "$SIM_LIB"
+
+# Same for macOS — one universal static library covering Apple Silicon + Intel.
+MAC_LIB="$CRATE_DIR/target/universal-macos/libdcap_qvl_mobile.a"
+mkdir -p "$(dirname "$MAC_LIB")"
+lipo -create \
+    "$CRATE_DIR/target/aarch64-apple-darwin/release/libdcap_qvl_mobile.a" \
+    "$CRATE_DIR/target/x86_64-apple-darwin/release/libdcap_qvl_mobile.a" \
+    -output "$MAC_LIB"
 
 echo "==> Generating Swift bindings"
 mkdir -p "$SOURCES_DIR"
@@ -71,6 +85,8 @@ xcodebuild -create-xcframework \
     -library "$CRATE_DIR/target/aarch64-apple-ios/release/libdcap_qvl_mobile.a" \
     -headers "$HEADERS_DIR" \
     -library "$SIM_LIB" \
+    -headers "$HEADERS_DIR" \
+    -library "$MAC_LIB" \
     -headers "$HEADERS_DIR" \
     -output "$XCFRAMEWORK"
 
