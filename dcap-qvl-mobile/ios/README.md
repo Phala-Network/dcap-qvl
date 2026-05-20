@@ -22,11 +22,12 @@ import DcapQvl
 let raw = try Data(contentsOf: quoteURL)
 let quote = try parseQuote(rawQuote: raw)
 
-// `collateral` is decoded from PCCS JSON — fetch it via URLSession and
-// populate the QuoteCollateral struct.
+// Fetch the collateral JSON via URLSession and pass the raw bytes straight
+// in — no field-by-field marshalling needed.
+let (collateralJson, _) = try await URLSession.shared.data(from: pccsURL)
 let report = try verify(
     rawQuote: raw,
-    collateral: collateral,
+    collateralJson: collateralJson,
     nowSecs: UInt64(Date().timeIntervalSince1970)
 )
 print(report.status, report.advisoryIds)

@@ -27,8 +27,11 @@ dependencies {
 ```kotlin
 import network.phala.dcapqvl.*
 
+// Fetch the collateral JSON over your own HTTP stack (OkHttp, Ktor, ...) and
+// pass the raw bytes straight in — no field-by-field marshalling needed.
+val collateralJson: ByteArray = httpClient.get(pccsUrl).body()
 val quote = parseQuote(rawQuote)
-val report = verify(rawQuote, collateral, /* nowSecs = */ System.currentTimeMillis() / 1000UL)
+val report = verify(rawQuote, collateralJson, /* nowSecs = */ (System.currentTimeMillis() / 1000).toULong())
 println("status=${report.status} advisories=${report.advisoryIds}")
 ```
 

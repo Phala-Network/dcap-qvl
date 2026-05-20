@@ -9,61 +9,7 @@ use dcap_qvl::{
     quote::{EnclaveReport, Header, Quote as CoreQuote, Report as CoreReport, TDReport10, TDReport15},
     tcb_info::{TcbStatus as CoreTcbStatus, TcbStatusWithAdvisory as CoreTcbStatusWithAdvisory},
     verify::VerifiedReport as CoreVerifiedReport,
-    QuoteCollateralV3,
 };
-
-// ---------------------------------------------------------------------------
-// QuoteCollateral
-// ---------------------------------------------------------------------------
-
-/// PCCS collateral required to verify a quote offline.
-#[derive(Clone, uniffi::Record)]
-pub struct QuoteCollateral {
-    pub pck_crl_issuer_chain: String,
-    pub root_ca_crl: Vec<u8>,
-    pub pck_crl: Vec<u8>,
-    pub tcb_info_issuer_chain: String,
-    pub tcb_info: String,
-    pub tcb_info_signature: Vec<u8>,
-    pub qe_identity_issuer_chain: String,
-    pub qe_identity: String,
-    pub qe_identity_signature: Vec<u8>,
-    pub pck_certificate_chain: Option<String>,
-}
-
-impl From<QuoteCollateral> for QuoteCollateralV3 {
-    fn from(c: QuoteCollateral) -> Self {
-        QuoteCollateralV3 {
-            pck_crl_issuer_chain: c.pck_crl_issuer_chain,
-            root_ca_crl: c.root_ca_crl,
-            pck_crl: c.pck_crl,
-            tcb_info_issuer_chain: c.tcb_info_issuer_chain,
-            tcb_info: c.tcb_info,
-            tcb_info_signature: c.tcb_info_signature,
-            qe_identity_issuer_chain: c.qe_identity_issuer_chain,
-            qe_identity: c.qe_identity,
-            qe_identity_signature: c.qe_identity_signature,
-            pck_certificate_chain: c.pck_certificate_chain,
-        }
-    }
-}
-
-impl From<QuoteCollateralV3> for QuoteCollateral {
-    fn from(c: QuoteCollateralV3) -> Self {
-        QuoteCollateral {
-            pck_crl_issuer_chain: c.pck_crl_issuer_chain,
-            root_ca_crl: c.root_ca_crl,
-            pck_crl: c.pck_crl,
-            tcb_info_issuer_chain: c.tcb_info_issuer_chain,
-            tcb_info: c.tcb_info,
-            tcb_info_signature: c.tcb_info_signature,
-            qe_identity_issuer_chain: c.qe_identity_issuer_chain,
-            qe_identity: c.qe_identity,
-            qe_identity_signature: c.qe_identity_signature,
-            pck_certificate_chain: c.pck_certificate_chain,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Quote / Report

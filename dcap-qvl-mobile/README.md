@@ -17,18 +17,18 @@ The bindings expose the same offline verification surface as the Go binding —
 caller fetches collateral from PCCS via native HTTP, then passes it in.
 
 ```kotlin
-// Kotlin
+// Kotlin — collateralJson is the raw PCCS response body
 val quote: Quote = parseQuote(rawQuote)
-val report: VerifiedReport = verify(rawQuote, collateral, nowSecs)
-val report2: VerifiedReport = verifyWithRootCa(rawQuote, collateral, rootCaDer, nowSecs)
+val report: VerifiedReport = verify(rawQuote, collateralJson, nowSecs)
+val report2: VerifiedReport = verifyWithRootCa(rawQuote, collateralJson, rootCaDer, nowSecs)
 val ext: PckExtension = parsePckExtensionFromPem(pemBytes)
 ```
 
 ```swift
-// Swift
+// Swift — collateralJson is the raw PCCS response body
 let quote: Quote = try parseQuote(rawQuote: rawQuote)
-let report = try verify(rawQuote: rawQuote, collateral: collateral, nowSecs: now)
-let report2 = try verifyWithRootCa(rawQuote: rawQuote, collateral: collateral,
+let report = try verify(rawQuote: rawQuote, collateralJson: collateralJson, nowSecs: now)
+let report2 = try verifyWithRootCa(rawQuote: rawQuote, collateralJson: collateralJson,
                                    rootCaDer: rootCaDer, nowSecs: now)
 let ext = try parsePckExtensionFromPem(pem: pemBytes)
 ```

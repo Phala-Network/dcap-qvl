@@ -2,18 +2,11 @@
 //! verification covered by `tests/verify_quote.rs`, but goes through the
 //! UniFFI-exported functions instead of the core API.
 
-use dcap_qvl_mobile::{parse_quote, verify, QuoteCollateral, QuoteKind, TcbStatus};
+use dcap_qvl_mobile::{parse_quote, verify, QuoteKind, TcbStatus};
 use serde_json::Value;
 
-fn load_collateral(json: &[u8]) -> QuoteCollateral {
-    let parsed: dcap_qvl::QuoteCollateralV3 =
-        serde_json::from_slice(json).expect("collateral JSON parses");
-    parsed.into()
-}
-
 fn timestamp_within_collateral(json: &[u8]) -> u64 {
-    let parsed: dcap_qvl::QuoteCollateralV3 =
-        serde_json::from_slice(json).expect("collateral JSON parses");
+    let root: Value = serde_json::from_slice(json).expect("collateral JSON parses");
     let pick = |s: &str| {
         let v: Value = serde_json::from_str(s).expect("JSON");
         let issue = v["issueDate"].as_str().expect("issueDate");
@@ -23,8 +16,8 @@ fn timestamp_within_collateral(json: &[u8]) -> u64 {
             chrono::DateTime::parse_from_rfc3339(next).unwrap().timestamp() as u64,
         )
     };
-    let (ti, tn) = pick(&parsed.tcb_info);
-    let (qi, qn) = pick(&parsed.qe_identity);
+    let (ti, tn) = pick(root["tcb_info"].as_str().unwrap());
+    let (qi, qn) = pick(root["qe_identity"].as_str().unwrap());
     let not_before = ti.max(qi);
     let not_after = tn.min(qn);
     not_before + (not_after - not_before) / 2
@@ -48,9 +41,9 @@ fn parse_tdx_sample() {
 #[test]
 fn verify_sgx_sample() {
     let raw = include_bytes!("../../sample/sgx_quote").to_vec();
-    let coll_json = include_bytes!("../../sample/sgx_quote_collateral.json");
-    let now = timestamp_within_collateral(coll_json);
-    let report = verify(raw, load_collateral(coll_json), now).expect("verify");
+    let coll_json = include_bytes!("../../sample/sgx_quote_collateral.json").to_vec();
+    let now = timestamp_within_collateral(&coll_json);
+    let report = verify(raw, coll_json, now).expect("verify");
     assert_eq!(report.status, "ConfigurationAndSWHardeningNeeded");
     assert!(matches!(
         report.platform_status.status,
@@ -61,8 +54,8 @@ fn verify_sgx_sample() {
 #[test]
 fn verify_tdx_sample() {
     let raw = include_bytes!("../../sample/tdx_quote").to_vec();
-    let coll_json = include_bytes!("../../sample/tdx_quote_collateral.json");
-    let now = timestamp_within_collateral(coll_json);
-    let report = verify(raw, load_collateral(coll_json), now).expect("verify");
+    let coll_json = include_bytes!("../../sample/tdx_quote_collateral.json").to_vec();
+    let now = timestamp_within_collateral(&coll_json);
+    let report = verify(raw, coll_json, now).expect("verify");
     assert!(!report.status.is_empty());
 }
