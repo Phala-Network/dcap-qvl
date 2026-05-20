@@ -61,7 +61,9 @@ done
 
 # Drop the host-built .so into a known directory referenced by `jna.library.path`
 # in build.gradle.kts, so the local JVM unit tests can dlopen it directly.
-HOST_LIB_DIR="$ANDROID_DIR/build/host-jna"
+# Note: this lives OUTSIDE `build/` so that `gradle clean` doesn't wipe it
+# before the test task runs.
+HOST_LIB_DIR="$ANDROID_DIR/.host-jna"
 mkdir -p "$HOST_LIB_DIR"
 cp "$CRATE_DIR/target/release/libdcap_qvl_mobile.so" "$HOST_LIB_DIR/"
 

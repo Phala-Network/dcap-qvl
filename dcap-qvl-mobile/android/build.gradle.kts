@@ -38,11 +38,11 @@ android {
         unitTests.all {
             it.systemProperty(
                 "jna.library.path",
-                file("build/host-jna").absolutePath
+                file(".host-jna").absolutePath
             )
             it.systemProperty(
                 "java.library.path",
-                file("build/host-jna").absolutePath
+                file(".host-jna").absolutePath
             )
         }
     }
