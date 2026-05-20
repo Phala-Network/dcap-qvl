@@ -63,9 +63,20 @@ if [[ -n "$JNA_ARCH" ]]; then
     cp "$CRATE_DIR/target/release/libdcap_qvl_mobile.so" "$TEST_RES/"
 fi
 
-# Assemble the AAR.
+# Assemble the AAR. Prefer the Gradle wrapper when present (a developer can
+# `gradle wrapper` once and commit it locally); otherwise fall back to the
+# system `gradle` binary (which CI provides via `gradle/actions/setup-gradle`).
 echo "==> Assembling AAR"
 cd "$ANDROID_DIR"
-./gradlew --no-daemon clean assembleRelease test
+if [[ -x "./gradlew" ]]; then
+    GRADLE_CMD=("./gradlew")
+elif command -v gradle >/dev/null; then
+    GRADLE_CMD=("gradle")
+else
+    echo "Neither ./gradlew nor a system gradle was found. Install Gradle 8+ or" >&2
+    echo "run \`gradle wrapper --gradle-version 8.10\` from $ANDROID_DIR first." >&2
+    exit 1
+fi
+"${GRADLE_CMD[@]}" --no-daemon clean assembleRelease test
 
 echo "==> AAR produced at: $ANDROID_DIR/build/outputs/aar/"
