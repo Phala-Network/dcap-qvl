@@ -74,21 +74,12 @@ xcodebuild -create-xcframework \
     -headers "$HEADERS_DIR" \
     -output "$XCFRAMEWORK"
 
-# `xcodebuild -create-xcframework -headers <dir>` flattens both the .h and
-# `module.modulemap` into each slice's `Headers/` directory. SwiftPM's binary-
-# target module-resolution only looks for modulemaps under `Modules/` — without
-# this step, `#if canImport(DcapQvlFFI)` evaluates false and the generated
-# Swift fails with "cannot find type 'RustBuffer'". Move the modulemap into
-# place after assembly.
-echo "==> Promoting modulemap to Modules/ in each XCFramework slice"
-while IFS= read -r -d '' slice_headers; do
-    slice_dir="$(dirname "$slice_headers")"
-    modules_dir="$slice_dir/Modules"
-    if [[ -f "$slice_headers/module.modulemap" ]]; then
-        mkdir -p "$modules_dir"
-        mv "$slice_headers/module.modulemap" "$modules_dir/module.modulemap"
-    fi
-done < <(find "$XCFRAMEWORK" -mindepth 2 -maxdepth 2 -type d -name Headers -print0)
+# Dump the resulting XCFramework structure to make module-resolution issues
+# diagnosable from CI logs.
+echo "==> XCFramework layout:"
+find "$XCFRAMEWORK" -type f | sort
+echo "==> Sample modulemap:"
+find "$XCFRAMEWORK" -name 'module.modulemap' -print -exec cat {} \;
 
 # Stage sample quote fixtures for the Swift unit tests. Symlinks work for
 # SwiftPM but we mirror the Android side here for consistency and to make

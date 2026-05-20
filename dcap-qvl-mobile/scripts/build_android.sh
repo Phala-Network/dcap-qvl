@@ -59,20 +59,11 @@ for fixture in sgx_quote sgx_quote_collateral.json tdx_quote tdx_quote_collatera
     cp "$CRATE_DIR/../sample/$fixture" "$TEST_RES_BASE/$fixture"
 done
 
-# JNA looks for the host library under `<jna-arch>/lib<name>.so`. Drop the
-# host-built .so into the test resources so the local JVM unit tests can run
-# without an emulator.
-HOST_ARCH="$(uname -m)"
-case "$HOST_ARCH" in
-    x86_64|amd64) JNA_ARCH=linux-x86-64 ;;
-    aarch64|arm64) JNA_ARCH=linux-aarch64 ;;
-    *) JNA_ARCH="" ;;
-esac
-if [[ -n "$JNA_ARCH" ]]; then
-    TEST_RES="$ANDROID_DIR/src/test/resources/$JNA_ARCH"
-    mkdir -p "$TEST_RES"
-    cp "$CRATE_DIR/target/release/libdcap_qvl_mobile.so" "$TEST_RES/"
-fi
+# Drop the host-built .so into a known directory referenced by `jna.library.path`
+# in build.gradle.kts, so the local JVM unit tests can dlopen it directly.
+HOST_LIB_DIR="$ANDROID_DIR/build/host-jna"
+mkdir -p "$HOST_LIB_DIR"
+cp "$CRATE_DIR/target/release/libdcap_qvl_mobile.so" "$HOST_LIB_DIR/"
 
 # Assemble the AAR. Prefer the Gradle wrapper when present (a developer can
 # `gradle wrapper` once and commit it locally); otherwise fall back to the

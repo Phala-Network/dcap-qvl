@@ -30,9 +30,21 @@ android {
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
     sourceSets["test"].java.srcDirs("src/test/kotlin")
     // For the local JVM test task, JNA must be able to locate the host-arch
-    // .so. The build script copies it into src/test/resources/<jna-arch>/.
+    // .so. The build script copies the host build into build/host-jna/, and
+    // we forward that path via `jna.library.path` and `java.library.path` so
+    // JNA finds it without classpath extraction.
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.systemProperty(
+                "jna.library.path",
+                file("build/host-jna").absolutePath
+            )
+            it.systemProperty(
+                "java.library.path",
+                file("build/host-jna").absolutePath
+            )
+        }
     }
 
     publishing {
