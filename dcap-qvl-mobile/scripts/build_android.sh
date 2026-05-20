@@ -48,6 +48,17 @@ cargo run --bin uniffi-bindgen -- generate \
     --config "$CRATE_DIR/uniffi.toml" \
     --out-dir "$KOTLIN_OUT"
 
+# Stage sample quote fixtures for the JVM unit tests. We can't symlink them
+# because Gradle's `processDebugUnitTestJavaRes` task refuses to follow
+# symlinks; copying keeps the canonical fixtures in `sample/` and avoids
+# duplicating committed data.
+echo "==> Staging test fixtures"
+TEST_RES_BASE="$ANDROID_DIR/src/test/resources"
+mkdir -p "$TEST_RES_BASE"
+for fixture in sgx_quote sgx_quote_collateral.json tdx_quote tdx_quote_collateral.json; do
+    cp "$CRATE_DIR/../sample/$fixture" "$TEST_RES_BASE/$fixture"
+done
+
 # JNA looks for the host library under `<jna-arch>/lib<name>.so`. Drop the
 # host-built .so into the test resources so the local JVM unit tests can run
 # without an emulator.
