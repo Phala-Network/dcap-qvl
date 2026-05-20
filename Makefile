@@ -118,4 +118,26 @@ test_near_gas:
 	@echo "Running NEAR gas consumption tests..."
 	cd tests/near/contracts/gas-test && cargo test --features test -- --nocapture
 
-.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean test_wasm_web test_wasm_node test_wasm test_near_gas
+
+# Mobile binding targets (Kotlin / Swift via UniFFI)
+test_mobile_rust:
+	@echo "Testing dcap-qvl-mobile Rust binding..."
+	cd dcap-qvl-mobile && cargo test
+
+build_mobile_ios:
+	@echo "Building iOS XCFramework + Swift sources..."
+	./dcap-qvl-mobile/scripts/build_ios.sh
+
+build_mobile_android:
+	@echo "Building Android AAR..."
+	./dcap-qvl-mobile/scripts/build_android.sh
+
+test_mobile_ios: build_mobile_ios
+	@echo "Running Swift Package tests..."
+	cd dcap-qvl-mobile/ios && swift test
+
+test_mobile_android: build_mobile_android
+	@echo "Running Android local unit tests..."
+	cd dcap-qvl-mobile/android && ./gradlew --no-daemon test
+
+.PHONY: all install_wasm_tool check_wasm_opt build_web_pkg build_node_pkg publish_npm clean build_python python_dev test_python test_python_versions test_collateral_api test_cross_versions python_clean test_wasm_web test_wasm_node test_wasm test_near_gas test_mobile_rust build_mobile_ios build_mobile_android test_mobile_ios test_mobile_android
