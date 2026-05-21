@@ -40,9 +40,11 @@ for t in "${TARGETS[@]}"; do
 done
 
 echo "==> Building cdylib + staticlib for each target"
+# `--lib` skips the host-only `uniffi-bindgen` binary — building that for
+# each Apple cross-target wastes time and can cause spurious link failures.
 cd "$CRATE_DIR"
 for t in "${TARGETS[@]}"; do
-    cargo build --release --target "$t"
+    cargo build --release --lib --target "$t"
 done
 
 # Combine simulator slices into one universal static library.

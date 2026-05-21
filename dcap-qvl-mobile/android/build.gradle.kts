@@ -30,9 +30,10 @@ android {
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
     sourceSets["test"].java.srcDirs("src/test/kotlin")
     // For the local JVM test task, JNA must be able to locate the host-arch
-    // .so. The build script copies the host build into build/host-jna/, and
-    // we forward that path via `jna.library.path` and `java.library.path` so
-    // JNA finds it without classpath extraction.
+    // .so. The build script (`scripts/build_android.sh`) copies the host build
+    // into `.host-jna/` (outside `build/`, so `gradle clean` can't wipe it
+    // before tests run) and we forward that path via `jna.library.path` and
+    // `java.library.path` so JNA finds it without classpath extraction.
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.all {

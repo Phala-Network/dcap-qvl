@@ -159,10 +159,14 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Build Android AAR + run unit tests
+      - name: Build Android AAR
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: ./dcap-qvl-mobile/scripts/build_android.sh
+
+      - name: Run JVM unit tests
+        working-directory: dcap-qvl-mobile/android
+        run: gradle --no-daemon test
 
   mobile-bindings-ios:
     name: Build iOS XCFramework + run Swift tests

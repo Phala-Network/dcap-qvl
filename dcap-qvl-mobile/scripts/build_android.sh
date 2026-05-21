@@ -28,7 +28,9 @@ fi
 
 cd "$CRATE_DIR"
 
-# Cross-compile the four standard Android ABIs.
+# Cross-compile the four standard Android ABIs. `--lib` skips the host-only
+# `uniffi-bindgen` binary target — building that for each Android ABI is
+# wasted time and can trigger spurious cross-link failures.
 echo "==> Building Rust cdylib for Android ABIs"
 cargo ndk \
     -t arm64-v8a \
@@ -36,7 +38,7 @@ cargo ndk \
     -t x86 \
     -t x86_64 \
     -o "$JNI_DIR" \
-    build --release
+    build --release --lib
 
 # Generate Kotlin sources from the (host-built) cdylib metadata.
 echo "==> Generating Kotlin bindings"
@@ -70,6 +72,8 @@ cp "$CRATE_DIR/target/release/libdcap_qvl_mobile.so" "$HOST_LIB_DIR/"
 # Assemble the AAR. Prefer the Gradle wrapper when present (a developer can
 # `gradle wrapper` once and commit it locally); otherwise fall back to the
 # system `gradle` binary (which CI provides via `gradle/actions/setup-gradle`).
+# Tests are intentionally NOT run here — `make test_mobile_android` and the
+# matching CI step invoke `gradle test` after this script finishes.
 echo "==> Assembling AAR"
 cd "$ANDROID_DIR"
 if [[ -x "./gradlew" ]]; then
@@ -81,6 +85,6 @@ else
     echo "run \`gradle wrapper --gradle-version 8.10\` from $ANDROID_DIR first." >&2
     exit 1
 fi
-"${GRADLE_CMD[@]}" --no-daemon clean assembleRelease test
+"${GRADLE_CMD[@]}" --no-daemon clean assembleRelease
 
 echo "==> AAR produced at: $ANDROID_DIR/build/outputs/aar/"

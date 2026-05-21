@@ -65,7 +65,9 @@ make test_mobile_android
 ```
 
 Runs as JVM unit tests (no emulator required). The build script stages the
-host-built `.so` into `src/test/resources/<jna-arch>/` so JNA can find it.
+host-built `.so` into `dcap-qvl-mobile/android/.host-jna/`, and
+`build.gradle.kts` passes that directory to the test JVM via
+`-Djna.library.path` so JNA dlopens it without classpath extraction.
 
 ## Limitations
 
