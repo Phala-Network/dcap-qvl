@@ -8,7 +8,7 @@ artifacts.
 
 | Platform | Artifact                       | Package                   |
 | -------- | ------------------------------ | ------------------------- |
-| Android  | `dcap-qvl-android.aar`         | `network.phala:dcap-qvl-android` |
+| Android  | `dcap-qvl-android.aar`         | `com.phala:dcap-qvl-android` |
 | iOS      | `DcapQvl` Swift Package + `DcapQvlFFI.xcframework` | `DcapQvl` (SPM target)   |
 
 ## API surface (v1)

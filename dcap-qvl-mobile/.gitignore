@@ -8,7 +8,7 @@ android/.gradle/
 android/.host-jna/
 android/local.properties
 android/src/main/jniLibs/
-android/src/main/java/network/phala/dcapqvl/dcap_qvl_mobile.kt
+android/src/main/java/com/phala/dcapqvl/dcap_qvl_mobile.kt
 # Test fixtures + JNA-staged host .so are copied in at build time; the
 # canonical sources live in /sample/.
 android/src/test/resources/*.json

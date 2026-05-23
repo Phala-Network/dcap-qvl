@@ -1,4 +1,4 @@
-package network.phala.dcapqvl
+package com.phala.dcapqvl
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals

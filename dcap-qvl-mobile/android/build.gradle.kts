@@ -4,11 +4,11 @@ plugins {
     `maven-publish`
 }
 
-group = "network.phala"
+group = "com.phala"
 version = "0.4.1"
 
 android {
-    namespace = "network.phala.dcapqvl"
+    namespace = "com.phala.dcapqvl"
     compileSdk = 34
 
     defaultConfig {
@@ -70,7 +70,7 @@ dependencies {
 publishing {
     publications {
         register<MavenPublication>("release") {
-            groupId = "network.phala"
+            groupId = "com.phala"
             artifactId = "dcap-qvl-android"
             version = project.version.toString()
 

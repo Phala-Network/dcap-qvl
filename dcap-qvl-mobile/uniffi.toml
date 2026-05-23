@@ -1,5 +1,5 @@
 [bindings.kotlin]
-package_name = "network.phala.dcapqvl"
+package_name = "com.phala.dcapqvl"
 cdylib_name = "dcap_qvl_mobile"
 
 [bindings.swift]
