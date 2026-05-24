@@ -2,6 +2,50 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
+mod hex_array {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde::de::Error;
+
+    pub fn serialize<S, const N: usize>(
+        bytes: &[u8; N],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&hex::encode_upper(bytes))
+    }
+
+    pub fn deserialize<'de, D, const N: usize>(
+        deserializer: D,
+    ) -> Result<[u8; N], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = <&str>::deserialize(deserializer)?;
+
+        // Reject non-ASCII before any further processing
+        if !s.is_ascii() {
+            return Err(D::Error::custom("hex string must be ASCII"));
+        }
+
+        // Fast reject: exact length before decode
+        if s.len() != N * 2 {
+            return Err(D::Error::custom(format!(
+                "expected {} hex chars, got {}",
+                N * 2,
+                s.len()
+            )));
+        }
+
+        // hex::decode is case-insensitive — no extra handling needed
+        hex::decode(s)
+            .map_err(|e| D::Error::custom(format!("invalid hex: {e}")))?
+            .try_into()
+            .map_err(|_| D::Error::custom("hex decode length mismatch"))
+    }
+}
+
 #[cfg(feature = "borsh_schema")]
 use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
@@ -20,17 +64,17 @@ pub struct QeIdentity {
     pub issue_date: String,
     pub next_update: String,
     pub tcb_evaluation_data_number: u32,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "hex_array")]
     pub miscselect: [u8; 4],
     #[serde(rename = "miscselectMask")]
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "hex_array")]
     pub miscselect_mask: [u8; 4],
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "hex_array")]
     pub attributes: [u8; 16],
     #[serde(rename = "attributesMask")]
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "hex_array")]
     pub attributes_mask: [u8; 16],
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "hex_array")]
     pub mrsigner: [u8; 32],
     /// ISV Product ID
     pub isvprodid: u16,
