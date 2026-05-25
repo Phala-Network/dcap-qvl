@@ -15,7 +15,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "echo \"Error: no test command specified\" && exit 1"
+    "test": "node --test tests/*.test.js"
   },
   "repository": {
     "type": "git",
