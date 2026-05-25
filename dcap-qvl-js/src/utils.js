@@ -432,7 +432,7 @@ function extractCrlUrl(certDer) {
 // Extract issuer string from certificate
 function getCertIssuer(certDer) {
     const cert = Certificate.decode(certDer, 'der');
-    // Convert issuer RDNs to a comma seperated string
+    // Convert issuer RDNs to a comma separated string
     const parts = [];
     for (const rdn of cert.tbsCertificate.issuer) {
         for (const attr of rdn) {
