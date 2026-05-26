@@ -81,9 +81,8 @@ pub const PCK_CERT_CHAIN: u16 = 5;
 pub const QE_REPORT_CERT: u16 = 6;
 pub const PLATFORM_MANIFEST: u16 = 7;
 
-// PCK certificate issuer identifiers
-pub const PROCESSOR_ISSUER: &str = "Processor";
-pub const PLATFORM_ISSUER: &str = "Platform";
+// PCK certificate issuer identifiers (lowercase strings used in PCS URLs
+// and FFI bindings; rendered from `crate::config::PckCa::as_id_str`).
 pub const PROCESSOR_ISSUER_ID: &str = "processor";
 pub const PLATFORM_ISSUER_ID: &str = "platform";
 

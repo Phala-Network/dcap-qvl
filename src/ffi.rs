@@ -310,7 +310,7 @@ pub unsafe extern "C" fn dcap_parse_quote_cb(
             Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
         let ca = match crate::intel::quote_ca(&parsed) {
-            Ok(c) => Some(c.to_string()),
+            Ok(c) => Some(c.as_id_str().to_string()),
             Err(e) => return emit_error(format_error(&e), cb, user_data),
         };
         (fmspc, ca)
