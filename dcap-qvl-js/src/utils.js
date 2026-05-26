@@ -28,6 +28,32 @@ const Extension = asn1.define('Extension', function () {
     );
 });
 
+const DirectoryString = asn1.define('DirectoryString', function () {
+    this.choice({
+        utf8String: this.utf8str(),
+        printableString: this.printstr(),
+        ia5String: this.ia5str(),
+        teletexString: this.t61str(),
+        universalString: this.unistr(),
+        bmpString: this.bmpstr()
+    });
+});
+
+const AttributeTypeAndValue = asn1.define('AttributeTypeAndValue', function () {
+    this.seq().obj(
+        this.key('type').objid(),
+        this.key('value').use(DirectoryString)
+    );
+});
+
+const RelativeDistinguishedName = asn1.define('RelativeDistinguishedName', function () {
+    this.setof(AttributeTypeAndValue);
+});
+
+const Name = asn1.define('Name', function () {
+    this.seqof(RelativeDistinguishedName);
+});
+
 const TBSCertificate = asn1.define('TBSCertificate', function () {
     this.seq().obj(
         this.key('version').explicit(0).int().optional(),
@@ -36,9 +62,9 @@ const TBSCertificate = asn1.define('TBSCertificate', function () {
             this.key('algorithm').objid(),
             this.key('parameters').optional().any()
         ),
-        this.key('issuer').any(),
+        this.key('issuer').use(Name),
         this.key('validity').any(),
-        this.key('subject').any(),
+        this.key('subject').use(Name),
         this.key('subjectPublicKeyInfo').any(),
         this.key('issuerUniqueID').implicit(1).bitstr().optional(),
         this.key('subjectUniqueID').implicit(2).bitstr().optional(),
@@ -405,24 +431,17 @@ function extractCrlUrl(certDer) {
 
 // Extract issuer string from certificate
 function getCertIssuer(certDer) {
-    try {
-        const cert = Certificate.decode(certDer, 'der');
-        const issuer = cert.tbsCertificate.issuer;
-
-        // Convert issuer RDNs to a string
-        const parts = [];
-        for (const rdn of issuer.value) {
-            for (const attr of rdn) {
-                // attr.type is the OID, attr.value is the ASN1 value
-                const value = attr.value.toString();
-                parts.push(value);
+    const cert = Certificate.decode(certDer, 'der');
+    // Convert issuer RDNs to a comma separated string
+    const parts = [];
+    for (const rdn of cert.tbsCertificate.issuer) {
+        for (const attr of rdn) {
+            if (attr.value && typeof attr.value.value === 'string') {
+                parts.push(attr.value.value);
             }
         }
-
-        return parts.join(', ');
-    } catch (e) {
-        return '';
     }
+    return parts.join(', ');
 }
 
 module.exports = {

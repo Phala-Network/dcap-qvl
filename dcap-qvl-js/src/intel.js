@@ -3,7 +3,6 @@
 
 const utils = require('./utils');
 const oids = require('./oids');
-const asn1 = require('asn1.js');
 const { PROCESSOR_ISSUER, PLATFORM_ISSUER, PROCESSOR_ISSUER_ID, PLATFORM_ISSUER_ID } = require('./constants');
 
 class PckExtension {
@@ -76,8 +75,7 @@ function getCa(quote) {
             throw new Error('Invalid certificate');
         }
 
-        const cert = utils.Certificate.decode(certs[0], 'der');
-        const issuerStr = formatDistinguishedName(cert.tbsCertificate.issuer);
+        const issuerStr = utils.getCertIssuer(certs[0]);
 
         if (issuerStr.includes(PROCESSOR_ISSUER)) {
             return PROCESSOR_ISSUER_ID;
@@ -89,20 +87,6 @@ function getCa(quote) {
     } catch (e) {
         return PROCESSOR_ISSUER_ID; // default
     }
-}
-
-// Format X.509 Distinguished Name to string
-function formatDistinguishedName(name) {
-    // The 'name' is an ASN.1 encoded RDNSequence
-    // For simplicity, we'll decode it as a buffer and convert to string
-    // In production, you'd want to properly parse the RDNSequence structure
-
-    const DistinguishedName = asn1.define('DistinguishedName', function () {
-        this.any();
-    });
-
-    const encoded = DistinguishedName.encode(name, 'der');
-    return encoded.toString('hex'); // Simple hex representation for matching
 }
 
 // Get FMSPC from quote
