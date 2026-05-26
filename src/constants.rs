@@ -86,6 +86,12 @@ pub const PLATFORM_MANIFEST: u16 = 7;
 pub const PROCESSOR_ISSUER_ID: &str = "processor";
 pub const PLATFORM_ISSUER_ID: &str = "platform";
 
+// Substrings matched against the issuer DN to classify a PCK leaf as
+// Processor- or Platform-issued. Crate-private; see
+// `X509CertParsed::pck_ca`.
+pub(crate) const PROCESSOR_ISSUER: &str = "Processor";
+pub(crate) const PLATFORM_ISSUER: &str = "Platform";
+
 // The root cert is downloaded from `https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.cer`.
 // See https://api.portal.trustedservices.intel.com/content/documentation.html#pcs for more details
 pub static TRUSTED_ROOT_CA_DER: &[u8] = include_bytes!("TrustedRootCA.der");
