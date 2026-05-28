@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.phala"
-version = "0.4.1"
+version = "0.5.0"
 
 android {
     namespace = "com.phala.dcapqvl"
