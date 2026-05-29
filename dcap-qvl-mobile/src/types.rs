@@ -183,7 +183,9 @@ impl Quote {
             let fmspc = dcap_qvl::intel::quote_fmspc(q)
                 .ok()
                 .map(|f| hex::encode_upper(f));
-            let ca = dcap_qvl::intel::quote_ca(q).ok().map(|c| c.to_string());
+            let ca = dcap_qvl::intel::quote_ca(q)
+                .ok()
+                .map(|c| c.as_id_str().to_string());
             (fmspc, ca)
         } else {
             (None, None)
