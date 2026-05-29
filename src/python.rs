@@ -482,7 +482,7 @@ impl PyQuote {
 
     fn ca(&self) -> PyResult<String> {
         match intel::quote_ca(&self.inner) {
-            Ok(ca) => Ok(ca.to_string()),
+            Ok(ca) => Ok(ca.as_id_str().to_string()),
             Err(e) => Err(PyValueError::new_err(format!("Failed to get CA: {}", e))),
         }
     }

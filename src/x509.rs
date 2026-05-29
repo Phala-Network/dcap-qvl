@@ -3,11 +3,12 @@
 //! Selected by [`crate::configs::RingConfig`] / [`crate::configs::RustCryptoConfig`]
 //! / [`crate::configs::DefaultConfig`].
 
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use anyhow::{anyhow, bail, Context, Result};
 
-use crate::config::{ParsedCert, X509Codec};
+use crate::config::{ParsedCert, PckCa, X509Codec};
+use crate::constants;
 
 /// Audited default [`X509Codec`] implementation, built on `x509-cert` + `der`.
 ///
@@ -33,8 +34,15 @@ impl X509Codec for X509CertBackend {
 }
 
 impl ParsedCert for X509CertParsed {
-    fn issuer_dn(&self) -> Result<String> {
-        Ok(self.cert.tbs_certificate.issuer.to_string())
+    fn pck_ca(&self) -> Option<PckCa> {
+        let issuer_dn = self.cert.tbs_certificate.issuer.to_string();
+        if issuer_dn.contains(constants::PROCESSOR_ISSUER) {
+            return Some(PckCa::Processor);
+        }
+        if issuer_dn.contains(constants::PLATFORM_ISSUER) {
+            return Some(PckCa::Platform);
+        }
+        None
     }
 
     fn extension(&self, oid: &[u8]) -> Result<Option<Vec<u8>>> {
