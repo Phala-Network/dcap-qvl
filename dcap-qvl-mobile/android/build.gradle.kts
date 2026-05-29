@@ -7,7 +7,11 @@ plugins {
     // `maven-publish` PUT to the Portal returns 404 — new namespaces no longer
     // get a Nexus/OSSRH staging repo, so artifacts must be uploaded as a
     // zipped bundle, which this plugin handles.
-    id("com.vanniktech.maven.publish") version "0.36.0"
+    //
+    // Pinned to 0.35.0: it's the last release supporting our AGP 8.7.0
+    // (0.36.0 requires AGP >= 8.13.0). The `publishToMavenCentral(...)` DSL
+    // below is unchanged — `SonatypeHost` was already dropped before 0.35.0.
+    id("com.vanniktech.maven.publish") version "0.35.0"
 }
 
 group = "com.phala"
