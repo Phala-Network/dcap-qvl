@@ -2,6 +2,7 @@ plugins {
     id("com.android.library") version "8.7.0"
     id("org.jetbrains.kotlin.android") version "2.0.20"
     `maven-publish`
+    signing
 }
 
 group = "com.phala"
@@ -88,7 +89,53 @@ publishing {
                         url.set("https://opensource.org/licenses/MIT")
                     }
                 }
+                developers {
+                    developer {
+                        id.set("phala-network")
+                        name.set("Phala Network")
+                        url.set("https://phala.com")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/Phala-Network/dcap-qvl")
+                    connection.set("scm:git:https://github.com/Phala-Network/dcap-qvl.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/Phala-Network/dcap-qvl.git")
+                }
             }
         }
+    }
+
+    // Sonatype Central staging endpoint. Credentials are supplied via
+    // `ORG_GRADLE_PROJECT_ossrhUsername` / `ORG_GRADLE_PROJECT_ossrhPassword`
+    // environment variables (see `.github/workflows/android-aar.yml`). The
+    // repo block is registered unconditionally; uploads simply fail with a
+    // clear auth error if creds aren't set.
+    repositories {
+        maven {
+            name = "MavenCentral"
+            url = uri("https://central.sonatype.com/api/v1/publisher/upload")
+            credentials {
+                username = (findProperty("ossrhUsername") as String?) ?: ""
+                password = (findProperty("ossrhPassword") as String?) ?: ""
+            }
+        }
+    }
+}
+
+// Sign every Maven publication when the signing key is present.
+// The Sonatype Central portal requires PGP signatures on all artifacts.
+//
+// The passphrase is optional: our release key is unprotected (it lives in the
+// `maven-central` GitHub Environment, which is the trust boundary — a
+// passphrase stored next to the key in the same environment adds nothing).
+// `useInMemoryPgpKeys` accepts an empty string for unprotected keys, so a
+// missing `signingPassword` property is treated as "no passphrase".
+signing {
+    val keyId = findProperty("signingKeyId") as String?
+    val signingKey = findProperty("signingKey") as String?
+    val signingPassword = (findProperty("signingPassword") as String?).orEmpty()
+    if (keyId != null && signingKey != null) {
+        useInMemoryPgpKeys(keyId, signingKey, signingPassword)
+        sign(publishing.publications)
     }
 }
