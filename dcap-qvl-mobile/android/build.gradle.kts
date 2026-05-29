@@ -1,8 +1,13 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+
 plugins {
     id("com.android.library") version "8.7.0"
     id("org.jetbrains.kotlin.android") version "2.0.20"
-    `maven-publish`
-    signing
+    // Speaks the Sonatype Central Portal bundle-upload protocol. A plain
+    // `maven-publish` PUT to the Portal returns 404 — new namespaces no longer
+    // get a Nexus/OSSRH staging repo, so artifacts must be uploaded as a
+    // zipped bundle, which this plugin handles.
+    id("com.vanniktech.maven.publish") version "0.36.0"
 }
 
 group = "com.phala"
@@ -48,12 +53,6 @@ android {
             )
         }
     }
-
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
-    }
 }
 
 dependencies {
@@ -68,74 +67,43 @@ dependencies {
     testImplementation("org.json:json:20240303")
 }
 
-publishing {
-    publications {
-        register<MavenPublication>("release") {
-            groupId = "com.phala"
-            artifactId = "dcap-qvl-android"
-            version = project.version.toString()
+mavenPublishing {
+    // Publish the single Android `release` variant with sources + javadoc jars.
+    configure(AndroidSingleVariantLibrary(variant = "release", sourcesJar = true, publishJavadocJar = true))
 
-            afterEvaluate {
-                from(components["release"])
-            }
+    // Upload to the Sonatype Central Portal. `automaticRelease = false` leaves
+    // the deployment in the portal for manual promotion — required for the
+    // first release of a new namespace; later releases can flip this to true.
+    publishToMavenCentral(automaticRelease = false)
 
-            pom {
-                name.set("dcap-qvl for Android")
-                description.set("Native DCAP quote verification for Android (Kotlin)")
-                url.set("https://github.com/Phala-Network/dcap-qvl")
-                licenses {
-                    license {
-                        name.set("MIT")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("phala-network")
-                        name.set("Phala Network")
-                        url.set("https://phala.com")
-                    }
-                }
-                scm {
-                    url.set("https://github.com/Phala-Network/dcap-qvl")
-                    connection.set("scm:git:https://github.com/Phala-Network/dcap-qvl.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/Phala-Network/dcap-qvl.git")
-                }
+    // PGP-sign all artifacts. Credentials come from the
+    // `ORG_GRADLE_PROJECT_signingInMemoryKey*` env vars (see the workflow).
+    // The key is unprotected, so no key password is supplied.
+    signAllPublications()
+
+    coordinates("com.phala", "dcap-qvl-android", version.toString())
+
+    pom {
+        name.set("dcap-qvl for Android")
+        description.set("Native DCAP quote verification for Android (Kotlin)")
+        url.set("https://github.com/Phala-Network/dcap-qvl")
+        licenses {
+            license {
+                name.set("MIT")
+                url.set("https://opensource.org/licenses/MIT")
             }
         }
-    }
-
-    // Sonatype Central staging endpoint. Credentials are supplied via
-    // `ORG_GRADLE_PROJECT_ossrhUsername` / `ORG_GRADLE_PROJECT_ossrhPassword`
-    // environment variables (see `.github/workflows/android-aar.yml`). The
-    // repo block is registered unconditionally; uploads simply fail with a
-    // clear auth error if creds aren't set.
-    repositories {
-        maven {
-            name = "MavenCentral"
-            url = uri("https://central.sonatype.com/api/v1/publisher/upload")
-            credentials {
-                username = (findProperty("ossrhUsername") as String?) ?: ""
-                password = (findProperty("ossrhPassword") as String?) ?: ""
+        developers {
+            developer {
+                id.set("phala-network")
+                name.set("Phala Network")
+                url.set("https://phala.com")
             }
         }
-    }
-}
-
-// Sign every Maven publication when the signing key is present.
-// The Sonatype Central portal requires PGP signatures on all artifacts.
-//
-// The passphrase is optional: our release key is unprotected (it lives in the
-// `maven-central` GitHub Environment, which is the trust boundary — a
-// passphrase stored next to the key in the same environment adds nothing).
-// `useInMemoryPgpKeys` accepts an empty string for unprotected keys, so a
-// missing `signingPassword` property is treated as "no passphrase".
-signing {
-    val keyId = findProperty("signingKeyId") as String?
-    val signingKey = findProperty("signingKey") as String?
-    val signingPassword = (findProperty("signingPassword") as String?).orEmpty()
-    if (keyId != null && signingKey != null) {
-        useInMemoryPgpKeys(keyId, signingKey, signingPassword)
-        sign(publishing.publications)
+        scm {
+            url.set("https://github.com/Phala-Network/dcap-qvl")
+            connection.set("scm:git:https://github.com/Phala-Network/dcap-qvl.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Phala-Network/dcap-qvl.git")
+        }
     }
 }
