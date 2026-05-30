@@ -40,6 +40,14 @@ cargo ndk \
     -o "$JNI_DIR" \
     build --release --lib
 
+# cargo-ndk copies every cdylib produced into the jniLibs output, which
+# includes the parent `dcap-qvl` crate's `libdcap_qvl.so` (it declares a
+# cdylib crate-type). That library is never loaded — `libdcap_qvl_mobile.so`
+# statically links all of dcap-qvl and only NEEDs libc/libdl — so it's ~16 MB
+# of dead weight across the four ABIs. Drop it before assembling the AAR.
+echo "==> Stripping redundant libdcap_qvl.so from jniLibs"
+find "$JNI_DIR" -type f -name 'libdcap_qvl.so' -print -delete
+
 # Generate Kotlin sources from the (host-built) cdylib metadata.
 echo "==> Generating Kotlin bindings"
 cargo build --release
@@ -56,9 +64,13 @@ cargo run --bin uniffi-bindgen -- generate \
 # duplicating committed data.
 echo "==> Staging test fixtures"
 TEST_RES_BASE="$ANDROID_DIR/src/test/resources"
-mkdir -p "$TEST_RES_BASE"
+ANDROID_TEST_ASSETS="$ANDROID_DIR/src/androidTest/assets"
+mkdir -p "$TEST_RES_BASE" "$ANDROID_TEST_ASSETS"
 for fixture in sgx_quote sgx_quote_collateral.json tdx_quote tdx_quote_collateral.json; do
+    # Local JVM unit tests read from test resources; the on-device
+    # instrumented test reads the same fixtures from the androidTest assets.
     cp "$CRATE_DIR/../sample/$fixture" "$TEST_RES_BASE/$fixture"
+    cp "$CRATE_DIR/../sample/$fixture" "$ANDROID_TEST_ASSETS/$fixture"
 done
 
 # Drop the host-built .so into a known directory referenced by `jna.library.path`
