@@ -27,3 +27,6 @@ ios/Tests/DcapQvlTests/Resources/tdx_quote
 ios/build/
 ios/.build/
 ios/Package.resolved
+
+# Kotlin compiler cache
+android/.kotlin/
