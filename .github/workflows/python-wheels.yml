@@ -80,7 +80,7 @@ jobs:
         run: |
           uv sync
           uv run python scripts/build_wheels.py \
-            --platforms linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl macos-aarch64 \
+            --platforms linux-x86_64 linux-aarch64 linux-x86_64-musl linux-aarch64-musl \
             --zig \
             --install-targets \
             --output-dir dist
@@ -190,6 +190,59 @@ jobs:
           name: wheels-macos-x86_64
           path: python-bindings/dist
 
+  # Apple-silicon wheel is built natively on a macOS arm64 runner rather than
+  # zig-cross-compiled: aws-lc-sys (pulled in transitively via reqwest's rustls
+  # TLS) needs the real macOS SDK (CoreServices.h) and `-march=armv8.4` support,
+  # neither of which zig's cross toolchain provides.
+  macos-arm:
+    runs-on: macos-14 # Apple silicon runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Override version if specified
+        if: github.event.inputs.version != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_VERSION='${{ github.event.inputs.version }}'
+          VERSION_SEMVER="$INPUT_VERSION"
+          if [[ "$INPUT_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(a|b|rc)([0-9]+)$ ]]; then
+            BASE="${BASH_REMATCH[1]}"
+            TAG="${BASH_REMATCH[2]}"
+            NUM="${BASH_REMATCH[3]}"
+            case "$TAG" in
+              a) PRE="alpha" ;;
+              b) PRE="beta" ;;
+              rc) PRE="rc" ;;
+            esac
+            VERSION_SEMVER="${BASE}-${PRE}.${NUM}"
+          fi
+          export VERSION_SEMVER
+          python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn("^(version\\s*=\\s*)\"[^\"]*\"", lambda m: m.group(1)+f"\"{ver}\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
+          grep '^version' Cargo.toml
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Setup Python 3.8
+        run: uv python install 3.8
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Build wheel natively
+        working-directory: python-bindings
+        run: |
+          uv sync
+          uv run python scripts/build_wheels.py \
+            --platforms macos-aarch64 \
+            --install-targets \
+            --output-dir dist
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-macos-aarch64
+          path: python-bindings/dist
+
   sdist:
     runs-on: ubuntu-latest
     steps:
@@ -243,7 +296,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi')
-    needs: [build-wheels, windows, macos-intel, sdist]
+    needs: [build-wheels, windows, macos-intel, macos-arm, sdist]
     environment:
       name: pypi
       url: https://pypi.org/p/dcap-qvl
@@ -268,7 +321,7 @@ jobs:
     name: Test Release
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && github.ref == 'refs/heads/python-bindings') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi')
-    needs: [build-wheels, windows, macos-intel, sdist]
+    needs: [build-wheels, windows, macos-intel, macos-arm, sdist]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/dcap-qvl
@@ -293,7 +346,7 @@ jobs:
   test-wheels:
     name: Test Wheels
     runs-on: ${{ matrix.os }}
-    needs: [build-wheels, windows, macos-intel]
+    needs: [build-wheels, windows, macos-intel, macos-arm]
     if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
