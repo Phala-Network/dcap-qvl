@@ -46,10 +46,11 @@ jobs:
               COMMIT_VERSION="true"
               echo "Triggered by npm-only tag push: npm-v$VERSION"
             else
-              # Unified tag: v0.5.3 -> 0.5.3. package.json was already bumped in
-              # the release commit, so don't commit back from a tag build.
+              # Unified tag: v0.5.3 -> 0.5.3. package.json was already bumped to
+              # this version in the release commit, so don't run `npm version`
+              # (it errors "Version not changed") and don't commit back.
               VERSION=${GITHUB_REF#refs/tags/v}
-              UPDATE_VERSION="true"
+              UPDATE_VERSION="false"
               COMMIT_VERSION="false"
               echo "Triggered by unified tag push: v$VERSION"
             fi
