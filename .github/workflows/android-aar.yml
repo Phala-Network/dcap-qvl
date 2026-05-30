@@ -91,9 +91,9 @@ jobs:
 
       # ----- Publish step (gated by input / tag) -----
       # Uploads a signed bundle to the Sonatype Central Portal via the
-      # Vanniktech maven-publish plugin (`publishToMavenCentral`). The
-      # deployment lands in the portal as USER_MANAGED (automaticRelease=false),
-      # so it must be promoted to public manually in the Deployments tab.
+      # Vanniktech maven-publish plugin (`publishToMavenCentral`). With
+      # `automaticRelease = true` the deployment auto-publishes to Maven
+      # Central once validation passes — no manual promotion needed.
       #
       # Secrets required (in the `maven-central` GitHub Environment):
       #   OSSRH_USERNAME — Sonatype Central user token name

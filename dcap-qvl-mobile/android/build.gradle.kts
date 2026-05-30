@@ -83,10 +83,12 @@ mavenPublishing {
     // Publish the single Android `release` variant with sources + javadoc jars.
     configure(AndroidSingleVariantLibrary(variant = "release", sourcesJar = true, publishJavadocJar = true))
 
-    // Upload to the Sonatype Central Portal. `automaticRelease = false` leaves
-    // the deployment in the portal for manual promotion — required for the
-    // first release of a new namespace; later releases can flip this to true.
-    publishToMavenCentral(automaticRelease = false)
+    // Upload to the Sonatype Central Portal and auto-publish once the
+    // deployment passes validation — a tag push goes live with no manual
+    // promotion. The `com.phala` namespace's first releases (0.5.0/0.5.1)
+    // were promoted by hand; now that it's established this is hands-off.
+    // (Flip back to `false` to stage for manual review if ever needed.)
+    publishToMavenCentral(automaticRelease = true)
 
     // PGP-sign all artifacts. Credentials come from the
     // `ORG_GRADLE_PROJECT_signingInMemoryKey*` env vars (see the workflow).

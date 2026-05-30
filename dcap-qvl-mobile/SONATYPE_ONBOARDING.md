@@ -111,16 +111,19 @@ The workflow:
 4. runs the JVM unit tests;
 5. signs + uploads to Sonatype Central.
 
-After the upload, the Central portal will show the deployment under
-**Deployments**. The first release of a new namespace needs to be
-manually promoted from staging to public (later releases auto-promote
-if you tick the "Auto-publish" checkbox).
+The build uses `publishToMavenCentral(automaticRelease = true)`, so the
+deployment auto-publishes to Maven Central once it passes validation — no
+manual step. (The first two releases, 0.5.0 and 0.5.1, were promoted by hand
+while the namespace was new; the flag was flipped to auto afterwards.) You can
+still watch progress under **Deployments** in the portal, and flip the flag
+back to `false` in `android/build.gradle.kts` if you ever want to stage a
+release for manual review.
 
 Consumers can then add:
 
 ```kotlin
 dependencies {
-    implementation("com.phala:dcap-qvl-android:0.5.0")
+    implementation("com.phala:dcap-qvl-android:0.5.1")
 }
 ```
 
