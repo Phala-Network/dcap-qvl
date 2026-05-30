@@ -25,17 +25,19 @@ Tag `v<X.Y.Z>` (the unified release tag) → `.github/workflows/ios-release.yml`
 Consumers then resolve `https://github.com/Phala-Network/dcap-qvl-swift` at the
 matching version — the same `X.Y.Z` as crates.io / npm / Maven.
 
-### Required secret (one-time)
+### Cross-repo auth (already set up)
 
 The satellite push needs write access to a second repo, which the default
-`GITHUB_TOKEN` can't grant. Add a repository (or `release`-environment) secret:
+`GITHUB_TOKEN` can't grant. Instead of a user-level PAT, this uses a
+**write-enabled deploy key** scoped to just `dcap-qvl-swift`:
 
-| Secret             | Value                                                                 |
-| ------------------ | --------------------------------------------------------------------- |
-| `SWIFT_REPO_TOKEN` | A fine-grained PAT with **Contents: read/write** on `Phala-Network/dcap-qvl-swift` |
+- the public half is a read-write **deploy key** on `Phala-Network/dcap-qvl-swift`;
+- the private half is the `SWIFT_REPO_SSH_KEY` secret on this repo.
 
-Without it the workflow still builds the XCFramework and computes the checksum
-(handy for a dry run), and just skips the satellite push with a warning.
+Both were provisioned with the `gh` CLI (`gh repo deploy-key add --allow-write`
++ `gh secret set`). To rotate: `ssh-keygen` a new pair, replace the deploy key
+and the secret. Without the secret the workflow still builds + checksums and
+just skips the push with a warning.
 
 ### Dry run (no tag, no publish)
 

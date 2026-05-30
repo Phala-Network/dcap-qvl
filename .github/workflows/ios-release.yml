@@ -91,20 +91,27 @@ jobs:
           (github.event_name == 'push') ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.push_satellite == 'true')
         env:
-          SWIFT_REPO_TOKEN: ${{ secrets.SWIFT_REPO_TOKEN }}
+          SWIFT_REPO_SSH_KEY: ${{ secrets.SWIFT_REPO_SSH_KEY }}
           TAG: ${{ steps.ver.outputs.tag }}
           VERSION: ${{ steps.ver.outputs.version }}
           CHECKSUM: ${{ steps.pkg.outputs.checksum }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${SWIFT_REPO_TOKEN:-}" ]]; then
-            echo "::warning::SWIFT_REPO_TOKEN not set — skipping satellite push. Build + checksum succeeded."
+          if [[ -z "${SWIFT_REPO_SSH_KEY:-}" ]]; then
+            echo "::warning::SWIFT_REPO_SSH_KEY not set — skipping satellite push. Build + checksum succeeded."
             exit 0
           fi
           URL="https://github.com/Phala-Network/dcap-qvl/releases/download/${TAG}/DcapQvlFFI.xcframework.zip"
 
-          git clone "https://x-access-token:${SWIFT_REPO_TOKEN}@github.com/${SATELLITE_REPO}.git" sat
+          # Auth via the write-enabled deploy key on dcap-qvl-swift (scoped to
+          # that one repo — no user-level PAT).
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SWIFT_REPO_SSH_KEY" > ~/.ssh/swift_deploy
+          chmod 600 ~/.ssh/swift_deploy
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/swift_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+          git clone "git@github.com:${SATELLITE_REPO}.git" sat
           cd sat
           git config user.name  "phala-release-bot"
           git config user.email "dev@phala.com"
