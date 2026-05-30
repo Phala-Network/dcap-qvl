@@ -168,6 +168,64 @@ jobs:
         working-directory: dcap-qvl-mobile/android
         run: gradle --no-daemon test
 
+  mobile-bindings-android-emulator:
+    name: Android emulator runtime test
+    runs-on: ubuntu-latest
+    # Gated behind the cheap build+unit-test job: the emulator (the most
+    # expensive minutes here) only spins up once the AAR builds and the
+    # instrumented test is known to compile + package.
+    needs: mobile-bindings-android
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build Android AAR + stage instrumented-test fixtures
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: ./dcap-qvl-mobile/scripts/build_android.sh
+
+      # GitHub-hosted ubuntu runners expose nested virtualization; enabling
+      # KVM lets the emulator boot fast (vs. ~4 min software emulation).
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run instrumented tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: default
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-audio -no-boot-anim
+          disable-animations: true
+          script: cd dcap-qvl-mobile/android && gradle --no-daemon :connectedDebugAndroidTest
+
   mobile-bindings-ios:
     name: Build iOS XCFramework + run Swift tests
     runs-on: macos-14

@@ -18,7 +18,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.phala:dcap-qvl-android:0.5.0")
+    implementation("com.phala:dcap-qvl-android:0.5.1")
 }
 ```
 

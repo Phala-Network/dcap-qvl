@@ -15,7 +15,7 @@ plugins {
 }
 
 group = "com.phala"
-version = "0.5.0"
+version = "0.5.1"
 
 android {
     namespace = "com.phala.dcapqvl"
@@ -25,6 +25,7 @@ android {
         minSdk = 21
         ndkVersion = "26.1.10909125"
         consumerProguardFiles("consumer-rules.pro")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -39,6 +40,7 @@ android {
     // Where `scripts/build_android.sh` deposits the cross-compiled .so files.
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
     sourceSets["test"].java.srcDirs("src/test/kotlin")
+    sourceSets["androidTest"].java.srcDirs("src/androidTest/kotlin")
     // For the local JVM test task, JNA must be able to locate the host-arch
     // .so. The build script (`scripts/build_android.sh`) copies the host build
     // into `.host-jna/` (outside `build/`, so `gradle clean` can't wipe it
@@ -69,6 +71,12 @@ dependencies {
     // The `org.json` package is stubbed in android.jar — local unit tests
     // need a real implementation on the classpath.
     testImplementation("org.json:json:20240303")
+
+    // Instrumented (on-device) test that exercises the real JNA-extract-from-
+    // AAR `.so` loading path. `org.json` and `java.time` are provided by the
+    // device runtime, so no extra deps are needed there.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
 
 mavenPublishing {
