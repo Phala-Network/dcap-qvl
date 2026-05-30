@@ -1,0 +1,147 @@
+name: Release iOS Swift Package
+
+# Fires on the unified release tag (e.g. v0.6.0) — the same tag that releases
+# the Rust crate / npm / Android. Builds the XCFramework, attaches it to the
+# GitHub Release, and pushes the matching version to the dcap-qvl-swift
+# distribution repo with the checksum filled in.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.6.0). For a dry run without a real tag."
+        required: true
+        type: string
+      push_satellite:
+        description: "Push to the dcap-qvl-swift repo (off = build + checksum only)"
+        required: true
+        type: boolean
+        default: false
+
+env:
+  SATELLITE_REPO: Phala-Network/dcap-qvl-swift
+
+jobs:
+  release-swift:
+    name: Build XCFramework + publish Swift package
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve tag / version
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${TAG#v}"            # strip leading v → SwiftPM semver
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag=$TAG Version=$VERSION"
+
+      - name: Setup Rust + Apple targets
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build XCFramework + generated Swift sources
+        run: ./dcap-qvl-mobile/scripts/build_ios.sh
+
+      - name: Package XCFramework + compute checksum
+        id: pkg
+        working-directory: dcap-qvl-mobile/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `ditto` preserves the framework's symlinks/structure; SwiftPM
+          # expects the .xcframework at the zip root.
+          ditto -c -k --sequesterRsrc --keepParent DcapQvlFFI.xcframework DcapQvlFFI.xcframework.zip
+          CHECKSUM="$(swift package compute-checksum DcapQvlFFI.xcframework.zip)"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+          echo "Checksum: $CHECKSUM"
+          ls -lh DcapQvlFFI.xcframework.zip
+
+      - name: Attach XCFramework to the GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        working-directory: dcap-qvl-mobile/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Idempotent: create the release if another job hasn't already.
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --notes "Automated release. iOS XCFramework attached." --verify-tag
+          gh release upload "$TAG" DcapQvlFFI.xcframework.zip --clobber
+
+      # ----- Push the rendered package to the dcap-qvl-swift satellite -----
+      # Requires a SWIFT_REPO_TOKEN secret (a PAT / fine-grained token with
+      # contents:write on Phala-Network/dcap-qvl-swift). Without it, the build
+      # + checksum still run; only this push is skipped.
+      - name: Publish to dcap-qvl-swift
+        if: |
+          (github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.push_satellite == 'true')
+        env:
+          SWIFT_REPO_TOKEN: ${{ secrets.SWIFT_REPO_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          CHECKSUM: ${{ steps.pkg.outputs.checksum }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SWIFT_REPO_TOKEN:-}" ]]; then
+            echo "::warning::SWIFT_REPO_TOKEN not set — skipping satellite push. Build + checksum succeeded."
+            exit 0
+          fi
+          URL="https://github.com/Phala-Network/dcap-qvl/releases/download/${TAG}/DcapQvlFFI.xcframework.zip"
+
+          git clone "https://x-access-token:${SWIFT_REPO_TOKEN}@github.com/${SATELLITE_REPO}.git" sat
+          cd sat
+          git config user.name  "phala-release-bot"
+          git config user.email "dev@phala.com"
+
+          # Replace the generated Swift sources.
+          rm -rf Sources/DcapQvl
+          mkdir -p Sources/DcapQvl
+          cp "$GITHUB_WORKSPACE/dcap-qvl-mobile/ios/Sources/DcapQvl/DcapQvl.swift" Sources/DcapQvl/DcapQvl.swift
+
+          # Render the release manifest with the remote binary target.
+          cat > Package.swift <<EOF
+          // swift-tools-version:5.7
+          import PackageDescription
+
+          let package = Package(
+              name: "DcapQvl",
+              platforms: [
+                  .iOS(.v13),
+                  .macOS(.v11),
+              ],
+              products: [
+                  .library(name: "DcapQvl", targets: ["DcapQvl"]),
+              ],
+              targets: [
+                  .binaryTarget(
+                      name: "DcapQvlFFI",
+                      url: "${URL}",
+                      checksum: "${CHECKSUM}"
+                  ),
+                  .target(name: "DcapQvl", dependencies: ["DcapQvlFFI"], path: "Sources/DcapQvl"),
+              ]
+          )
+          EOF
+
+          git add -A
+          git commit -m "release: ${VERSION} (DcapQvlFFI.xcframework ${CHECKSUM})"
+          git tag "${VERSION}"
+          git push origin HEAD:master
+          git push origin "${VERSION}"
+          echo "Pushed ${SATELLITE_REPO}@${VERSION}"
