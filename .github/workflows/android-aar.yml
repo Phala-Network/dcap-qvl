@@ -3,7 +3,8 @@ name: Build and Publish Android AAR
 on:
   push:
     tags:
-      - "android-v*"        # e.g. android-v0.5.0 → publishes 0.5.0
+      - "v*"               # unified release tag, e.g. v0.5.3 → publishes 0.5.3
+      - "android-v*"       # android-only release, e.g. android-v0.5.3
   workflow_dispatch:
     inputs:
       version:
@@ -40,6 +41,8 @@ jobs:
             VERSION="${{ github.event.inputs.version }}"
           elif [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/android-v}"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
           else
             VERSION="$(grep -E '^version\s*=' dcap-qvl-mobile/Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
           fi
@@ -103,7 +106,7 @@ jobs:
       # (No signing passphrase — the release key is unprotected.)
       - name: Publish to Maven Central
         if: |
-          startsWith(github.ref, 'refs/tags/android-v')
+          startsWith(github.ref, 'refs/tags/')
           || github.event.inputs.publish_target == 'sonatype'
         working-directory: dcap-qvl-mobile/android
         env:
