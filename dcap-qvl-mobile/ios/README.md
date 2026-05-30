@@ -6,19 +6,21 @@ backed by `DcapQvlFFI.xcframework` (Rust static libs for `arm64` device +
 
 ## Install
 
-The Swift Package lives at `dcap-qvl-mobile/ios/` inside the dcap-qvl
-monorepo — SwiftPM doesn't resolve sub-directory packages from a URL, so until
-a dedicated `dcap-qvl-swift` repo or a tagged release ships, consume it via a
-local path:
+Released versions are published to the **[`dcap-qvl-swift`](https://github.com/Phala-Network/dcap-qvl-swift)**
+distribution repo (SwiftPM can't resolve a sub-directory package, so the
+`ios-release` workflow mirrors each `v*` release there with the XCFramework URL
++ checksum filled in). The version numbers match the unified `dcap-qvl` release.
 
 ```swift
 // Package.swift
-.package(path: "../dcap-qvl/dcap-qvl-mobile/ios")
+.package(url: "https://github.com/Phala-Network/dcap-qvl-swift", from: "0.6.0")
 ```
 
-or in Xcode: **File → Add Package Dependencies… → Add Local…** and pick the
-`dcap-qvl-mobile/ios` directory. A standalone published SwiftPM artifact is
-tracked as a follow-up.
+or in Xcode: **File → Add Package Dependencies…** and paste the URL.
+
+For local development against an unreleased checkout, point at this directory
+instead: `.package(path: "../dcap-qvl/dcap-qvl-mobile/ios")` (run
+`scripts/build_ios.sh` first to produce the local `DcapQvlFFI.xcframework`).
 
 ## Use
 
