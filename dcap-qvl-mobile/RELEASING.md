@@ -50,7 +50,19 @@ the satellite repo.
 
 ## Unified versioning
 
-`crates.io`, `npm`, Maven Central, and SwiftPM all share one `X.Y.Z`. The iOS
-pipeline keys on the bare `v<X.Y.Z>` tag; Android keeps its `android-v*` trigger
-for now. Consolidating every ecosystem onto a single `v*` tag is a follow-up —
-it only needs the existing per-ecosystem workflows' triggers pointed at `v*`.
+A single **`v<X.Y.Z>`** tag releases every ecosystem at the same version:
+
+| Workflow | Publishes |
+| --- | --- |
+| `release.yml` | `dcap-qvl` + `dcap-qvl-cli` → crates.io, CLI binaries, GitHub Release |
+| `python-wheels.yml` | `dcap-qvl` wheels → PyPI |
+| `android-aar.yml` | `com.phala:dcap-qvl-android` → Maven Central |
+| `publish-npm.yml` | `@phala/dcap-qvl` → npm |
+| `ios-release.yml` | Swift package → `dcap-qvl-swift` |
+
+Bump every manifest to the new version first (root `Cargo.toml`,
+`cli/Cargo.toml` + its `dcap-qvl` dep, `dcap-qvl-js/package.json`,
+`dcap-qvl-mobile/Cargo.toml`), commit, then push the `v<X.Y.Z>` tag.
+
+The per-ecosystem prefixes (`android-v*`, `npm-v*`) still work for releasing a
+single ecosystem out of band, but the normal path is one `v*` tag for all.

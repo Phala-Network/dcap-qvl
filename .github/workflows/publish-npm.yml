@@ -3,7 +3,8 @@ name: Publish npm Package
 on:
   push:
     tags:
-      - "npm-v*"  # Trigger on tags like npm-v0.0.1
+      - "v*"      # unified release tag, e.g. v0.5.3
+      - "npm-v*"  # npm-only release, e.g. npm-v0.0.1
   workflow_dispatch:
     inputs:
       version:
@@ -37,12 +38,21 @@ jobs:
         id: npm-meta
         run: |
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            # Tag push: npm-v0.1.0 -> version=0.1.0, npm_tag=latest
             NPM_TAG="latest"
-            VERSION=${GITHUB_REF#refs/tags/npm-v}
-            UPDATE_VERSION="true"  # Update package.json to match tag
-            COMMIT_VERSION="true"  # Commit back to keep repository in sync
-            echo "Triggered by tag push: npm-v$VERSION"
+            if [[ "$GITHUB_REF" == refs/tags/npm-v* ]]; then
+              # npm-only tag: npm-v0.1.0 -> 0.1.0; patch package.json + commit back.
+              VERSION=${GITHUB_REF#refs/tags/npm-v}
+              UPDATE_VERSION="true"
+              COMMIT_VERSION="true"
+              echo "Triggered by npm-only tag push: npm-v$VERSION"
+            else
+              # Unified tag: v0.5.3 -> 0.5.3. package.json was already bumped in
+              # the release commit, so don't commit back from a tag build.
+              VERSION=${GITHUB_REF#refs/tags/v}
+              UPDATE_VERSION="true"
+              COMMIT_VERSION="false"
+              echo "Triggered by unified tag push: v$VERSION"
+            fi
           else
             # Manual dispatch
             NPM_TAG="${{ github.event.inputs.npm_tag || 'beta' }}"
