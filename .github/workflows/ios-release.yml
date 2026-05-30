@@ -77,7 +77,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Idempotent: create the release if another job hasn't already.
+          # The `release.yml` workflow owns release creation (via
+          # actions/create-release, which errors if the release already
+          # exists). To avoid a race on the shared `v*` tag, wait for that
+          # release to appear, then only upload — never create it here.
+          for i in $(seq 1 30); do
+            if gh release view "$TAG" >/dev/null 2>&1; then break; fi
+            echo "Waiting for release $TAG to be created… ($i/30)"
+            sleep 10
+          done
+          # Fallback: if release.yml didn't run (e.g. a non-v tag), create it.
           gh release view "$TAG" >/dev/null 2>&1 \
             || gh release create "$TAG" --title "$TAG" --notes "Automated release. iOS XCFramework attached." --verify-tag
           gh release upload "$TAG" DcapQvlFFI.xcframework.zip --clobber
