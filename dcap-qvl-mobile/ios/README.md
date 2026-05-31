@@ -1,5 +1,8 @@
 # dcap-qvl for iOS / macOS
 
+> Part of [**dcap-qvl**](../../) — see the [main README](../../README.md) for the
+> library and the other language bindings.
+
 Native Swift Package for [`dcap-qvl`](../../). Distributed as a SwiftPM module
 backed by `DcapQvlFFI.xcframework` (Rust static libs for `arm64` device +
 `arm64`/`x86_64` simulator).

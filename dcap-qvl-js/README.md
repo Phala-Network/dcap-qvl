@@ -1,6 +1,11 @@
-# dcap-qvl-js
+# dcap-qvl for JavaScript
 
-Pure JavaScript implementation of Intel SGX DCAP Quote Verification Library.
+Pure-JavaScript implementation of Intel SGX and TDX (DCAP) quote verification.
+Runs in Node and the browser with no native dependencies.
+
+> Part of [**dcap-qvl**](../) — see the [main README](../README.md) for the Rust
+> core and the other language bindings. (For a WebAssembly build of the Rust core
+> instead of this pure-JS port, use `@phala/dcap-qvl-web` / `@phala/dcap-qvl-node`.)
 
 ## Description
 

@@ -1,5 +1,8 @@
 # dcap-qvl for Android
 
+> Part of [**dcap-qvl**](../../) — see the [main README](../../README.md) for the
+> library and the other language bindings.
+
 Native Android binding for [`dcap-qvl`](../../). Published as an AAR
 (`com.phala:dcap-qvl-android`) that bundles:
 
