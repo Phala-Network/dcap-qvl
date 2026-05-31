@@ -1,142 +1,79 @@
-# DCAP-QVL Python Bindings
+# dcap-qvl for Python
 
-This directory contains the Python bindings for the DCAP-QVL (Data Center Attestation Primitives Quote Verification Library) implemented in Rust.
+Verify Intel SGX and TDX (DCAP) attestation quotes from Python, with a clean
+async API. Built on the Rust [`dcap-qvl`](../) core via [PyO3](https://pyo3.rs/).
 
-## Directory Structure
+> Part of [**dcap-qvl**](../) — see the [main README](../README.md) for the
+> library and the other language bindings.
 
-```
-python-bindings/
-├── README.md                    # This file
-├── pyproject.toml              # Python project configuration
-├── uv.lock                     # uv lock file
-├── python/                     # Python package source
-│   └── dcap_qvl/
-│       ├── __init__.py         # Main package with async API
-├── examples/                   # Example scripts
-│   ├── basic_test.py          # Basic functionality test
-│   └── python_example.py      # Real-world usage example
-├── tests/                      # All test files
-│   ├── test_python_bindings.py      # Basic Python binding tests
-│   ├── test_collateral_api.py       # Async collateral API tests
-│   ├── test_all_async_functions.py  # Comprehensive async tests
-│   ├── test_with_samples.py         # Tests with real sample data
-│   ├── test_async_collateral.py     # Basic async collateral tests
-│   ├── test_python_versions.sh      # Multi-version testing script
-│   ├── test_cross_versions.sh       # Cross-version compatibility
-│   └── test_installation.py         # Installation verification
-├── scripts/                    # Build scripts
-│   ├── build_wheels.py        # Wheel building script
-│   └── build_wheels.sh         # Wheel building shell script
-└── docs/                       # Documentation
-    ├── README_Python.md        # Main Python bindings documentation
-    ├── PYTHON_TESTING.md        # Python version testing guide
-    └── BUILDING.md              # Build instructions
-```
-
-## Quick Start
-
-### Building and Testing
+## Install
 
 ```bash
-# From the project root directory
-make build_python                    # Build Python bindings
-make test_python                     # Test basic functionality
-make test_python_versions            # Test across Python versions
-
-# Or directly from this directory
-cd python-bindings
-uv run maturin develop --features python
-uv run python examples/basic_test.py
+pip install dcap-qvl
 ```
 
-### Installation
+Wheels are published for CPython 3.8–3.13 on Linux, macOS, and Windows.
 
-```bash
-# Using uv (recommended)
-cd python-bindings
-uv sync
-uv run maturin develop --features python
-
-# Using pip with maturin
-pip install maturin
-cd python-bindings
-maturin develop --features python
-```
-
-## Features
-
-- **Python 3.8+ Support**: Compatible with Python 3.8 through 3.13
-- **Async API**: Full async/await support for collateral fetching and verification
-- **Modern Tooling**: Uses uv for package management and maturin for building
-- **Comprehensive Testing**: Automated testing across all supported Python versions
-- **Clean API**: Pythonic async interface to the Rust library
-- **Type Safety**: Proper error handling and type annotations with async support
-
-## API Overview
+## Quick start
 
 ```python
 import asyncio
 import dcap_qvl
 
 async def main():
-    # Get collateral from Intel PCS (async)
-    quote_data = open("quote.bin", "rb").read()
-    collateral = await dcap_qvl.get_collateral_from_pcs(quote_data)
+    quote = open("quote.bin", "rb").read()
 
-    # Or fetch from a custom PCCS URL
-    collateral = await dcap_qvl.get_collateral(
-        "https://pccs.phala.network", quote_data
-    )
+    # Fetch collateral and verify in one step (defaults to Phala's PCCS).
+    result = await dcap_qvl.get_collateral_and_verify(quote)
+    print("status:", result.status)
+    print("advisories:", result.advisory_ids)
 
-    # Verify quote with collateral
-    result = dcap_qvl.verify(quote_data, collateral, timestamp)
-    print(f"Status: {result.status}")
-
-    # Or get collateral and verify in one step (async)
-    result = await dcap_qvl.get_collateral_and_verify(quote_data)
-    print(f"Advisory IDs: {result.advisory_ids}")
-
-# Run async code
 asyncio.run(main())
 ```
 
-## Documentation
+## API
 
-- **[README_Python.md](docs/README_Python.md)**: Complete API documentation and usage guide
-- **[PYTHON_TESTING.md](docs/PYTHON_TESTING.md)**: Python version compatibility testing guide
+```python
+# One-step: fetch collateral from a PCCS and verify.
+result = await dcap_qvl.get_collateral_and_verify(quote, pccs_url=None)
 
-## Development
+# Or do it in two steps.
+collateral = await dcap_qvl.get_collateral("https://pccs.phala.network", quote)
+collateral = await dcap_qvl.get_collateral_from_pcs(quote)   # Intel PCS
+result = dcap_qvl.verify(quote, collateral, timestamp)        # synchronous
 
-The Python bindings are built using:
+# Parse a quote without verifying.
+quote_obj = dcap_qvl.parse_quote(raw_quote)
+```
 
-- **[PyO3](https://pyo3.rs/)**: Rust bindings for Python
-- **[maturin](https://github.com/PyO3/maturin)**: Build tool for Rust-based Python extensions
-- **[uv](https://github.com/astral-sh/uv)**: Modern Python package management
+`result` is a `VerifiedReport` with `status`, `advisory_ids`, `report`, and
+`ppid`. Collateral fetching is async; `verify()` itself is synchronous.
 
-### Adding New Features
+See [docs/README_Python.md](docs/README_Python.md) for the complete API
+reference.
 
-1. Add Rust implementation in `../src/python.rs`
-2. Update Python package in `python/dcap_qvl/__init__.py`
-3. Add tests in `tests/` directory (use appropriate test file)
-4. Update documentation in `docs/`
+## Develop
 
-### Testing
+Build the extension locally and run the tests:
 
-The project includes comprehensive testing:
+```bash
+# From the repo root
+make build_python      # build the extension in-place
+make test_python       # run the test suite (incl. multiple Python versions)
 
-- **Unit tests**: Basic functionality testing with pytest
-- **Async tests**: Full async/await testing with pytest-asyncio
-- **Integration tests**: Real-world usage scenarios with sample data
-- **Version compatibility**: Testing across Python 3.8-3.13
-- **Cross-version testing**: Automated testing across multiple Python versions
-- **CI/CD**: Automated testing in GitHub Actions
+# Or directly, with uv
+cd python-bindings
+uv sync
+uv run maturin develop --features python
+uv run python examples/basic_test.py
+```
 
-## Requirements
-
-- Python 3.8+
-- Rust toolchain (for building)
-- uv (recommended) or pip with maturin
+Layout: Rust glue in [`../src/python.rs`](../src/python.rs), the Python package
+in [`python/dcap_qvl/`](python/dcap_qvl/), tests in [`tests/`](tests/), and
+build scripts in [`scripts/`](scripts/). Build details are in
+[docs/BUILDING.md](docs/BUILDING.md); version-compatibility testing is in
+[docs/PYTHON_TESTING.md](docs/PYTHON_TESTING.md).
 
 ## License
 
-MIT License - see [../LICENSE](../LICENSE) for details.
+MIT — see [../LICENSE](../LICENSE).

@@ -1,6 +1,10 @@
-# DCAP-QVL Go Bindings
+# dcap-qvl for Go
 
-Go bindings for `dcap-qvl` (DCAP Quote Verification Library) via CGO + Rust FFI.
+Verify Intel SGX and TDX (DCAP) attestation quotes from Go, via CGO over the
+Rust [`dcap-qvl`](../) core.
+
+> Part of [**dcap-qvl**](../) — see the [main README](../README.md) for the
+> library and the other language bindings.
 
 ## Install
 

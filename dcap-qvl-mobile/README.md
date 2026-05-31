@@ -1,5 +1,9 @@
 # dcap-qvl Mobile Bindings
 
+> Part of [**dcap-qvl**](../) — see the [main README](../README.md) for all
+> language bindings. Per-platform usage is in
+> [android/](android/) and [ios/](ios/).
+
 Native Kotlin and Swift bindings for [`dcap-qvl`](../), built with
 [UniFFI](https://mozilla.github.io/uniffi-rs/). A single Rust crate
 (`dcap-qvl-mobile`) defines the FFI surface; `uniffi-bindgen` emits idiomatic
