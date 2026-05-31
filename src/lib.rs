@@ -1,18 +1,21 @@
 //! # dcap-qvl
 //!
-//! This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust. It supports both SGX (Software Guard Extensions) and TDX (Trust Domain Extensions) quotes.
+//! Verify Intel SGX and TDX (DCAP — Data Center Attestation Primitives)
+//! attestation quotes, in pure Rust. Supports both SGX (Software Guard
+//! Extensions) and TDX (Trust Domain Extensions).
 //!
-//! # Features
-//! - Verify SGX and TDX quotes
-//! - Get collateral from PCCS
-//! - Extract information from quotes
+//! # What it does
+//! - Verify SGX and TDX quotes against Intel's trust chain
+//! - Fetch collateral from a PCCS or Intel PCS, or verify fully offline
+//! - Extract report fields (measurements, report data, TCB status) from a quote
 //!
-//! # Usage
-//! Add the following dependency to your `Cargo.toml` file to use this crate:
-//! ```toml
-//! [dependencies]
-//! dcap-qvl = "0.1.0"
-//! ```
+//! By default the collateral client uses Phala Network's PCCS
+//! (`https://pccs.phala.network`).
+//!
+//! Native bindings for Python, JavaScript, Go, Kotlin, and Swift are published
+//! from the same core — see the [project README][readme].
+//!
+//! [readme]: https://github.com/Phala-Network/dcap-qvl
 //!
 //! # Example
 //!
@@ -35,9 +38,40 @@
 //!
 //!     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
 //!     let report = verify(&quote, &collateral, now).expect("failed to verify quote");
-//!     println!("{:?}", report);
+//!     println!("{report:?}");
 //! }
 //! ```
+//!
+//! # Crypto backends
+//!
+//! Two backends are available: **ring** (optimized, uses assembly) and
+//! **rustcrypto** (pure Rust). Both are enabled by default and `ring` takes
+//! priority. For predictable behavior, call an explicit backend module:
+//!
+//! ```ignore
+//! use dcap_qvl::verify::ring::verify;        // always ring
+//! use dcap_qvl::verify::rustcrypto::verify;  // always rustcrypto
+//! ```
+//!
+//! The top-level [`verify::verify`] selects the backend from enabled features:
+//! `ring` wins when both are on, `rustcrypto` is used when only it is enabled,
+//! and enabling neither is a compile error. Because Cargo features are additive,
+//! any crate in your dependency tree that enables `ring` makes the top-level
+//! `verify()` use ring — reach for the explicit modules to avoid surprises.
+//!
+//! # Feature flags
+//!
+//! ```toml
+//! # Default: both backends, std, the PCCS collateral client, and x509 parsing.
+//! dcap-qvl = "0.5"
+//!
+//! # Minimal verifier for WASM / on-chain (smaller, ring only, no_std-friendly):
+//! dcap-qvl = { version = "0.5", default-features = false, features = ["std", "ring"] }
+//! ```
+//!
+//! `no_std` builds are supported by disabling default features. The `report`
+//! feature pulls in the async PCCS collateral client (`reqwest` + `tokio`); drop
+//! it for offline verification on size-constrained targets.
 
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 

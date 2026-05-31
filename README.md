@@ -1,195 +1,156 @@
-
-<!-- cargo-rdme start -->
-
 # dcap-qvl
 
-This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust. It supports both SGX (Software Guard Extensions) and TDX (Trust Domain Extensions) quotes.
+[![CI](https://github.com/Phala-Network/dcap-qvl/actions/workflows/rust.yml/badge.svg)](https://github.com/Phala-Network/dcap-qvl/actions/workflows/rust.yml)
+[![crates.io](https://img.shields.io/crates/v/dcap-qvl.svg)](https://crates.io/crates/dcap-qvl)
+[![docs.rs](https://img.shields.io/docsrs/dcap-qvl)](https://docs.rs/dcap-qvl)
+[![PyPI](https://img.shields.io/pypi/v/dcap-qvl)](https://pypi.org/project/dcap-qvl/)
+[![npm](https://img.shields.io/npm/v/@phala/dcap-qvl)](https://www.npmjs.com/package/@phala/dcap-qvl)
+[![Maven Central](https://img.shields.io/maven-central/v/com.phala/dcap-qvl-android)](https://central.sonatype.com/artifact/com.phala/dcap-qvl-android)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-# Features
-- Verify SGX and TDX quotes
-- Get collateral from PCCS or Intel PCS
-- Extract information from quotes
-- Default PCCS: Phala Network (`https://pccs.phala.network`) - recommended for better availability and lower rate limits
+**Verify Intel SGX and TDX attestation quotes.** `dcap-qvl` is a small, pure-Rust
+library that verifies DCAP (Data Center Attestation Primitives) quotes, with
+native bindings for Python, Go, Kotlin, and Swift — plus a standalone
+pure-JavaScript implementation for the web.
 
-# Usage
-Add the following dependency to your `Cargo.toml` file to use this crate:
-```toml
-[dependencies]
-dcap-qvl = "0.1.0"
-```
+## What it does
 
-# Crypto Backend Selection
+- **Verifies SGX and TDX quotes** against Intel's trust chain.
+- **Gets collateral for you** from a PCCS or Intel PCS — or verifies fully
+  **offline** with collateral you already have.
+- **Extracts report fields** from a quote: measurements, report data, TCB
+  status, and advisory IDs.
+- **Runs everywhere.** The pure-Rust core works on servers, mobile,
+  WebAssembly, and on-chain (`no_std`).
 
-This crate supports two crypto backends: **ring** (optimized, uses assembly) and **rustcrypto** (pure Rust).
+By default it uses Phala Network's PCCS (`https://pccs.phala.network`) for
+better availability and lower rate limits.
 
-## Gas/Performance Comparison (NEAR Contract)
+## Languages
 
-| Backend | Gas Consumption |
-|---------|-----------------|
-| ring | ~175 Tgas |
-| rustcrypto | ~288 Tgas |
+| Language | Package | Install | Guide |
+|---|---|---|---|
+| **Rust** | [`dcap-qvl`](https://crates.io/crates/dcap-qvl) | `cargo add dcap-qvl` | [docs.rs](https://docs.rs/dcap-qvl) |
+| **Python** | [`dcap-qvl`](https://pypi.org/project/dcap-qvl/) | `pip install dcap-qvl` | [python-bindings/](python-bindings/) |
+| **JavaScript** (pure JS) | [`@phala/dcap-qvl`](https://www.npmjs.com/package/@phala/dcap-qvl) | `npm i @phala/dcap-qvl` | [dcap-qvl-js/](dcap-qvl-js/) |
+| **Go** | `github.com/Phala-Network/dcap-qvl/golang-bindings` | `go get github.com/Phala-Network/dcap-qvl/golang-bindings` | [golang-bindings/](golang-bindings/) |
+| **Android** (Kotlin/Java) | [`com.phala:dcap-qvl-android`](https://central.sonatype.com/artifact/com.phala/dcap-qvl-android) | Gradle | [dcap-qvl-mobile/android/](dcap-qvl-mobile/android/) |
+| **Swift** (iOS/macOS) | [`dcap-qvl-swift`](https://swiftpackageindex.com/Phala-Network/dcap-qvl-swift) | SwiftPM | [dcap-qvl-mobile/ios/](dcap-qvl-mobile/ios/) |
 
-Ring saves ~113 Tgas (~39%) compared to rustcrypto.
+The JavaScript package is a standalone pure-JS port that runs in Node and the
+browser with no native dependencies. WebAssembly builds of the Rust core are
+also published as [`@phala/dcap-qvl-web`](https://www.npmjs.com/package/@phala/dcap-qvl-web)
+and [`@phala/dcap-qvl-node`](https://www.npmjs.com/package/@phala/dcap-qvl-node).
 
-## Feature Flags
+There's also a command-line tool, [`dcap-qvl-cli`](cli/) (`cargo install dcap-qvl-cli`).
 
-```toml
-# Default: both backends enabled, ring takes priority
-dcap-qvl = "0.3.11"
+## How verification works
 
-# For WASM/NEAR (recommended for gas efficiency):
-dcap-qvl = { version = "0.3.11", default-features = false, features = ["std", "ring"] }
+To verify a quote you need three things:
 
-# For pure Rust / no-assembly environments:
-dcap-qvl = { version = "0.3.11", default-features = false, features = ["std", "rustcrypto"] }
-```
+1. the **quote** bytes,
+2. the **collateral** for it — the certificates, CRLs, and TCB info that prove
+   the quote against Intel's trust chain, served by a PCCS, and
+3. the **current time**, to check the collateral hasn't expired.
 
-## Backend Selection Rules for `verify()`
+`verify()` checks the signature chain and TCB status and returns the report plus
+a status string. If you don't already have collateral, the library can fetch it
+from a PCCS for you in one step.
 
-The top-level `verify()` function selects backend based on enabled features:
+## Quick start
 
-| `ring` enabled | `rustcrypto` enabled | `verify()` uses |
-|----------------|----------------------|-----------------|
-| ✓ | ✓ | ring |
-| ✓ | ✗ | ring |
-| ✗ | ✓ | rustcrypto |
-| ✗ | ✗ | compile error |
-
-⚠️ **Important**: Due to Cargo's additive feature model, if **any** crate in your dependency tree enables the `ring` feature, the top-level `verify()` will use ring. This can lead to unexpected behavior in complex projects.
-
-## Explicit Backend Selection (Recommended)
-
-For predictable behavior, especially in complex projects, use explicit backend modules:
-
-```rust
-// Explicitly use ring backend
-use dcap_qvl::verify::ring::verify;
-
-// Explicitly use rustcrypto backend
-use dcap_qvl::verify::rustcrypto::verify;
-```
-
-# Example
+### Rust
 
 ```rust
-use dcap_qvl::collateral::get_collateral;
-// Use explicit backend for predictable behavior
-use dcap_qvl::verify::ring::verify;
+use dcap_qvl::collateral::CollateralClient;
+use dcap_qvl::verify::verify;
 use dcap_qvl::PHALA_PCCS_URL;
 
-#[tokio::main]
-async fn main() {
-    let quote = std::fs::read("quote").expect("quote file not found");
-
-    // Use default Phala PCCS, or override with custom URL
-    let pccs_url = std::env::var("PCCS_URL").unwrap_or_else(|_| PHALA_PCCS_URL.to_string());
-    let collateral = get_collateral(&pccs_url, &quote).await.expect("failed to get collateral");
-
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let report = verify(&quote, &collateral, now).expect("failed to verify quote");
-    println!("{:?}", report);
-}
+let quote = std::fs::read("quote.bin")?;
+let collateral = CollateralClient::with_default_http(PHALA_PCCS_URL)?
+    .fetch(&quote)
+    .await?;
+let now = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)?
+    .as_secs();
+let report = verify(&quote, &collateral, now)?;
+println!("status = {}", report.status);
 ```
 
-<!-- cargo-rdme end -->
+See the [docs.rs page](https://docs.rs/dcap-qvl) for crypto-backend selection,
+feature flags, `no_std`, and offline verification.
 
-# Python Bindings
-
-Python bindings are available for this crate, providing a Pythonic interface to the DCAP quote verification functionality.
-
-## Quick Start
-
-```bash
-# Build and test Python bindings
-make build_python
-make test_python
-
-# Test across Python versions (3.8-3.13)
-make test_python_versions
-```
-
-## Usage
+### Python
 
 ```python
-import asyncio
-import dcap_qvl
+import asyncio, dcap_qvl
 
 async def main():
-    quote_data = open("quote.bin", "rb").read()
-
-    # Get collateral and verify in one step (defaults to Phala PCCS)
-    result = await dcap_qvl.get_collateral_and_verify(quote_data)
-    print(f"Status: {result.status}")
+    quote = open("quote.bin", "rb").read()
+    result = await dcap_qvl.get_collateral_and_verify(quote)  # defaults to Phala PCCS
+    print(result.status)
 
 asyncio.run(main())
 ```
 
-See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.
+### JavaScript
 
-# Android (Kotlin / Java) Bindings
+```javascript
+import { getCollateralAndVerify } from '@phala/dcap-qvl';
 
-Native Android bindings, generated from the same Rust core via [UniFFI](https://mozilla.github.io/uniffi-rs/)
-and published to Maven Central as `com.phala:dcap-qvl-android`.
-
-## Quick Start
-
-```kotlin
-// app/build.gradle.kts
-dependencies {
-    implementation("com.phala:dcap-qvl-android:0.5.2")
-}
+const result = await getCollateralAndVerify(quoteBuffer); // defaults to Phala PCCS
+console.log(result.status);
 ```
 
-## Usage
+### Android (Kotlin)
 
 ```kotlin
 import com.phala.dcapqvl.*
 
-// `collateralJson` is the raw PCCS response body — fetch it with your own
-// HTTP stack (OkHttp / Ktor) and pass the bytes straight in.
-val collateralJson: ByteArray = httpClient.get(pccsUrl).body()
-val quote = parseQuote(rawQuote)
-val report = verify(rawQuote, collateralJson, (System.currentTimeMillis() / 1000).toULong())
-println("status=${report.status} advisories=${report.advisoryIds}")
+// collateralJson is the raw PCCS response body — fetch it with OkHttp / Ktor.
+val report = verify(rawQuote, collateralJson, nowSecs)
+println(report.status)
 ```
 
-Java callers use the same package via the generated types. Verification is
-synchronous; wrap in `withContext(Dispatchers.IO)` off the main thread.
-
-See [dcap-qvl-mobile/android/](dcap-qvl-mobile/android/) for complete documentation.
-
-# Swift (iOS / macOS) Bindings
-
-Native Swift bindings, generated via UniFFI and distributed as a Swift Package
-backed by an `XCFramework`.
-
-## Quick Start
-
-```swift
-// Package.swift
-.package(url: "https://github.com/Phala-Network/dcap-qvl-swift", from: "0.5.2")
-```
-
-or in Xcode: **File → Add Package Dependencies…** and paste the URL.
-
-## Usage
+### Swift
 
 ```swift
 import DcapQvl
 
-// `collateralJson` is the raw PCCS response body — fetch it via URLSession.
-let (collateralJson, _) = try await URLSession.shared.data(from: pccsURL)
-let quote = try parseQuote(rawQuote: rawQuote)
-let report = try verify(
-    rawQuote: rawQuote,
-    collateralJson: collateralJson,
-    nowSecs: UInt64(Date().timeIntervalSince1970)
-)
-print(report.status, report.advisoryIds)
+let report = try verify(rawQuote: rawQuote, collateralJson: collateralJson, nowSecs: nowSecs)
+print(report.status)
 ```
 
-See [dcap-qvl-mobile/ios/](dcap-qvl-mobile/ios/) for complete documentation.
+### Go
 
-# License
+```go
+import dcap "github.com/Phala-Network/dcap-qvl/golang-bindings"
 
-This crate is licensed under the MIT license. See the LICENSE file for details.
+report, _ := dcap.GetCollateralAndVerify(rawQuote, dcap.PhalaPCCSURL)
+fmt.Println(report.Status)
+```
+
+Each binding's directory (linked in the table above) has full documentation and
+runnable examples.
+
+## Building and testing
+
+Common tasks are in the [Makefile](Makefile):
+
+```bash
+cargo test              # test the Rust core
+make build_python       # build + test the Python bindings
+make test_wasm          # test the WASM packages
+make build_mobile_android  # build the Android AAR
+make build_mobile_ios      # build the iOS XCFramework (macOS only)
+```
+
+## Releasing
+
+A single `v<X.Y.Z>` tag publishes every ecosystem at one version — crates.io,
+PyPI, npm, Maven Central, and the Swift Package Index. See
+[dcap-qvl-mobile/RELEASING.md](dcap-qvl-mobile/RELEASING.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
