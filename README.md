@@ -126,6 +126,70 @@ asyncio.run(main())
 
 See [python-bindings/](python-bindings/) for complete documentation, examples, and testing information.
 
+# Android (Kotlin / Java) Bindings
+
+Native Android bindings, generated from the same Rust core via [UniFFI](https://mozilla.github.io/uniffi-rs/)
+and published to Maven Central as `com.phala:dcap-qvl-android`.
+
+## Quick Start
+
+```kotlin
+// app/build.gradle.kts
+dependencies {
+    implementation("com.phala:dcap-qvl-android:0.5.2")
+}
+```
+
+## Usage
+
+```kotlin
+import com.phala.dcapqvl.*
+
+// `collateralJson` is the raw PCCS response body — fetch it with your own
+// HTTP stack (OkHttp / Ktor) and pass the bytes straight in.
+val collateralJson: ByteArray = httpClient.get(pccsUrl).body()
+val quote = parseQuote(rawQuote)
+val report = verify(rawQuote, collateralJson, (System.currentTimeMillis() / 1000).toULong())
+println("status=${report.status} advisories=${report.advisoryIds}")
+```
+
+Java callers use the same package via the generated types. Verification is
+synchronous; wrap in `withContext(Dispatchers.IO)` off the main thread.
+
+See [dcap-qvl-mobile/android/](dcap-qvl-mobile/android/) for complete documentation.
+
+# Swift (iOS / macOS) Bindings
+
+Native Swift bindings, generated via UniFFI and distributed as a Swift Package
+backed by an `XCFramework`.
+
+## Quick Start
+
+```swift
+// Package.swift
+.package(url: "https://github.com/Phala-Network/dcap-qvl-swift", from: "0.5.2")
+```
+
+or in Xcode: **File → Add Package Dependencies…** and paste the URL.
+
+## Usage
+
+```swift
+import DcapQvl
+
+// `collateralJson` is the raw PCCS response body — fetch it via URLSession.
+let (collateralJson, _) = try await URLSession.shared.data(from: pccsURL)
+let quote = try parseQuote(rawQuote: rawQuote)
+let report = try verify(
+    rawQuote: rawQuote,
+    collateralJson: collateralJson,
+    nowSecs: UInt64(Date().timeIntervalSince1970)
+)
+print(report.status, report.advisoryIds)
+```
+
+See [dcap-qvl-mobile/ios/](dcap-qvl-mobile/ios/) for complete documentation.
+
 # License
 
 This crate is licensed under the MIT license. See the LICENSE file for details.
