@@ -143,16 +143,17 @@ fn verify_with_custom_config_matches_default() {
     // care that the generic plumbing reaches the same outcome as the default
     // entry point. Either both succeed with equal reports, or both fail with
     // equal error strings.
-    let now = chrono::DateTime::parse_from_rfc3339(
-        &serde_json::from_str::<serde_json::Value>(&collateral.tcb_info).expect("tcb json")
-            ["nextUpdate"]
-            .as_str()
-            .expect("nextUpdate")
-            .to_string(),
-    )
-    .expect("nextUpdate parse")
-    .timestamp() as u64
-        - 1;
+    let tcb_info_json =
+        serde_json::from_str::<serde_json::Value>(&collateral.tcb_info).expect("tcb json");
+    let next_update = tcb_info_json
+        .get("nextUpdate")
+        .and_then(serde_json::Value::as_str)
+        .expect("nextUpdate");
+    let now = (chrono::DateTime::parse_from_rfc3339(next_update)
+        .expect("nextUpdate parse")
+        .timestamp() as u64)
+        .checked_sub(1)
+        .expect("nonzero nextUpdate timestamp");
 
     let default_result = verify(raw_quote, &collateral, now);
     let custom_result = verify_with::<ForwardingConfig>(raw_quote, &collateral, now);

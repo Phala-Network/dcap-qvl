@@ -1,4 +1,4 @@
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_async_runtimes::tokio::future_into_py;
@@ -12,7 +12,7 @@ use crate::{
     QuoteCollateralV3,
 };
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyQuoteCollateralV3 {
     inner: QuoteCollateralV3,
@@ -20,6 +20,7 @@ pub struct PyQuoteCollateralV3 {
 
 #[pymethods]
 impl PyQuoteCollateralV3 {
+    #[allow(clippy::too_many_arguments)]
     #[new]
     fn new(
         pck_crl_issuer_chain: String,
@@ -54,13 +55,13 @@ impl PyQuoteCollateralV3 {
     }
 
     #[getter]
-    fn root_ca_crl(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.root_ca_crl).into()
+    fn root_ca_crl(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.root_ca_crl).unbind()
     }
 
     #[getter]
-    fn pck_crl(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.pck_crl).into()
+    fn pck_crl(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.pck_crl).unbind()
     }
 
     #[getter]
@@ -74,8 +75,8 @@ impl PyQuoteCollateralV3 {
     }
 
     #[getter]
-    fn tcb_info_signature(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.tcb_info_signature).into()
+    fn tcb_info_signature(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.tcb_info_signature).unbind()
     }
 
     #[getter]
@@ -89,8 +90,8 @@ impl PyQuoteCollateralV3 {
     }
 
     #[getter]
-    fn qe_identity_signature(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.qe_identity_signature).into()
+    fn qe_identity_signature(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.qe_identity_signature).unbind()
     }
 
     fn to_json(&self) -> PyResult<String> {
@@ -106,7 +107,7 @@ impl PyQuoteCollateralV3 {
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyVerifiedReport {
     inner: VerifiedReport,
@@ -125,8 +126,8 @@ impl PyVerifiedReport {
     }
 
     #[getter]
-    fn ppid(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.ppid).into()
+    fn ppid(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.ppid).unbind()
     }
 
     fn to_json(&self) -> PyResult<String> {
@@ -136,7 +137,7 @@ impl PyVerifiedReport {
 }
 
 /// Quote header parsed from raw quote.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyQuoteHeader {
     inner: Header,
@@ -170,17 +171,17 @@ impl PyQuoteHeader {
     }
 
     #[getter]
-    fn qe_vendor_id(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.qe_vendor_id).into()
+    fn qe_vendor_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.qe_vendor_id).unbind()
     }
 
     #[getter]
-    fn user_data(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.user_data).into()
+    fn user_data(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.user_data).unbind()
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyTdReport10 {
     inner: TDReport10,
@@ -189,68 +190,68 @@ pub struct PyTdReport10 {
 #[pymethods]
 impl PyTdReport10 {
     #[getter]
-    fn tee_tcb_svn(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.tee_tcb_svn).into()
+    fn tee_tcb_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.tee_tcb_svn).unbind()
     }
     #[getter]
-    fn mr_seam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_seam).into()
+    fn mr_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_seam).unbind()
     }
     #[getter]
-    fn mr_signer_seam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_signer_seam).into()
+    fn mr_signer_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_signer_seam).unbind()
     }
     #[getter]
-    fn seam_attributes(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.seam_attributes).into()
+    fn seam_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.seam_attributes).unbind()
     }
     #[getter]
-    fn td_attributes(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.td_attributes).into()
+    fn td_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.td_attributes).unbind()
     }
     #[getter]
-    fn xfam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.xfam).into()
+    fn xfam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.xfam).unbind()
     }
     #[getter]
-    fn mr_td(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_td).into()
+    fn mr_td(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_td).unbind()
     }
     #[getter]
-    fn mr_config_id(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_config_id).into()
+    fn mr_config_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_config_id).unbind()
     }
     #[getter]
-    fn mr_owner(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_owner).into()
+    fn mr_owner(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_owner).unbind()
     }
     #[getter]
-    fn mr_owner_config(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_owner_config).into()
+    fn mr_owner_config(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_owner_config).unbind()
     }
     #[getter]
-    fn rt_mr0(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.rt_mr0).into()
+    fn rt_mr0(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.rt_mr0).unbind()
     }
     #[getter]
-    fn rt_mr1(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.rt_mr1).into()
+    fn rt_mr1(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.rt_mr1).unbind()
     }
     #[getter]
-    fn rt_mr2(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.rt_mr2).into()
+    fn rt_mr2(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.rt_mr2).unbind()
     }
     #[getter]
-    fn rt_mr3(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.rt_mr3).into()
+    fn rt_mr3(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.rt_mr3).unbind()
     }
     #[getter]
-    fn report_data(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.report_data).into()
+    fn report_data(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.report_data).unbind()
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyTdReport15 {
     inner: TDReport15,
@@ -260,79 +261,79 @@ pub struct PyTdReport15 {
 impl PyTdReport15 {
     // Flatten fields from base TDReport10
     #[getter]
-    fn tee_tcb_svn(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.tee_tcb_svn).into()
+    fn tee_tcb_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.tee_tcb_svn).unbind()
     }
     #[getter]
-    fn mr_seam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_seam).into()
+    fn mr_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_seam).unbind()
     }
     #[getter]
-    fn mr_signer_seam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_signer_seam).into()
+    fn mr_signer_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_signer_seam).unbind()
     }
     #[getter]
-    fn seam_attributes(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.seam_attributes).into()
+    fn seam_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.seam_attributes).unbind()
     }
     #[getter]
-    fn td_attributes(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.td_attributes).into()
+    fn td_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.td_attributes).unbind()
     }
     #[getter]
-    fn xfam(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.xfam).into()
+    fn xfam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.xfam).unbind()
     }
     #[getter]
-    fn mr_td(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_td).into()
+    fn mr_td(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_td).unbind()
     }
     #[getter]
-    fn mr_config_id(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_config_id).into()
+    fn mr_config_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_config_id).unbind()
     }
     #[getter]
-    fn mr_owner(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_owner).into()
+    fn mr_owner(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_owner).unbind()
     }
     #[getter]
-    fn mr_owner_config(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.mr_owner_config).into()
+    fn mr_owner_config(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_owner_config).unbind()
     }
     #[getter]
-    fn rt_mr0(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.rt_mr0).into()
+    fn rt_mr0(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.rt_mr0).unbind()
     }
     #[getter]
-    fn rt_mr1(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.rt_mr1).into()
+    fn rt_mr1(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.rt_mr1).unbind()
     }
     #[getter]
-    fn rt_mr2(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.rt_mr2).into()
+    fn rt_mr2(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.rt_mr2).unbind()
     }
     #[getter]
-    fn rt_mr3(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.rt_mr3).into()
+    fn rt_mr3(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.rt_mr3).unbind()
     }
     #[getter]
-    fn report_data(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.base.report_data).into()
+    fn report_data(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.report_data).unbind()
     }
 
     // TD15 extra fields
     #[getter]
-    fn tee_tcb_svn2(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.tee_tcb_svn2).into()
+    fn tee_tcb_svn2(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.tee_tcb_svn2).unbind()
     }
 
     #[getter]
-    fn mr_service_td(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_service_td).into()
+    fn mr_service_td(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_service_td).unbind()
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PySgxEnclaveReport {
     inner: EnclaveReport,
@@ -341,32 +342,32 @@ pub struct PySgxEnclaveReport {
 #[pymethods]
 impl PySgxEnclaveReport {
     #[getter]
-    fn cpu_svn(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.cpu_svn).into()
+    fn cpu_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.cpu_svn).unbind()
     }
 
     #[getter]
-    fn attributes(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.attributes).into()
+    fn attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.attributes).unbind()
     }
 
     #[getter]
-    fn mr_enclave(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_enclave).into()
+    fn mr_enclave(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_enclave).unbind()
     }
 
     #[getter]
-    fn mr_signer(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.mr_signer).into()
+    fn mr_signer(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.mr_signer).unbind()
     }
 
     #[getter]
-    fn report_data(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.report_data).into()
+    fn report_data(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.report_data).unbind()
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyPckExtension {
     inner: intel::PckExtension,
@@ -375,13 +376,13 @@ pub struct PyPckExtension {
 #[pymethods]
 impl PyPckExtension {
     #[getter]
-    fn ppid(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.ppid).into()
+    fn ppid(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.ppid).unbind()
     }
 
     #[getter]
-    fn cpu_svn(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.cpu_svn).into()
+    fn cpu_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.cpu_svn).unbind()
     }
 
     #[getter]
@@ -390,13 +391,13 @@ impl PyPckExtension {
     }
 
     #[getter]
-    fn pce_id(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.pce_id).into()
+    fn pce_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.pce_id).unbind()
     }
 
     #[getter]
-    fn fmspc(&self, py: Python<'_>) -> PyObject {
-        PyBytes::new(py, &self.inner.fmspc).into()
+    fn fmspc(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.fmspc).unbind()
     }
 
     #[getter]
@@ -405,19 +406,19 @@ impl PyPckExtension {
     }
 
     #[getter]
-    fn platform_instance_id(&self, py: Python<'_>) -> Option<PyObject> {
+    fn platform_instance_id(&self, py: Python<'_>) -> Option<Py<PyBytes>> {
         self.inner
             .platform_instance_id
             .as_ref()
-            .map(|v| PyBytes::new(py, v).into())
+            .map(|v| PyBytes::new(py, v).unbind())
     }
 
     /// Look up an arbitrary OID inside the raw Intel SGX extension.
-    fn get_value(&self, oid: &str, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    fn get_value(&self, oid: &str, py: Python<'_>) -> PyResult<Option<Py<PyBytes>>> {
         let parsed_oid = const_oid::ObjectIdentifier::new(oid)
             .map_err(|e| PyValueError::new_err(format!("Invalid OID '{}': {}", oid, e)))?;
         match self.inner.get_value(&parsed_oid) {
-            Ok(Some(bytes)) => Ok(Some(PyBytes::new(py, &bytes).into())),
+            Ok(Some(bytes)) => Ok(Some(PyBytes::new(py, &bytes).unbind())),
             Ok(None) => Ok(None),
             Err(e) => Err(PyValueError::new_err(format!(
                 "Failed to look up OID: {}",
@@ -427,7 +428,7 @@ impl PyPckExtension {
     }
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 pub struct PyQuote {
     inner: Quote,
 }
@@ -506,16 +507,16 @@ impl PyQuote {
     /// Get the embedded PCK certificate chain in PEM form, if present.
     ///
     /// Returns bytes instead of str to avoid implicit decoding/copying.
-    fn cert_chain_pem_bytes(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    fn cert_chain_pem_bytes(&self, py: Python<'_>) -> PyResult<Option<Py<PyBytes>>> {
         let raw = match self.inner.raw_cert_chain() {
             Ok(v) => v,
             Err(_) => return Ok(None),
         };
-        let mut end = raw.len();
-        while end > 0 && raw[end - 1] == 0 {
-            end -= 1;
+        let mut trimmed = raw;
+        while let Some(without_suffix) = trimmed.strip_suffix(&[0]) {
+            trimmed = without_suffix;
         }
-        Ok(Some(PyBytes::new(py, &raw[..end]).into()))
+        Ok(Some(PyBytes::new(py, trimmed).unbind()))
     }
 
     /// Parse the Intel SGX extension from the leaf PCK certificate.
@@ -593,8 +594,13 @@ fn parse_pck_extension_from_pem(pem_bytes: &Bound<'_, PyBytes>) -> PyResult<PyPc
 fn get_collateral_py<'py>(
     py: Python<'py>,
     pccs_url: String,
-    raw_quote: Vec<u8>,
+    raw_quote: &Bound<'_, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let raw_quote = raw_quote
+        .cast::<PyBytes>()
+        .map_err(|_| PyTypeError::new_err("raw_quote must be bytes"))?
+        .as_bytes()
+        .to_vec();
     future_into_py(py, async move {
         let client = CollateralClient::with_default_http(pccs_url)
             .map_err(|e| PyValueError::new_err(format!("Failed to build HTTP client: {}", e)))?;

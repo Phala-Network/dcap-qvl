@@ -306,6 +306,14 @@ mod tests {
         }
     }
 
+    #[allow(clippy::expect_used)]
+    fn first_component_svn(components: &[TcbComponents]) -> u8 {
+        components
+            .first()
+            .expect("expected at least one TCB component")
+            .svn
+    }
+
     #[test]
     fn test_canonicalize_sgx_sorts_by_cpu_svn_desc() {
         let mut info = make_tcb_info(
@@ -320,7 +328,7 @@ mod tests {
         let svns: Vec<u8> = info
             .tcb_levels
             .iter()
-            .map(|l| l.tcb.sgx_components[0].svn)
+            .map(|l| first_component_svn(&l.tcb.sgx_components))
             .collect();
         assert_eq!(svns, vec![5, 3, 2]);
     }
@@ -354,7 +362,7 @@ mod tests {
         let tdx_svns: Vec<u8> = info
             .tcb_levels
             .iter()
-            .map(|l| l.tcb.tdx_components[0].svn)
+            .map(|l| first_component_svn(&l.tcb.tdx_components))
             .collect();
         assert_eq!(tdx_svns, vec![3, 2, 1]);
     }
@@ -373,7 +381,7 @@ mod tests {
         let tdx_svns: Vec<u8> = info
             .tcb_levels
             .iter()
-            .map(|l| l.tcb.tdx_components[0].svn)
+            .map(|l| first_component_svn(&l.tcb.tdx_components))
             .collect();
         assert_eq!(tdx_svns, vec![1, 9]);
     }
