@@ -38,7 +38,7 @@ python3 scripts/build_wheels.py --platforms linux-x86_64 linux-aarch64 --zig --i
 
 ## Prerequisites
 
-1. **Rust toolchain** with cross-compilation targets:
+1. **Rust toolchain 1.83+** with cross-compilation targets:
    ```bash
    # Install additional targets (automatically installed with --install-targets)
    rustup target add x86_64-unknown-linux-gnu

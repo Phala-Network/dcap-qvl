@@ -54,7 +54,8 @@ reference.
 
 ## Develop
 
-Build the extension locally and run the tests:
+Building the extension from source requires Rust 1.83 or newer. Build the
+extension locally and run the tests:
 
 ```bash
 # From the repo root

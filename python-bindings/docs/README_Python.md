@@ -438,7 +438,7 @@ See [PYTHON_TESTING.md](PYTHON_TESTING.md) for detailed information about Python
 
 ### For development (building from source):
 - Python 3.8+
-- Rust toolchain (rustc, cargo)
+- Rust toolchain (rustc, cargo) 1.83+
 - maturin (automatically installed with `uv sync`)
 
 ## License

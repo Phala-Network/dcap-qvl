@@ -25,8 +25,14 @@ pub fn verify(
 fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {
     fn parse_issue_next(json_str: &str) -> (u64, u64) {
         let value: Value = serde_json::from_str(json_str).expect("valid JSON");
-        let issue = value["issueDate"].as_str().expect("issueDate string");
-        let next = value["nextUpdate"].as_str().expect("nextUpdate string");
+        let issue = value
+            .get("issueDate")
+            .and_then(Value::as_str)
+            .expect("issueDate string");
+        let next = value
+            .get("nextUpdate")
+            .and_then(Value::as_str)
+            .expect("nextUpdate string");
         let issue_ts = chrono::DateTime::parse_from_rfc3339(issue)
             .expect("issueDate parse")
             .timestamp() as u64;
@@ -64,7 +70,7 @@ fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {
         "collateral validity window invalid"
     );
     if not_after > not_before {
-        not_after - 1
+        not_after.checked_sub(1).expect("nonzero not_after")
     } else {
         not_after
     }
