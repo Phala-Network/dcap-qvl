@@ -135,10 +135,14 @@ jobs:
         working-directory: dcap-qvl-js
         run: |
           VERSION="${{ steps.npm-meta.outputs.version }}"
-          echo "Updating package.json version to $VERSION"
-          npm version "$VERSION" --no-git-tag-version
-          echo "Updated version:"
-          node -e "console.log(require('./package.json').version)"
+          CURRENT=$(node -e "console.log(require('./package.json').version)")
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "package.json already at $VERSION — skipping npm version bump"
+          else
+            echo "Updating package.json version: $CURRENT -> $VERSION"
+            npm version "$VERSION" --no-git-tag-version
+          fi
+          echo "Final version: $(node -e "console.log(require('./package.json').version)")"
 
       - name: Publish to npm (Dry Run)
         if: steps.npm-meta.outputs.dry_run == 'true'
@@ -199,8 +203,21 @@ jobs:
             echo "Current branch: $CURRENT_BRANCH"
           fi
 
-          # Commit and push
+          # Ensure the target branch's package.json reflects $VERSION, in case the
+          # tag commit had been pre-bumped (and the bump on the tag commit's tree
+          # didn't carry over because we skipped `npm version`).
+          TARGET_CURRENT=$(node -e "console.log(require('./dcap-qvl-js/package.json').version)")
+          if [ "$TARGET_CURRENT" != "$VERSION" ]; then
+            echo "Target branch package.json at $TARGET_CURRENT — bumping to $VERSION"
+            (cd dcap-qvl-js && npm version "$VERSION" --no-git-tag-version)
+          fi
+
+          # Commit and push (skip if package.json was already at $VERSION on the target branch)
           git add dcap-qvl-js/package.json dcap-qvl-js/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No version changes to commit — package.json already at $VERSION"
+            exit 0
+          fi
           git commit -m "chore(npm): bump version to $VERSION" \
             -m "Published @phala/dcap-qvl@$VERSION to npm" \
             -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
