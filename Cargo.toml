@@ -31,7 +31,7 @@ pem = { version = "3", default-features = false }
 asn1_der = { version = "0.7", default-features = false, features = [
     "native_types",
 ] }
-der = { version = "0.7.10", default-features = false, features = [
+der = { version = "0.8.0", default-features = false, features = [
     "alloc",
 ], optional = true }
 
@@ -72,9 +72,9 @@ rustls-pki-types = { version = "1.14", default-features = false }
 
 # Crypto backends (choose one via features: "ring" or "rustcrypto")
 ring = { version = "0.17", default-features = false, features = ["alloc"], optional = true }
-sha2 = { version = "0.10", default-features = false, optional = true }
+sha2 = { version = "0.11", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
-signature = { version = "2.2", default-features = false, optional = true }
+signature = { version = "3.0", default-features = false, optional = true }
 
 dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 
