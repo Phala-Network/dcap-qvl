@@ -1,6 +1,6 @@
 [package]
 name = "dcap-qvl"
-version = "0.3.12"
+version = "0.3.13"
 edition = "2021"
 license = "MIT"
 description = "This crate implements the quote verification logic for DCAP (Data Center Attestation Primitives) in pure Rust."
@@ -37,8 +37,8 @@ log = { version = "0.4.29", default-features = false }
 
 anyhow = { version = "1.0.100", optional = true }
 
-reqwest = { version = "0.12.24", optional = true, default-features = false, features = [
-    "rustls-tls",
+reqwest = { version = "0.13.4", optional = true, default-features = false, features = [
+    "rustls",
     "blocking",
     "hickory-dns",
 ] }
@@ -80,7 +80,7 @@ dcap-qvl-webpki = { version = "=0.103.4", features = ["alloc"] }
 [dev-dependencies]
 hex-literal = "1.1.0"
 insta = "1.46.3"
-reqwest = "0.12.24"
+reqwest = "0.13.4"
 serde_json = "1.0.148"
 tokio = { version = "1.49.0", features = ["full"] }
 
