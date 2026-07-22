@@ -3,12 +3,15 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_async_runtimes::tokio::future_into_py;
 use serde_json;
+use std::time::Duration;
 
 use crate::{
     collateral::CollateralClient,
     intel,
+    policy::{QuoteClaims, QuotePolicy},
     quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
-    verify::{verify, VerifiedReport},
+    tcb_info::TcbStatus,
+    verify::{QuoteVerifier, VerifiedReport},
     QuoteCollateralV3,
 };
 
@@ -538,6 +541,154 @@ impl PyQuote {
     }
 }
 
+#[pyclass(from_py_object)]
+#[derive(Clone)]
+pub struct PyQuotePolicy {
+    inner: QuotePolicy,
+}
+
+fn parse_tcb_status(value: &str) -> PyResult<TcbStatus> {
+    match value {
+        "UpToDate" => Ok(TcbStatus::UpToDate),
+        "SWHardeningNeeded" => Ok(TcbStatus::SWHardeningNeeded),
+        "ConfigurationNeeded" => Ok(TcbStatus::ConfigurationNeeded),
+        "ConfigurationAndSWHardeningNeeded" => Ok(TcbStatus::ConfigurationAndSWHardeningNeeded),
+        "OutOfDate" => Ok(TcbStatus::OutOfDate),
+        "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
+        "Revoked" => Ok(TcbStatus::Revoked),
+        _ => Err(PyValueError::new_err(format!(
+            "Unknown TCB status: {value}"
+        ))),
+    }
+}
+
+#[pymethods]
+impl PyQuotePolicy {
+    #[staticmethod]
+    fn strict(now_secs: u64) -> Self {
+        Self {
+            inner: QuotePolicy::strict(now_secs),
+        }
+    }
+
+    #[staticmethod]
+    fn claims_only(now_secs: u64) -> Self {
+        Self {
+            inner: QuotePolicy::claims_only(now_secs),
+        }
+    }
+    fn allow_status(&self, status: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: self.inner.clone().allow_status(parse_tcb_status(status)?),
+        })
+    }
+    fn reject_advisory(&self, id: &str) -> Self {
+        Self {
+            inner: self.inner.clone().reject_advisory(id),
+        }
+    }
+    fn reject_advisories(&self, ids: Vec<String>) -> Self {
+        Self {
+            inner: self.inner.clone().reject_advisories(&ids),
+        }
+    }
+    fn collateral_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .collateral_grace_period(Duration::from_secs(secs)),
+        }
+    }
+    fn platform_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .platform_grace_period(Duration::from_secs(secs)),
+        }
+    }
+    fn qe_grace_period(&self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .clone()
+                .qe_grace_period(Duration::from_secs(secs)),
+        }
+    }
+    fn min_tcb_eval_data_number(&self, value: u32) -> Self {
+        Self {
+            inner: self.inner.clone().min_tcb_eval_data_number(value),
+        }
+    }
+    fn allow_dynamic_platform(&self, value: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_dynamic_platform(value),
+        }
+    }
+    fn allow_cached_keys(&self, value: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_cached_keys(value),
+        }
+    }
+    fn allow_smt(&self, value: bool) -> Self {
+        Self {
+            inner: self.inner.clone().allow_smt(value),
+        }
+    }
+    fn accepted_sgx_types(&self, values: Vec<u8>) -> Self {
+        Self {
+            inner: self.inner.clone().accepted_sgx_types(&values),
+        }
+    }
+}
+
+#[pyclass]
+pub struct PyQuoteClaims {
+    inner: QuoteClaims,
+}
+
+#[pymethods]
+impl PyQuoteClaims {
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner)
+            .map_err(|e| PyValueError::new_err(format!("Failed to serialize claims: {e}")))
+    }
+}
+
+#[pyclass]
+pub struct PyQuoteVerifier {
+    inner: QuoteVerifier,
+}
+
+#[pymethods]
+impl PyQuoteVerifier {
+    #[new]
+    #[pyo3(signature = (root_ca_der=None))]
+    fn new(root_ca_der: Option<Vec<u8>>) -> Self {
+        let inner = root_ca_der.map_or_else(QuoteVerifier::new_prod, QuoteVerifier::new);
+        Self { inner }
+    }
+
+    fn verify_with_policy(
+        &self,
+        raw_quote: &Bound<'_, PyBytes>,
+        collateral: &PyQuoteCollateralV3,
+        now_secs: u64,
+        policy: &PyQuotePolicy,
+    ) -> PyResult<PyQuoteClaims> {
+        self.inner
+            .verify_with_policy(
+                raw_quote.as_bytes(),
+                collateral.inner.clone(),
+                now_secs,
+                &policy.inner,
+            )
+            .map(|inner| PyQuoteClaims { inner })
+            .map_err(|e| PyValueError::new_err(format!("Verification failed: {e}")))
+    }
+}
+
 #[pyfunction]
 fn py_verify(
     raw_quote: &Bound<'_, PyBytes>,
@@ -546,12 +697,10 @@ fn py_verify(
 ) -> PyResult<PyVerifiedReport> {
     let quote_bytes = raw_quote.as_bytes();
 
-    match verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    QuoteVerifier::new_prod()
+        .verify(quote_bytes, &collateral.inner, now_secs)
+        .map(|inner| PyVerifiedReport { inner })
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))
 }
 
 #[pyfunction]
@@ -565,12 +714,10 @@ fn py_verify_with_root_ca(
     let root_ca = root_ca_der.as_bytes();
 
     let verifier = crate::verify::QuoteVerifier::new(root_ca.to_vec());
-    match verifier.verify(quote_bytes, &collateral.inner, now_secs) {
-        Ok(verified_report) => Ok(PyVerifiedReport {
-            inner: verified_report,
-        }),
-        Err(e) => Err(PyValueError::new_err(format!("Verification failed: {e:?}"))),
-    }
+    verifier
+        .verify(quote_bytes, &collateral.inner, now_secs)
+        .map(|inner| PyVerifiedReport { inner })
+        .map_err(|e| PyValueError::new_err(format!("Verification failed: {e:?}")))
 }
 
 #[pyfunction]
@@ -621,6 +768,9 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySgxEnclaveReport>()?;
     m.add_class::<PyPckExtension>()?;
     m.add_class::<PyQuote>()?;
+    m.add_class::<PyQuotePolicy>()?;
+    m.add_class::<PyQuoteClaims>()?;
+    m.add_class::<PyQuoteVerifier>()?;
     m.add_function(wrap_pyfunction!(py_verify, m)?)?;
     m.add_function(wrap_pyfunction!(py_verify_with_root_ca, m)?)?;
     m.add_function(wrap_pyfunction!(parse_quote, m)?)?;

@@ -121,7 +121,7 @@ fn encode_ecdsa_sig_handles_edge_cases() {
 }
 
 /// A `Config` defined entirely in this test crate, to prove the plumbing in
-/// `verify_with::<C>` actually accepts a downstream-defined config and that
+/// `QuoteVerifier<C>` actually accepts a downstream-defined config and that
 /// custom configs can mix-and-match per-component.
 struct ForwardingConfig;
 impl Config for ForwardingConfig {
@@ -132,7 +132,7 @@ impl Config for ForwardingConfig {
 
 #[test]
 fn verify_with_custom_config_matches_default() {
-    use dcap_qvl::verify::{verify, verify_with};
+    use dcap_qvl::verify::{verify, QuoteVerifier};
 
     let raw_quote = include_bytes!("../sample/tdx_quote");
     let collateral: QuoteCollateralV3 =
@@ -156,11 +156,13 @@ fn verify_with_custom_config_matches_default() {
         .expect("nonzero nextUpdate timestamp");
 
     let default_result = verify(raw_quote, &collateral, now);
-    let custom_result = verify_with::<ForwardingConfig>(raw_quote, &collateral, now);
+    let custom_result = QuoteVerifier::new_prod()
+        .with_config::<ForwardingConfig>()
+        .verify(raw_quote, &collateral, now);
     assert_eq!(
         default_result.map_err(|e| e.to_string()),
         custom_result.map_err(|e| e.to_string()),
-        "verify_with::<ForwardingConfig> must match verify"
+        "custom configured verifier must match verify"
     );
 }
 

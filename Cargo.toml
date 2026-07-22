@@ -118,7 +118,7 @@ default-x509 = ["dep:der", "dep:x509-cert"]
 # `report` (PCCS client + collateral fetch) parses CRL distribution
 # points with `x509-cert`, so it pulls in the audited backend bundle too.
 report = ["std", "tracing", "futures", "reqwest", "default-x509"]
-js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen"]
+js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen", "rustcrypto", "default-x509"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
 # The `go` FFI surface concretizes on `DefaultConfig`, so it pulls in the
 # audited backend bundle.

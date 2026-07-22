@@ -313,6 +313,96 @@ class PyPckExtension:
         ...
 
 
+class PyQuotePolicy:
+    """Verification policy with builder pattern.
+
+    Use ``QuotePolicy.strict(now_secs)`` to create a strict policy (only UpToDate),
+    then chain builder methods to relax constraints.
+
+    Example::
+
+        policy = QuotePolicy.strict(now_secs) \\
+            .allow_status("SWHardeningNeeded") \\
+            .reject_advisory("INTEL-SA-00334") \\
+            .collateral_grace_period(90 * 24 * 3600) \\
+            .qe_grace_period(7 * 24 * 3600)
+    """
+
+    @staticmethod
+    def strict(now_secs: int) -> "PyQuotePolicy":
+        """Create a strict policy: only UpToDate, no grace, no advisory blacklist."""
+        ...
+
+    @staticmethod
+    def claims_only(now_secs: int) -> "PyQuotePolicy": ...
+
+    def allow_status(self, status: str) -> "PyQuotePolicy":
+        """Allow an additional TCB status (e.g. "SWHardeningNeeded")."""
+        ...
+
+    def reject_advisory(self, advisory_id: str) -> "PyQuotePolicy":
+        """Reject a specific advisory ID (e.g. "INTEL-SA-00334")."""
+        ...
+
+    def reject_advisories(self, advisory_ids: List[str]) -> "PyQuotePolicy":
+        """Reject multiple advisory IDs at once."""
+        ...
+
+    def collateral_grace_period(self, secs: int) -> "PyQuotePolicy":
+        """Set collateral grace period in seconds."""
+        ...
+
+    def platform_grace_period(self, secs: int) -> "PyQuotePolicy":
+        """Set platform grace period in seconds."""
+        ...
+
+    def qe_grace_period(self, secs: int) -> "PyQuotePolicy":
+        """Set QE grace period in seconds."""
+        ...
+
+    def min_tcb_eval_data_number(self, min: int) -> "PyQuotePolicy":
+        """Set minimum TCB evaluation data number."""
+        ...
+
+    def allow_dynamic_platform(self, allow: bool) -> "PyQuotePolicy":
+        """Set whether dynamic platforms are allowed."""
+        ...
+
+    def allow_cached_keys(self, allow: bool) -> "PyQuotePolicy":
+        """Set whether cached keys are allowed."""
+        ...
+
+    def allow_smt(self, allow: bool) -> "PyQuotePolicy":
+        """Set whether SMT (hyperthreading) is allowed."""
+        ...
+
+    def accepted_sgx_types(self, types: List[int]) -> "PyQuotePolicy":
+        """Set accepted SGX types (e.g. [0, 1, 2])."""
+        ...
+
+
+class PyQuoteClaims:
+    """Detailed verified claims suitable for a downstream policy engine."""
+
+    def to_json(self) -> str: ...
+
+
+
+class PyQuoteVerifier:
+    """Quote verifier returning detailed claims directly."""
+
+    def __init__(self, root_ca_der: Optional[bytes] = None) -> None: ...
+
+
+    def verify_with_policy(
+        self,
+        raw_quote: bytes,
+        collateral: PyQuoteCollateralV3,
+        now_secs: int,
+        policy: PyQuotePolicy,
+    ) -> PyQuoteClaims: ...
+
+
 class PyQuote:
     """
     Represents a parsed SGX or TDX quote.
@@ -422,23 +512,20 @@ def py_verify(
     raw_quote: bytes, collateral: PyQuoteCollateralV3, now_secs: int
 ) -> PyVerifiedReport:
     """
-    Verify an SGX or TDX quote with the provided collateral data.
+    Verify an SGX or TDX quote and return the legacy verified report.
 
-    This function performs cryptographic verification of the quote against
-    the provided collateral information, checking certificates, signatures,
-    and revocation status.
+    Performs cryptographic verification against the provided collateral.
 
     Args:
         raw_quote: Raw quote data as bytes (SGX or TDX format)
         collateral: Quote collateral containing certificates and attestation data
-        now_secs: Current timestamp in seconds since Unix epoch for time-based checks
+        now_secs: Current Unix timestamp
 
     Returns:
-        PyVerifiedReport containing verification status and advisory information
+        PyVerifiedReport: verified quote report
 
     Raises:
-        ValueError: If verification fails due to invalid data, expired certificates,
-                   revoked keys, or other verification errors
+        ValueError: If cryptographic verification fails
     """
     ...
 
@@ -446,22 +533,22 @@ def py_verify_with_root_ca(
     raw_quote: bytes,
     collateral: PyQuoteCollateralV3,
     root_ca_der: bytes,
-    now_secs: int
+    now_secs: int,
 ) -> PyVerifiedReport:
     """
-    Verify an SGX or TDX quote with the provided collateral data and custom root CA.
+    Verify an SGX or TDX quote with custom root CA.
 
     Args:
         raw_quote: Raw quote data as bytes (SGX or TDX format)
         collateral: Quote collateral containing certificates and attestation data
         root_ca_der: Custom root CA certificate in DER format
-        now_secs: Current timestamp in seconds since Unix epoch for time-based checks
+        now_secs: Current Unix timestamp
 
     Returns:
-        PyVerifiedReport containing verification status and advisory information
+        PyVerifiedReport: verified quote report
 
     Raises:
-        ValueError: If verification fails
+        ValueError: If cryptographic verification fails
     """
     ...
 
@@ -523,4 +610,3 @@ async def get_collateral(pccs_url: str, raw_quote: bytes) -> PyQuoteCollateralV3
             of this module).
     """
     ...
-

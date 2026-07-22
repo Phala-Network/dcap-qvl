@@ -145,9 +145,7 @@ pub struct TdxModuleTcb {
     pub isvsvn: u8,
 }
 
-#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize, Display,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Display)]
 #[display("{_variant}")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -174,20 +172,26 @@ impl TcbStatus {
         }
     }
 
-    /// Returns true if the TCB status is acceptable to let the caller decide
-    /// whether to accept the quote or not.
-    ///
-    /// Currently, `Revoked` status is considered invalid and will cause the verification to fail.
-    pub(crate) fn is_valid(&self) -> bool {
-        match self {
-            Self::UpToDate => true,
-            Self::SWHardeningNeeded => true,
-            Self::ConfigurationNeeded => true,
-            Self::ConfigurationAndSWHardeningNeeded => true,
-            Self::OutOfDate => true,
-            Self::OutOfDateConfigurationNeeded => true,
-            Self::Revoked => false,
+    fn converge_with_qe(self, qe: TcbStatus) -> TcbStatus {
+        use TcbStatus::*;
+        match (qe, self) {
+            (OutOfDate, ConfigurationNeeded | ConfigurationAndSWHardeningNeeded) => {
+                OutOfDateConfigurationNeeded
+            }
+            _ => qe.max(self),
         }
+    }
+}
+
+impl Ord for TcbStatus {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.severity().cmp(&other.severity())
+    }
+}
+
+impl PartialOrd for TcbStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -212,13 +216,9 @@ impl TcbStatusWithAdvisory {
         }
     }
 
-    /// Merge two TCB statuses, taking the worse status and combining advisory IDs
+    /// Merge a platform status with a QE status using Intel QVL convergence rules.
     pub fn merge(self, other: &TcbStatusWithAdvisory) -> Self {
-        let final_status = if other.status.severity() > self.status.severity() {
-            other.status
-        } else {
-            self.status
-        };
+        let final_status = self.status.converge_with_qe(other.status);
 
         let mut advisory_ids = self.advisory_ids;
         for id in &other.advisory_ids {
@@ -255,6 +255,16 @@ mod tests {
         let result = a.merge(&b);
         assert_eq!(result.status, OutOfDate);
         assert_eq!(result.advisory_ids, vec!["INTEL-SA-00001"]);
+    }
+
+    #[test]
+    fn qe_out_of_date_converges_configuration_status() {
+        let platform = TcbStatusWithAdvisory::new(TcbStatus::ConfigurationNeeded, vec![]);
+        let qe = TcbStatusWithAdvisory::new(TcbStatus::OutOfDate, vec![]);
+        assert_eq!(
+            platform.merge(&qe).status,
+            TcbStatus::OutOfDateConfigurationNeeded
+        );
     }
 
     #[test]

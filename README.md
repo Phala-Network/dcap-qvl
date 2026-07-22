@@ -133,6 +133,26 @@ fmt.Println(report.Status)
 Each binding's directory (linked in the table above) has full documentation and
 runnable examples.
 
+## Detailed claims and optional policy validation
+
+Applications can request detailed serializable claims and optionally apply the built-in policy:
+
+```rust
+use dcap_qvl::{QuoteVerifier, QuotePolicy, TcbStatus};
+
+let policy = QuotePolicy::strict(now)
+    .allow_status(TcbStatus::SWHardeningNeeded)
+    .reject_advisory("INTEL-SA-00334");
+
+let claims = QuoteVerifier::new_prod()
+    .verify_with_policy(&quote, collateral, now, &policy)?;
+```
+
+For downstream appraisal, use `QuotePolicy::claims_only(now)`. It skips local business-policy checks while verification still uses the explicit `now` argument. Applications can serialize those claims and feed them to a
+shared downstream policy engine that also handles other TEE platforms. See
+[docs/policy.md](docs/policy.md) for the claims schema and `QuotePolicy`.
+Existing one-shot `verify()` entry points remain available.
+
 ## Building and testing
 
 Common tasks are in the [Makefile](Makefile):

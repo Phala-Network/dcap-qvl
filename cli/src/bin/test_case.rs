@@ -101,17 +101,22 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
         .expect("Invalid system time")
         .as_secs();
 
-    use dcap_qvl::configs::{RingConfig, RustCryptoConfig};
-    let verifier = match root_ca_der {
+    let ring_verifier = match root_ca_der.clone() {
+        Some(root_ca_der) => QuoteVerifier::new(root_ca_der),
+        None => QuoteVerifier::new_prod(),
+    };
+    let rustcrypto_verifier = match root_ca_der {
         Some(root_ca_der) => QuoteVerifier::new(root_ca_der),
         None => QuoteVerifier::new_prod(),
     };
 
-    let ring_result = verifier
-        .verify_with::<RingConfig>(&quote_bytes, &collateral, now)
+    let ring_result = ring_verifier
+        .with_config::<dcap_qvl::configs::RingConfig>()
+        .verify(&quote_bytes, &collateral, now)
         .map_err(|e| format!("{e:#}"));
-    let rustcrypto_result = verifier
-        .verify_with::<RustCryptoConfig>(&quote_bytes, &collateral, now)
+    let rustcrypto_result = rustcrypto_verifier
+        .with_config::<dcap_qvl::configs::RustCryptoConfig>()
+        .verify(&quote_bytes, &collateral, now)
         .map_err(|e| format!("{e:#}"));
     if ring_result != rustcrypto_result {
         eprintln!("Verification results differ between ring and rustcrypto");
@@ -120,20 +125,14 @@ fn run_verify(quote_file: PathBuf, collateral_file: PathBuf, root_ca_file: Optio
         return 1;
     }
 
-    let ring_result1 = verifier.verify_with::<RingConfig>(&quote_bytes, &collateral, now);
-    match ring_result1 {
-        Ok(verified_report) => {
+    match ring_result {
+        Ok(report) => {
             println!("Verification successful");
-            println!("Status: {:?}", verified_report.status);
+            println!("Status: {}", report.status);
             0
         }
         Err(e) => {
-            eprintln!("Verification failed: {}", e);
-            let mut source = e.source();
-            while let Some(err) = source {
-                eprintln!("  Caused by: {}", err);
-                source = err.source();
-            }
+            eprintln!("Verification failed: {e}");
             1
         }
     }
@@ -158,20 +157,12 @@ fn run_get_collateral(pccs_url: String, quote_file: PathBuf) -> i32 {
             }
         };
 
-        // Build HTTP client
-        let client = match CollateralClient::with_default_http(pccs_url) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Failed to build HTTP client: {}", e);
-                return 2;
-            }
-        };
-
         // Fetch collateral
-        let result = client
-            .fetch(&quote_bytes)
-            .await
-            .and_then(|collateral| {
+        let result = match CollateralClient::with_default_http(pccs_url) {
+            Ok(client) => client.fetch(&quote_bytes).await,
+            Err(error) => Err(error),
+        }
+        .and_then(|collateral| {
                 serde_json::to_string(&collateral).context("Failed to serialize collateral")
             });
         match result {

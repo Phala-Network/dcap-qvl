@@ -9,7 +9,8 @@ use clap::{Args, Parser, Subcommand};
 use dcap_qvl::collateral::{CollateralClient, PHALA_PCCS_URL};
 use dcap_qvl::intel;
 use dcap_qvl::quote::Quote;
-use dcap_qvl::verify::verify;
+use dcap_qvl::verify::QuoteVerifier;
+use dcap_qvl::QuotePolicy;
 use der::Decode;
 use serde::Serialize;
 use x509_cert::Certificate;
@@ -48,6 +49,9 @@ struct VerifyQuoteArgs {
     /// Indicate the quote file is in hex format
     #[arg(long)]
     hex: bool,
+    /// Apply QuotePolicy::strict(now) after cryptographic verification
+    #[arg(long)]
+    strict: bool,
     /// The quote file
     quote_file: PathBuf,
 }
@@ -106,12 +110,25 @@ async fn command_verify_quote(args: VerifyQuoteArgs) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let report = verify(&quote, &collateral, now).context("Failed to verify quote")?;
-    println!(
-        "{}",
-        serde_json::to_string(&report).context("Failed to serialize report")?
-    );
-    eprintln!("Quote verified");
+    let verifier = QuoteVerifier::new_prod();
+    let output = if args.strict {
+        let claims = verifier
+            .verify_with_policy(&quote, collateral, now, &QuotePolicy::strict(now))
+            .context("Strict policy validation failed")?;
+        serde_json::to_string(&claims).context("Failed to serialize claims")?
+    } else {
+        let report = verifier
+            .verify(&quote, &collateral, now)
+            .context("Failed to verify quote")?;
+        serde_json::to_string(&report)
+            .context("Failed to serialize report")?
+    };
+    println!("{output}");
+    if args.strict {
+        eprintln!("Quote verified under strict policy");
+    } else {
+        eprintln!("Quote verified");
+    }
     Ok(())
 }
 

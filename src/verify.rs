@@ -4,29 +4,62 @@ use anyhow::{bail, ensure, Context, Result};
 use rustls_pki_types::UnixTime;
 use scale::Decode;
 
+#[cfg(feature = "default-x509")]
+use crate::policy::{PckIdentity, PlatformInfo, Policy, QeInfo, QuoteClaims, TcbVerdict};
 use {
     crate::constants::*,
-    crate::intel,
-    crate::qe_identity::QeIdentity,
-    crate::tcb_info::{TcbInfo, TcbStatusWithAdvisory, TdxModuleTcbLevel},
+    crate::policy::PckCertFlag,
+    crate::qe_identity::{QeIdentity, QeTcbLevel},
+    crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleTcbLevel},
     alloc::string::String,
     alloc::vec::Vec,
 };
 
-#[cfg(feature = "default-x509")]
-use crate::configs::DefaultConfig;
 pub use crate::quote::{AuthData, EnclaveReport, Quote};
+
 use crate::{
     config::{Config, CryptoProvider},
     quote::{Report, TDAttributes},
-    utils::{encode_as_der_with, extract_certs, parse_crls, verify_certificate_chain},
+    utils::{
+        encode_as_der_with, extract_certs, parse_crls, parse_rfc3339_unix_secs,
+        verify_certificate_chain,
+    },
 };
 use crate::{
     quote::{TDReport10, TDReport15},
     QuoteCollateralV3,
 };
+
 use rustls_pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
+
+/// Crypto backend configuration for quote verification.
+///
+/// Holds the signature verification algorithm and SHA-256 implementation
+/// needed by the verification logic. Use [`ring::backend()`] or
+/// [`rustcrypto::backend()`] to obtain a pre-configured instance.
+pub struct CryptoBackend {
+    /// ECDSA P-256 SHA-256 algorithm for certificate and raw signature verification
+    pub sig_algo: &'static dyn rustls_pki_types::SignatureVerificationAlgorithm,
+    /// SHA-256 hash function
+    pub sha256: fn(&[u8]) -> [u8; 32],
+    /// SHA-384 hash function (used for root_key_id computation)
+    pub sha384: fn(&[u8]) -> [u8; 48],
+    /// Raw ECDSA `r || s` to DER encoder.
+    pub encode_ecdsa: fn(&[u8]) -> Result<Vec<u8>>,
+    /// Parse Intel PCK extensions with the configured X.509 backend.
+    pub parse_pck_extension: fn(&[u8]) -> Result<crate::intel::PckExtension>,
+}
+
+fn backend_for<C: Config>() -> CryptoBackend {
+    CryptoBackend {
+        sig_algo: C::Crypto::sig_algo(),
+        sha256: C::Crypto::sha256,
+        sha384: C::Crypto::sha384,
+        encode_ecdsa: encode_as_der_with::<C>,
+        parse_pck_extension: crate::intel::parse_pck_extension_with::<C>,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TeeType {
@@ -67,8 +100,147 @@ fn format_error_chain(e: &anyhow::Error) -> String {
 use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
+use core::marker::PhantomData;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Result of cryptographic quote verification, before policy validation.
+///
+/// The enclave report is private — it can only be obtained by passing a [`Policy`]
+/// via [`validate()`](Self::validate).
+///
+/// [`QuoteClaims`] is built lazily via [`claims()`](Self::claims) —
+/// the `verify()` call itself does the minimum work (crypto only).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+struct QuoteVerificationResult {
+    header: crate::quote::Header,
+    report: Report,
+    collateral: QuoteCollateralV3,
+    #[serde(with = "crate::utils::serde_vec_bytes")]
+    pck_cert_chain_der: Vec<Vec<u8>>,
+    // -- core verification results (always computed) --
+    tee_type: u32,
+    tcb_status: TcbStatus,
+    advisory_ids: Vec<String>,
+    platform_tcb_level: TcbLevel,
+    qe_tcb_level: QeTcbLevel,
+    pck_ext: PckCertChainResult,
+    qe_report: EnclaveReport,
+    tcb_eval_data_number: u32,
+    qe_tcb_eval_data_number: u32,
+    #[serde(with = "serde_bytes")]
+    root_key_id: [u8; 48],
+}
+
+impl QuoteVerificationResult {
+    /// Build the full [`QuoteClaims`] from verification intermediates.
+    ///
+    /// Computes the collateral time window from all 8 sources (TCBInfo, QEIdentity,
+    /// 2 CRLs, 4 certificate chains), root_key_id SHA-384, CRL numbers, and tcb_date_tag.
+    #[cfg(feature = "default-x509")]
+    pub fn claims(&self) -> Result<QuoteClaims> {
+        // Parse collateral JSON for time window computation
+        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
+            .context("Failed to parse TcbInfo for claims")?;
+        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
+            .context("Failed to parse QeIdentity for claims")?;
+        let pck_certs: Vec<CertificateDer<'_>> = self
+            .pck_cert_chain_der
+            .iter()
+            .map(|cert| CertificateDer::from(cert.as_slice()))
+            .collect();
+
+        let collateral_dates =
+            compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
+
+        // root_key_id: SHA-384 of root CA's raw public key bytes
+        let root_key_id = self.root_key_id;
+
+        // CRL numbers
+        let root_ca_crl_num =
+            crate::utils::extract_crl_number(&self.collateral.root_ca_crl).unwrap_or(0);
+        let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl).unwrap_or(0);
+
+        // tcb_date_tag
+        let tcb_date_tag = parse_rfc3339_unix_secs(&self.platform_tcb_level.tcb_date)
+            .context("Failed to parse platform TCB date")?;
+
+        Ok(QuoteClaims {
+            claims_version: 1,
+            header: self.header,
+            tee_type: self.tee_type,
+            tcb: TcbVerdict {
+                status: self.tcb_status,
+                advisory_ids: self.advisory_ids.clone(),
+                eval_data_number: self.tcb_eval_data_number,
+            },
+            platform: PlatformInfo {
+                tcb_level: self.platform_tcb_level.clone(),
+                tcb_date_tag,
+                pck: PckIdentity {
+                    ppid: self.pck_ext.ppid.clone(),
+                    cpu_svn: self.pck_ext.cpu_svn,
+                    pce_svn: self.pck_ext.pce_svn,
+                    pce_id: self.pck_ext.pce_id.clone(),
+                    fmspc: self.pck_ext.fmspc,
+                    sgx_type: self.pck_ext.sgx_type,
+                    platform_instance_id: self.pck_ext.platform_instance_id,
+                    dynamic_platform: self.pck_ext.dynamic_platform,
+                    cached_keys: self.pck_ext.cached_keys,
+                    smt_enabled: self.pck_ext.smt_enabled,
+                    // Intel's upstream DCAP Rego policy checks
+                    // `platform_provider_id`, but the upstream QvE producer
+                    // currently leaves it as a TODO when building the platform
+                    // measurement JSON:
+                    // https://github.com/intel/confidential-computing.tee.dcap/blob/main/ae/QvE/qve/qve.cpp
+                    platform_provider_id: None,
+                },
+                root_key_id: root_key_id.to_vec(),
+                pck_crl_num,
+                root_ca_crl_num,
+            },
+            qe: QeInfo {
+                tcb_level: self.qe_tcb_level.clone(),
+                report: self.qe_report,
+                tcb_eval_data_number: self.qe_tcb_eval_data_number,
+            },
+            report: self.report.clone(),
+            earliest_issue_date: collateral_dates.earliest_issue,
+            latest_issue_date: collateral_dates.latest_issue,
+            earliest_expiration_date: collateral_dates.earliest_expiration,
+            qe_iden_earliest_issue_date: collateral_dates.qe_iden_earliest_issue,
+            qe_iden_latest_issue_date: collateral_dates.qe_iden_latest_issue,
+            qe_iden_earliest_expiration_date: collateral_dates.qe_iden_earliest_expiration,
+        })
+    }
+
+    /// Convert directly into [`VerifiedReport`] **without applying any policy**.
+    ///
+    /// # Warning
+    /// This skips all policy checks (TCB status, advisory IDs, collateral
+    /// freshness, platform flags). Use only when you handle validation
+    /// externally or intentionally accept any verification result.
+    pub fn into_report_unchecked(self) -> VerifiedReport {
+        let platform_status = TcbStatusWithAdvisory::new(
+            self.platform_tcb_level.tcb_status,
+            self.platform_tcb_level.advisory_ids.clone(),
+        );
+        let qe_status = TcbStatusWithAdvisory::new(
+            self.qe_tcb_level.tcb_status,
+            self.qe_tcb_level.advisory_ids.clone(),
+        );
+        VerifiedReport {
+            status: self.tcb_status.to_string(),
+            advisory_ids: self.advisory_ids,
+            report: self.report,
+            ppid: self.pck_ext.ppid,
+            platform_status,
+            qe_status,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct VerifiedReport {
@@ -81,26 +253,25 @@ pub struct VerifiedReport {
     pub platform_status: TcbStatusWithAdvisory,
 }
 
-/// Quote verifier with a configurable root certificate.
+/// Quote verifier with configurable root certificate and crypto backend.
 ///
-/// All other configurable choices (X.509 parser, signature encoder, crypto
-/// primitives) are selected at the call site by passing a [`Config`] type
-/// parameter to [`Self::verify_with`] / [`Self::dangerous_verify_with_tcb_override_with`].
-/// The non-generic [`Self::verify`] / [`Self::dangerous_verify_with_tcb_override`]
-/// methods use [`DefaultConfig`].
-pub struct QuoteVerifier {
+/// Provides both the backwards-compatible report API and the detailed claims API.
+pub struct QuoteVerifier<C: Config = crate::configs::DefaultConfig> {
     root_ca_der: Vec<u8>,
     allow_service_td: bool,
     allow_debug: bool,
+    config: PhantomData<C>,
 }
 
-impl QuoteVerifier {
+#[cfg(feature = "default-x509")]
+impl QuoteVerifier<crate::configs::DefaultConfig> {
     /// Create a new verifier with a custom root certificate.
     pub fn new(root_ca_der: Vec<u8>) -> Self {
         Self {
             root_ca_der,
             allow_service_td: false,
             allow_debug: false,
+            config: PhantomData,
         }
     }
 
@@ -108,55 +279,133 @@ impl QuoteVerifier {
     pub fn new_prod() -> Self {
         Self::new(TRUSTED_ROOT_CA_DER.to_vec())
     }
+}
 
-    /// Allow non-zero `mr_service_td` in TDX 1.5 quotes (opt-in).
-    /// Default is `false` — existing callers are unaffected.
+impl<C: Config> QuoteVerifier<C> {
+    /// Create a verifier for `C` with a custom root certificate.
+    pub fn new_with_config(root_ca_der: Vec<u8>) -> Self {
+        Self {
+            root_ca_der,
+            allow_service_td: false,
+            allow_debug: false,
+            config: PhantomData,
+        }
+    }
+
+    /// Select a different compile-time verification backend.
+    pub fn with_config<D: Config>(self) -> QuoteVerifier<D> {
+        QuoteVerifier {
+            root_ca_der: self.root_ca_der,
+            allow_service_td: self.allow_service_td,
+            allow_debug: self.allow_debug,
+            config: PhantomData,
+        }
+    }
+
     pub fn allow_service_td(mut self, allow: bool) -> Self {
         self.allow_service_td = allow;
         self
     }
 
-    /// Allow debug-mode enclaves (SGX debug bit, TDX `TUD.DEBUG`). Default `false`.
     pub fn allow_debug(mut self, allow: bool) -> Self {
         self.allow_debug = allow;
         self
     }
 
-    /// Verify a quote with the configured root certificate, using
-    /// [`DefaultConfig`].
+    /// Verify a quote, apply a policy, and return detailed serializable claims.
     #[cfg(feature = "default-x509")]
+    pub fn verify_with_policy<P: Policy + ?Sized>(
+        &self,
+        raw_quote: &[u8],
+        collateral: impl Into<QuoteCollateralV3>,
+        now_secs: u64,
+        policy: &P,
+    ) -> Result<QuoteClaims> {
+        let claims = self
+            .verify_result(raw_quote, collateral, now_secs)?
+            .claims()?;
+        policy.validate(&claims)?;
+        Ok(claims)
+    }
+
+    fn verify_result(
+        &self,
+        raw_quote: &[u8],
+        collateral: impl Into<QuoteCollateralV3>,
+        now_secs: u64,
+    ) -> Result<QuoteVerificationResult> {
+        let backend = backend_for::<C>();
+        verify_impl(
+            raw_quote,
+            collateral.into(),
+            now_secs,
+            &self.root_ca_der,
+            &backend,
+            self.allow_service_td,
+            self.allow_debug,
+            #[cfg(feature = "danger-allow-tcb-override")]
+            None::<fn(TcbInfo) -> TcbInfo>,
+        )
+    }
+
+    /// Verify with the one-shot API using this verifier's [`Config`].
     pub fn verify(
         &self,
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        self.verify_with::<DefaultConfig>(raw_quote, collateral, now_secs)
+        self.verify_result(raw_quote, collateral, now_secs)
+            .map(QuoteVerificationResult::into_report_unchecked)
     }
 
-    /// Verify a quote, selecting an explicit [`Config`] for X.509 / DER /
-    /// crypto operations. Use this to plug in a custom backend.
-    pub fn verify_with<C: Config>(
+    /// Verify a quote with the configured root certificate, passing a TCB info override.
+    ///
+    /// The override function receives `TcbInfo` after signature verification and can
+    /// modify it before TCB level matching. Use with extreme caution.
+    #[cfg(all(feature = "danger-allow-tcb-override", feature = "default-x509"))]
+    pub fn dangerous_verify_claims_with_tcb_override(
         &self,
         raw_quote: &[u8],
-        collateral: &QuoteCollateralV3,
+        collateral: impl Into<QuoteCollateralV3>,
         now_secs: u64,
-    ) -> Result<VerifiedReport> {
-        verify_impl::<C>(
+        override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+    ) -> Result<QuoteClaims> {
+        verify_impl(
             raw_quote,
-            collateral,
+            collateral.into(),
             now_secs,
             &self.root_ca_der,
+            &backend_for::<C>(),
             self.allow_service_td,
             self.allow_debug,
-            #[cfg(feature = "danger-allow-tcb-override")]
-            None::<fn(_) -> _>,
+            Some(override_tcb_info),
+        )?
+        .claims()
+    }
+
+    #[cfg(feature = "danger-allow-tcb-override")]
+    fn dangerous_verify_result_with_tcb_override<F: FnOnce(TcbInfo) -> TcbInfo>(
+        &self,
+        raw_quote: &[u8],
+        collateral: impl Into<QuoteCollateralV3>,
+        now_secs: u64,
+        override_tcb_info: F,
+    ) -> Result<QuoteVerificationResult> {
+        let backend = backend_for::<C>();
+        verify_impl(
+            raw_quote,
+            collateral.into(),
+            now_secs,
+            &self.root_ca_der,
+            &backend,
+            self.allow_service_td,
+            self.allow_debug,
+            Some(override_tcb_info),
         )
     }
 
-    /// Like [`Self::verify`], but takes a closure to mutate TCB info after the
-    /// signature check passes. Uses [`DefaultConfig`].
-    #[cfg(all(feature = "default-x509", feature = "danger-allow-tcb-override"))]
+    #[cfg(all(feature = "danger-allow-tcb-override", feature = "default-x509"))]
     pub fn dangerous_verify_with_tcb_override(
         &self,
         raw_quote: &[u8],
@@ -164,121 +413,251 @@ impl QuoteVerifier {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        self.dangerous_verify_with_tcb_override_with::<DefaultConfig, _>(
+        self.dangerous_verify_result_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
             override_tcb_info,
         )
+        .map(QuoteVerificationResult::into_report_unchecked)
+    }
+}
+
+/// Backwards-compatible one-shot verification using [`DefaultConfig`].
+#[cfg(feature = "default-x509")]
+pub fn verify(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::<crate::configs::DefaultConfig>::new_prod()
+        .verify(raw_quote, collateral, now_secs)
+}
+
+#[cfg(all(feature = "default-x509", feature = "danger-allow-tcb-override"))]
+pub fn dangerous_verify_with_tcb_override(
+    raw_quote: &[u8],
+    collateral: &QuoteCollateralV3,
+    now_secs: u64,
+    override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
+) -> Result<VerifiedReport> {
+    QuoteVerifier::<crate::configs::DefaultConfig>::new_prod().dangerous_verify_with_tcb_override(
+        raw_quote,
+        collateral,
+        now_secs,
+        override_tcb_info,
+    )
+}
+
+/// Verification policy builder for JS/WASM.
+///
+/// ```js
+/// const policy = new QuotePolicy(now)
+///     .allow_status("OutOfDate")
+///     .collateral_grace_period(7n * 86400n)
+///     .allow_smt(true);
+/// ```
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_name = "QuotePolicy")]
+pub struct JsQuotePolicy {
+    inner: crate::policy::QuotePolicy,
+}
+
+#[cfg(feature = "js")]
+fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
+    match s {
+        "UpToDate" => Ok(TcbStatus::UpToDate),
+        "SWHardeningNeeded" => Ok(TcbStatus::SWHardeningNeeded),
+        "ConfigurationNeeded" => Ok(TcbStatus::ConfigurationNeeded),
+        "ConfigurationAndSWHardeningNeeded" => Ok(TcbStatus::ConfigurationAndSWHardeningNeeded),
+        "OutOfDate" => Ok(TcbStatus::OutOfDate),
+        "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
+        "Revoked" => Ok(TcbStatus::Revoked),
+        _ => Err(JsValue::from_str(&alloc::format!(
+            "Unknown TCB status: {s}"
+        ))),
+    }
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_class = "QuotePolicy")]
+impl JsQuotePolicy {
+    /// Create a strict policy: only `UpToDate`, no grace period, no advisory blacklist.
+    #[wasm_bindgen(constructor)]
+    pub fn strict(now_secs: u64) -> Self {
+        Self {
+            inner: crate::policy::QuotePolicy::strict(now_secs),
+        }
     }
 
-    /// Variant of [`Self::dangerous_verify_with_tcb_override`] with an explicit
-    /// [`Config`].
-    #[cfg(feature = "danger-allow-tcb-override")]
-    pub fn dangerous_verify_with_tcb_override_with<C: Config, F: FnOnce(TcbInfo) -> TcbInfo>(
+    /// Create a pass-through policy for downstream appraisal.
+    #[wasm_bindgen(js_name = "claimsOnly")]
+    pub fn claims_only(now_secs: u64) -> Self {
+        Self {
+            inner: crate::policy::QuotePolicy::claims_only(now_secs),
+        }
+    }
+
+    /// Allow an additional TCB status (e.g. "OutOfDate", "SWHardeningNeeded").
+    pub fn allow_status(self, status: &str) -> Result<JsQuotePolicy, JsValue> {
+        let s = js_parse_tcb_status(status)?;
+        Ok(Self {
+            inner: self.inner.allow_status(s),
+        })
+    }
+
+    /// Reject a specific advisory ID (e.g. "INTEL-SA-00334").
+    pub fn reject_advisory(self, id: &str) -> Self {
+        Self {
+            inner: self.inner.reject_advisory(id),
+        }
+    }
+
+    /// Reject multiple advisory IDs at once.
+    pub fn reject_advisories(self, ids: Vec<String>) -> Self {
+        Self {
+            inner: self.inner.reject_advisories(&ids),
+        }
+    }
+
+    /// Set collateral grace period in seconds.
+    pub fn collateral_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self
+                .inner
+                .collateral_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set platform grace period in seconds.
+    pub fn platform_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self.inner.platform_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set QE grace period in seconds.
+    pub fn qe_grace_period(self, secs: u64) -> Self {
+        Self {
+            inner: self.inner.qe_grace_period(Duration::from_secs(secs)),
+        }
+    }
+
+    /// Set minimum TCB evaluation data number.
+    pub fn min_tcb_eval_data_number(self, min: u32) -> Self {
+        Self {
+            inner: self.inner.min_tcb_eval_data_number(min),
+        }
+    }
+
+    /// Set whether dynamic platforms are allowed.
+    pub fn allow_dynamic_platform(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_dynamic_platform(allow),
+        }
+    }
+
+    /// Set whether cached keys are allowed.
+    pub fn allow_cached_keys(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_cached_keys(allow),
+        }
+    }
+
+    /// Set whether SMT (hyperthreading) is allowed.
+    pub fn allow_smt(self, allow: bool) -> Self {
+        Self {
+            inner: self.inner.allow_smt(allow),
+        }
+    }
+
+    /// Set accepted SGX types (e.g. [0, 1, 2]).
+    pub fn accepted_sgx_types(self, types: Vec<u8>) -> Self {
+        Self {
+            inner: self.inner.accepted_sgx_types(&types),
+        }
+    }
+}
+
+/// Quote verifier for JS/WASM.
+///
+/// ```js
+/// const verifier = new QuoteVerifier();          // Intel production root CA
+/// const verifier = new QuoteVerifier(rootCaDer);  // custom root CA
+/// const result = verifier.verify(quote, collateral, now);
+/// ```
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_name = "QuoteVerifier")]
+pub struct JsQuoteVerifier {
+    inner: QuoteVerifier,
+}
+
+#[cfg(feature = "js")]
+#[wasm_bindgen(js_class = "QuoteVerifier")]
+impl JsQuoteVerifier {
+    /// Create a verifier. No argument = Intel production root CA; pass `rootCaDer` for custom.
+    #[wasm_bindgen(constructor)]
+    pub fn new(root_ca_der: Option<Vec<u8>>) -> Self {
+        let inner = match root_ca_der {
+            Some(der) => QuoteVerifier::new(der),
+            None => QuoteVerifier::new_prod(),
+        };
+        Self { inner }
+    }
+
+    /// Backwards-compatible one-shot verification returning `VerifiedReport`.
+    pub fn verify(
         &self,
-        raw_quote: &[u8],
-        collateral: &QuoteCollateralV3,
-        now_secs: u64,
-        override_tcb_info: F,
-    ) -> Result<VerifiedReport> {
-        verify_impl::<C>(
-            raw_quote,
-            collateral,
-            now_secs,
-            &self.root_ca_der,
-            self.allow_service_td,
-            self.allow_debug,
-            Some(override_tcb_info),
-        )
-    }
-}
-
-#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
-#[wasm_bindgen]
-pub fn js_verify(
-    raw_quote: JsValue,
-    quote_collateral: JsValue,
-    now: u64,
-) -> Result<JsValue, JsValue> {
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
-
-    let verified_report = verify(&raw_quote, &quote_collateral, now).map_err(|e| {
-        let error_msg = format_error_chain(&e);
-        serde_wasm_bindgen::to_value(&error_msg)
-            .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
-    })?;
-
-    serde_wasm_bindgen::to_value(&verified_report)
-        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
-}
-
-#[cfg(all(feature = "js", feature = "_anycrypto", feature = "default-x509"))]
-#[wasm_bindgen]
-pub fn js_verify_with_root_ca(
-    raw_quote: JsValue,
-    quote_collateral: JsValue,
-    root_ca_der: JsValue,
-    now: u64,
-) -> Result<JsValue, JsValue> {
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-    let quote_collateral = serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
-    let root_ca_der: Vec<u8> = serde_wasm_bindgen::from_value(root_ca_der)
-        .map_err(|_| JsValue::from_str("Failed to decode root_ca_der"))?;
-
-    let verifier = QuoteVerifier::new(root_ca_der);
-    let verified_report = verifier
-        .verify(&raw_quote, &quote_collateral, now)
-        .map_err(|e| {
-            let error_msg = format_error_chain(&e);
-            serde_wasm_bindgen::to_value(&error_msg)
-                .unwrap_or_else(|_| JsValue::from_str("Failed to encode Error"))
-        })?;
-
-    serde_wasm_bindgen::to_value(&verified_report)
-        .map_err(|_| JsValue::from_str("Failed to encode verified_report"))
-}
-
-#[cfg(all(feature = "js", feature = "report"))]
-#[wasm_bindgen]
-pub async fn js_get_collateral(pccs_url: JsValue, raw_quote: JsValue) -> Result<JsValue, JsValue> {
-    let pccs_url: String = serde_wasm_bindgen::from_value(pccs_url)
-        .map_err(|_| JsValue::from_str("Failed to decode pccs_url"))?;
-    let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
-        .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
-
-    let collateral: QuoteCollateralV3 =
-        crate::collateral::CollateralClient::with_default_http(pccs_url)
-            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?
-            .fetch(&raw_quote)
-            .await
+        raw_quote: JsValue,
+        quote_collateral: JsValue,
+        now: u64,
+    ) -> Result<JsValue, JsValue> {
+        let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+            .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+        let quote_collateral =
+            serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+        let report = self
+            .inner
+            .verify(&raw_quote, &quote_collateral, now)
             .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
-    serde_wasm_bindgen::to_value(&collateral)
-        .map_err(|_| JsValue::from_str("Failed to encode collateral"))
-}
+        serde_wasm_bindgen::to_value(&report)
+            .map_err(|_| JsValue::from_str("Failed to encode verified report"))
+    }
 
-// Parse JSON with `serde-json-core`, matching `serde_json::from_str`'s strictness:
-// `serde-json-core` returns the value plus bytes consumed and silently ignores the
-// tail, while `serde_json` rejects anything after the value except JSON whitespace
-// (` `, `\n`, `\r`, `\t`). Enforce the same here so parsing behavior stays identical
-// across the `json-core` feature flag.
-#[cfg(feature = "json-core")]
-fn from_json_core_str<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
-    let (value, consumed) =
-        serde_json_core::from_str::<T>(s).map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let trailing = s
-        .get(consumed..)
-        .context("serde_json_core returned an invalid consumed offset")?;
-    ensure!(
-        trailing
-            .trim_end_matches([' ', '\n', '\r', '\t'])
-            .is_empty(),
-        "trailing non-whitespace content"
-    );
-    Ok(value)
+    /// Verify the quote, apply the built-in policy, and return claims.
+    pub fn verify_with_policy(
+        &self,
+        raw_quote: JsValue,
+        quote_collateral: JsValue,
+        now: u64,
+        policy: &JsQuotePolicy,
+    ) -> Result<JsValue, JsValue> {
+        let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+            .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+        let quote_collateral =
+            serde_wasm_bindgen::from_value::<QuoteCollateralV3>(quote_collateral)?;
+        let claims = self
+            .inner
+            .verify_with_policy(&raw_quote, quote_collateral, now, &policy.inner)
+            .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&claims)
+            .map_err(|_| JsValue::from_str("Failed to encode quote claims"))
+    }
+
+    /// Fetch collateral from a PCCS server.
+    pub async fn get_collateral(pccs_url: &str, raw_quote: JsValue) -> Result<JsValue, JsValue> {
+        let raw_quote: Vec<u8> = serde_wasm_bindgen::from_value(raw_quote)
+            .map_err(|_| JsValue::from_str("Failed to decode raw_quote"))?;
+
+        let collateral: QuoteCollateralV3 =
+            crate::collateral::CollateralClient::with_default_http(pccs_url)
+                .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?
+                .fetch(&raw_quote)
+                .await
+                .map_err(|e| JsValue::from_str(&format_error_chain(&e)))?;
+        serde_wasm_bindgen::to_value(&collateral)
+            .map_err(|_| JsValue::from_str("Failed to encode collateral"))
+    }
 }
 
 // =============================================================================
@@ -286,34 +665,26 @@ fn from_json_core_str<T: serde::de::DeserializeOwned>(s: &str) -> Result<T> {
 // =============================================================================
 
 /// Verify TCB Info collateral: certificate chain, signature, parsing, and expiration check
-fn verify_tcb_info_signature<C: Config>(
+fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    backend: &CryptoBackend,
 ) -> Result<TcbInfo> {
-    // Parse TCB Info. Under the `json-core` feature, route through
-    // `serde-json-core` instead of `serde_json` for a smaller footprint
-    // on size-constrained targets (e.g. `wasm32-unknown-unknown`,
-    // `no_std` / embedded, TEE enclaves).
-    #[cfg(not(feature = "json-core"))]
+    // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
-    #[cfg(feature = "json-core")]
-    let tcb_info =
-        from_json_core_str::<TcbInfo>(&collateral.tcb_info).context("Failed to decode TcbInfo")?;
 
     // Check validity window
-    let issue_date = chrono::DateTime::parse_from_rfc3339(&tcb_info.issue_date)
-        .ok()
+    let issue_date = parse_rfc3339_unix_secs(&tcb_info.issue_date)
         .context("Failed to parse TCB Info issue date")?;
-    let next_update = chrono::DateTime::parse_from_rfc3339(&tcb_info.next_update)
-        .ok()
+    let next_update = parse_rfc3339_unix_secs(&tcb_info.next_update)
         .context("Failed to parse TCB Info next update")?;
-    if now.as_secs() < issue_date.timestamp() as u64 {
+    if now.as_secs() < issue_date {
         bail!("TCBInfo issue date is in the future");
     }
-    if now.as_secs() > next_update.timestamp() as u64 {
+    if now.as_secs() > next_update {
         bail!("TCBInfo expired");
     }
 
@@ -327,10 +698,10 @@ fn verify_tcb_info_signature<C: Config>(
     verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor)?;
 
     // Verify signature
-    let asn1_signature = encode_as_der_with::<C>(&collateral.tcb_info_signature)?;
+    let asn1_signature = (backend.encode_ecdsa)(&collateral.tcb_info_signature)?;
     if tcb_leaf_cert
         .verify_signature(
-            C::Crypto::sig_algo(),
+            backend.sig_algo,
             collateral.tcb_info.as_bytes(),
             &asn1_signature,
         )
@@ -347,31 +718,26 @@ fn verify_tcb_info_signature<C: Config>(
 // =============================================================================
 
 /// Verify QE Identity collateral: certificate chain, signature, parsing, and expiration check
-fn verify_qe_identity_signature<C: Config>(
+fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    backend: &CryptoBackend,
 ) -> Result<QeIdentity> {
-    // Parse QE Identity. See TCB-Info site above for `json-core` feature.
-    #[cfg(not(feature = "json-core"))]
+    // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
-        .context("Failed to decode QeIdentity")?;
-    #[cfg(feature = "json-core")]
-    let qe_identity = from_json_core_str::<QeIdentity>(&collateral.qe_identity)
         .context("Failed to decode QeIdentity")?;
 
     // Check validity window
-    let issue_date = chrono::DateTime::parse_from_rfc3339(&qe_identity.issue_date)
-        .ok()
+    let issue_date = parse_rfc3339_unix_secs(&qe_identity.issue_date)
         .context("Failed to parse QE Identity issue date")?;
-    let next_update = chrono::DateTime::parse_from_rfc3339(&qe_identity.next_update)
-        .ok()
+    let next_update = parse_rfc3339_unix_secs(&qe_identity.next_update)
         .context("Failed to parse QE Identity next update")?;
-    if now.as_secs() < issue_date.timestamp() as u64 {
+    if now.as_secs() < issue_date {
         bail!("QE Identity issue date is in the future");
     }
-    if now.as_secs() > next_update.timestamp() as u64 {
+    if now.as_secs() > next_update {
         bail!("QE Identity expired");
     }
 
@@ -385,10 +751,10 @@ fn verify_qe_identity_signature<C: Config>(
     verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
 
     // Verify signature
-    let qe_id_asn1_signature = encode_as_der_with::<C>(&collateral.qe_identity_signature)?;
+    let qe_id_asn1_signature = (backend.encode_ecdsa)(&collateral.qe_identity_signature)?;
     if qe_id_leaf_cert
         .verify_signature(
-            C::Crypto::sig_algo(),
+            backend.sig_algo,
             collateral.qe_identity.as_bytes(),
             &qe_id_asn1_signature,
         )
@@ -408,12 +774,13 @@ fn verify_qe_identity_signature<C: Config>(
 ///
 /// Verifies the PCK certificate chain against the trusted root and CRLs.
 /// Extracts cpu_svn, pce_svn, fmspc, and ppid from the certificate.
-fn verify_pck_cert_chain<C: Config>(
+fn verify_pck_cert_chain(
     collateral: &QuoteCollateralV3,
     certification_data: &crate::quote::CertificationData,
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
+    backend: &CryptoBackend,
 ) -> Result<PckCertChainResult> {
     // Extract PCK certificate chain - prefer collateral, fall back to quote
     let certification_certs = if let Some(pem_chain) = &collateral.pck_certificate_chain {
@@ -421,7 +788,7 @@ fn verify_pck_cert_chain<C: Config>(
             .context("Failed to extract PCK certificates from collateral")?
     } else {
         if certification_data.cert_type != PCK_CERT_CHAIN {
-            bail!("Unsupported DCAP PCK cert format: {}. Use CollateralClient::fetch() to obtain the PCK certificate.", certification_data.cert_type);
+            bail!("Unsupported DCAP PCK cert format: {}. Use get_collateral() to fetch PCK certificate.", certification_data.cert_type);
         }
         extract_certs(&certification_data.body.data)
             .context("Failed to extract PCK certificates from quote")?
@@ -437,24 +804,59 @@ fn verify_pck_cert_chain<C: Config>(
     verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
 
     // Extract Intel extension data from PCK cert (parsed once)
-    let pck_ext = intel::parse_pck_extension_with::<C>(pck_leaf)?;
+    let pck_ext = (backend.parse_pck_extension)(pck_leaf)?;
+
+    // Preserve pce_id as the raw value from the PCK cert SGX extension.
+    let pce_id = pck_ext.pce_id.clone();
+
+    // Convert platform_instance_id to fixed-size array
+    let platform_instance_id = pck_ext.platform_instance_id.as_ref().and_then(|v| {
+        let arr: [u8; 16] = v.as_slice().try_into().ok()?;
+        Some(arr)
+    });
 
     Ok(PckCertChainResult {
+        pck_cert_chain_der: certification_certs
+            .iter()
+            .map(|cert| cert.as_ref().to_vec())
+            .collect(),
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
         ppid: pck_ext.ppid,
         cpu_svn: pck_ext.cpu_svn,
         pce_svn: pck_ext.pce_svn,
         fmspc: pck_ext.fmspc,
+        pce_id,
+        sgx_type: pck_ext.sgx_type as u8,
+        platform_instance_id,
+        dynamic_platform: pck_ext.dynamic_platform.into(),
+        cached_keys: pck_ext.cached_keys.into(),
+        smt_enabled: pck_ext.smt_enabled.into(),
     })
 }
 
 /// Result from PCK certificate chain verification
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 struct PckCertChainResult {
+    #[serde(with = "crate::utils::serde_vec_bytes")]
+    pck_cert_chain_der: Vec<Vec<u8>>,
+    #[serde(with = "serde_bytes")]
     pck_leaf_der: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     ppid: Vec<u8>,
+    #[serde(with = "serde_bytes")]
     cpu_svn: [u8; 16],
     pce_svn: u16,
+    #[serde(with = "serde_bytes")]
     fmspc: [u8; 6],
+    #[serde(with = "serde_bytes")]
+    pce_id: Vec<u8>,
+    sgx_type: u8,
+    platform_instance_id: Option<[u8; 16]>,
+    dynamic_platform: PckCertFlag,
+    cached_keys: PckCertFlag,
+    smt_enabled: PckCertFlag,
 }
 
 // =============================================================================
@@ -462,21 +864,18 @@ struct PckCertChainResult {
 // =============================================================================
 
 /// Verify QE report signature using PCK certificate
-fn verify_qe_report_signature<C: Config>(
+fn verify_qe_report_signature(
     pck_leaf: &CertificateDer,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<EnclaveReport> {
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
 
     // Verify QE report signature (signed by PCK)
-    let qe_report_signature = encode_as_der_with::<C>(&auth_data.qe_report_signature)?;
+    let qe_report_signature = (backend.encode_ecdsa)(&auth_data.qe_report_signature)?;
     if pck_leaf_cert
-        .verify_signature(
-            C::Crypto::sig_algo(),
-            &auth_data.qe_report,
-            &qe_report_signature,
-        )
+        .verify_signature(backend.sig_algo, &auth_data.qe_report, &qe_report_signature)
         .is_err()
     {
         bail!("Signature is invalid for qe_report in quote");
@@ -495,9 +894,10 @@ fn verify_qe_report_signature<C: Config>(
 // =============================================================================
 
 /// Verify QE report hash matches attestation key and auth data (panic-free)
-fn verify_qe_report_data<C: Config>(
+fn verify_qe_report_data(
     qe_report: &EnclaveReport,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<()> {
     use crate::constants::{ATTESTATION_KEY_LEN, AUTHENTICATION_DATA_LEN};
 
@@ -509,7 +909,7 @@ fn verify_qe_report_data<C: Config>(
     let mut qe_hash_data = [0u8; ATTESTATION_KEY_LEN + AUTHENTICATION_DATA_LEN];
     qe_hash_data[..ATTESTATION_KEY_LEN].copy_from_slice(&auth_data.ecdsa_attestation_key);
     qe_hash_data[ATTESTATION_KEY_LEN..].copy_from_slice(&auth_data.qe_auth_data.data);
-    let qe_hash = C::Crypto::sha256(&qe_hash_data);
+    let qe_hash = (backend.sha256)(&qe_hash_data);
     if qe_hash[..] != qe_report.report_data[..32] {
         bail!("QE report hash mismatch");
     }
@@ -527,23 +927,25 @@ fn verify_qe_report_data<C: Config>(
 // =============================================================================
 
 /// Verify ISV enclave report signature using attestation key
-fn verify_isv_report_signature<C: Config>(
+fn verify_isv_report_signature(
     raw_quote: &[u8],
     quote: &Quote,
     auth_data: &crate::quote::AuthDataV3,
+    backend: &CryptoBackend,
 ) -> Result<()> {
     // Prepend 0x04 to raw public key for SEC1 uncompressed format
     let mut pub_key = [0x04u8; 65];
     pub_key[1..].copy_from_slice(&auth_data.ecdsa_attestation_key);
 
     // DER-encode the raw r||s signature for SignatureVerificationAlgorithm
-    let der_sig = encode_as_der_with::<C>(&auth_data.ecdsa_signature)?;
+    let der_sig = (backend.encode_ecdsa)(&auth_data.ecdsa_signature)?;
 
     let signed_data = raw_quote
         .get(..quote.signed_length())
         .context("Failed to get signed quote scope")?;
 
-    C::Crypto::sig_algo()
+    backend
+        .sig_algo
         .verify_signature(&pub_key, signed_data, &der_sig)
         .map_err(|_| anyhow::anyhow!("ISV enclave report signature is invalid"))
 }
@@ -552,10 +954,7 @@ fn verify_isv_report_signature<C: Config>(
 // Step 8: Match Platform TCB (PCK Cert's CPU_SVN/PCE_SVN/FMSPC vs TCB Info)
 // =============================================================================
 
-/// Match platform TCB level and return status with advisory IDs.
-///
-/// For TDX, this also folds in TDX Module Identity status and advisory IDs,
-/// following Intel DCAP QVL behavior.
+/// Match platform TCB level and return the matched TcbLevel
 fn match_platform_tcb(
     tcb_info: &TcbInfo,
     quote: &Quote,
@@ -563,7 +962,7 @@ fn match_platform_tcb(
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
-) -> Result<TcbStatusWithAdvisory> {
+) -> Result<TcbLevel> {
     // Verify FMSPC matches
     let tcb_fmspc = hex::decode(&tcb_info.fmspc)
         .ok()
@@ -593,9 +992,6 @@ fn match_platform_tcb(
         }
 
         let sgx_components: Vec<u8> = tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
-        // Reject mismatched component count so `.zip()` below cannot
-        // silently truncate a comparison and accept a platform whose
-        // unchecked SVN bytes are below the required level.
         if sgx_components.len() != cpu_svn.len() {
             bail!(
                 "SGX component count mismatch: expected {}, got {}",
@@ -635,35 +1031,25 @@ fn match_platform_tcb(
             }
         }
 
-        // Found matching level
-        let mut status =
-            TcbStatusWithAdvisory::new(tcb_level.tcb_status, tcb_level.advisory_ids.clone());
-
-        // For TDX, also fold in TDX module identity status and advisories
+        let mut matched = tcb_level.clone();
         if tee_type.is_tdx() {
             if let Some(module_status) =
                 match_tdx_module_identity(tcb_info, quote).context("TDX module identity check")?
             {
-                status = status.merge(&module_status);
+                matched.tcb_status = matched.tcb_status.max(module_status.status);
+                for advisory in module_status.advisory_ids {
+                    if !matched.advisory_ids.contains(&advisory) {
+                        matched.advisory_ids.push(advisory);
+                    }
+                }
             }
         }
-
-        return Ok(status);
+        return Ok(matched);
     }
 
     bail!("No matching TCB level found");
 }
 
-/// Match TDX Module Identity against TCB Info and TD report.
-///
-/// Follows Intel DCAP QVL behavior:
-/// - For TDX TCB Info (version >= 3, id == "TDX"), read `tdxModule`
-/// - For module versions > 0, select the `tdxModuleIdentities` entry whose `id`
-///   matches `TDX_{tee_tcb_svn[1]}` (case-insensitive)
-/// - Verify MRSEAM signer matches the expected `mrsigner`
-/// - Apply `attributes_mask` when comparing SEAMATTRIBUTES
-/// - If a module identity entry is used, derive module TCB status and
-///   advisory IDs from its TCB levels based on module ISVSVN.
 fn match_tdx_module_identity(
     tcb_info: &TcbInfo,
     quote: &Quote,
@@ -803,7 +1189,8 @@ fn match_tdx_module_identity(
 // Main verification flow following the trust chain
 // =============================================================================
 
-/// Internal implementation that uses QuoteVerifier
+/// Cryptographic verification of a quote. Returns [`QuoteClaims`] without
+/// applying any policy — the caller decides acceptance via [`QuoteClaims::validate()`].
 ///
 /// Trust chain verification order:
 /// 1. Verify TCB Info signature (Intel Root -> TCB Signing Cert -> TCB Info JSON)
@@ -816,17 +1203,19 @@ fn match_tdx_module_identity(
 /// 8. Match Platform TCB (PCK Cert's CPU_SVN/PCE_SVN/FMSPC vs TCB Info)
 /// 9. Match QE TCB (QE Report's ISVSVN vs QE Identity tcb_levels)
 /// 10. Merge TCB statuses
-fn verify_impl<C: Config>(
+#[allow(clippy::too_many_arguments)]
+fn verify_impl(
     raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
+    collateral: QuoteCollateralV3,
     now_secs: u64,
     root_ca_der: &[u8],
+    backend: &CryptoBackend,
     allow_service_td: bool,
     allow_debug: bool,
     #[cfg(feature = "danger-allow-tcb-override")] override_tcb_info: Option<
         impl FnOnce(TcbInfo) -> TcbInfo,
     >,
-) -> Result<VerifiedReport> {
+) -> Result<QuoteVerificationResult> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
     let trust_anchor =
@@ -845,9 +1234,6 @@ fn verify_impl<C: Config>(
     let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
     if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
         bail!("Unsupported DCAP quote version");
-    }
-    if quote.header.qe_vendor_id != INTEL_QE_VENDOR_ID {
-        bail!("Unknown QE vendor ID");
     }
     let tee_type = TeeType::from_u32(quote.header.tee_type)?;
     match tee_type {
@@ -869,22 +1255,17 @@ fn verify_impl<C: Config>(
 
     // Step 1: Verify TCB Info signature
     let mut tcb_info =
-        verify_tcb_info_signature::<C>(collateral, now, &crls, trust_anchor.clone())?;
+        verify_tcb_info_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
 
     #[cfg(feature = "danger-allow-tcb-override")]
-    {
-        tcb_info = match override_tcb_info {
-            Some(override_tcb_info) => override_tcb_info(tcb_info),
-            None => tcb_info,
-        };
+    if let Some(override_tcb_info) = override_tcb_info {
+        tcb_info = override_tcb_info(tcb_info);
     }
-
-    // Canonicalize TCB levels ordering to match Intel QVL expectations.
     tcb_info.canonicalize_tcb_levels();
 
     // Step 2: Verify QE Identity signature
     let qe_identity =
-        verify_qe_identity_signature::<C>(collateral, now, &crls, trust_anchor.clone())?;
+        verify_qe_identity_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -900,29 +1281,30 @@ fn verify_impl<C: Config>(
     }
 
     // Step 3: Verify PCK certificate chain
-    let pck_result = verify_pck_cert_chain::<C>(
-        collateral,
+    let pck_result = verify_pck_cert_chain(
+        &collateral,
         &auth_data.certification_data,
         now,
         &crls,
         trust_anchor,
+        backend,
     )?;
     let pck_leaf = CertificateDer::from(pck_result.pck_leaf_der.as_slice());
 
     // Step 4: Verify QE Report signature
-    let qe_report = verify_qe_report_signature::<C>(&pck_leaf, &auth_data)?;
+    let qe_report = verify_qe_report_signature(&pck_leaf, &auth_data, backend)?;
 
     // Step 5: Verify QE Report content (hash check)
-    verify_qe_report_data::<C>(&qe_report, &auth_data)?;
+    verify_qe_report_data(&qe_report, &auth_data, backend)?;
 
-    // Step 6: Verify QE Report policy
-    let qe_status = verify_qe_identity_policy(&qe_report, &qe_identity)?;
+    // Step 6: Verify QE Report policy (returns matched QeTcbLevel)
+    let qe_tcb_level = verify_qe_identity_policy(&qe_report, &qe_identity)?;
 
     // Step 7: Verify ISV Report signature
-    verify_isv_report_signature::<C>(raw_quote, &quote, &auth_data)?;
+    verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
 
-    // Step 8: Match Platform TCB
-    let platform_status = match_platform_tcb(
+    // Step 8: Match Platform TCB (returns matched TcbLevel)
+    let platform_tcb_level = match_platform_tcb(
         &tcb_info,
         &quote,
         tee_type,
@@ -931,22 +1313,215 @@ fn verify_impl<C: Config>(
         &pck_result.fmspc,
     )?;
 
-    // Step 9 & 10: QE TCB matching is done in verify_qe_identity_policy, merge statuses
-    let final_status = platform_status.clone().merge(&qe_status);
-    if !final_status.status.is_valid() {
-        bail!("TCB status is invalid: {:?}", final_status.status);
+    // Step 9 & 10: Merge statuses (take worst)
+    let platform_status = TcbStatusWithAdvisory::new(
+        platform_tcb_level.tcb_status,
+        platform_tcb_level.advisory_ids.clone(),
+    );
+    let qe_status =
+        TcbStatusWithAdvisory::new(qe_tcb_level.tcb_status, qe_tcb_level.advisory_ids.clone());
+    let final_status = platform_status.merge(&qe_status);
+
+    // Revoked means the platform's keys are compromised — reject unconditionally,
+    // regardless of policy. This is a security invariant, not a policy decision.
+    if final_status.status == TcbStatus::Revoked {
+        bail!("TCB status is invalid: Revoked");
     }
+
+    #[cfg(feature = "default-x509")]
+    let root_key_id = {
+        let root_cert: x509_cert::Certificate =
+            der::Decode::from_der(root_ca_der).context("Failed to parse root CA certificate")?;
+        let raw_key = root_cert
+            .tbs_certificate()
+            .subject_public_key_info()
+            .subject_public_key
+            .raw_bytes();
+        (backend.sha384)(raw_key)
+    };
+    #[cfg(not(feature = "default-x509"))]
+    let root_key_id = [0u8; 48];
 
     // Validate report attributes (debug mode check, etc.)
     validate_attrs(&quote.report, allow_service_td, allow_debug)?;
 
-    Ok(VerifiedReport {
-        status: final_status.status.to_string(),
-        advisory_ids: final_status.advisory_ids,
+    Ok(QuoteVerificationResult {
+        header: quote.header,
         report: quote.report,
-        ppid: pck_result.ppid,
-        qe_status,
-        platform_status,
+        collateral,
+        pck_cert_chain_der: pck_result.pck_cert_chain_der.clone(),
+        tee_type: quote.header.tee_type,
+        tcb_status: final_status.status,
+        advisory_ids: final_status.advisory_ids,
+        platform_tcb_level,
+        qe_tcb_level,
+        pck_ext: pck_result,
+        qe_report,
+        tcb_eval_data_number: tcb_info
+            .tcb_evaluation_data_number
+            .min(qe_identity.tcb_evaluation_data_number),
+        qe_tcb_eval_data_number: qe_identity.tcb_evaluation_data_number,
+        root_key_id,
+    })
+}
+
+/// Collateral time window dates (8 sources + QE Identity subset).
+#[cfg(feature = "default-x509")]
+struct CollateralDates {
+    earliest_issue: u64,
+    latest_issue: u64,
+    earliest_expiration: u64,
+    /// QE Identity-specific dates (sources \[5\] + \[7\] only).
+    qe_iden_earliest_issue: u64,
+    qe_iden_latest_issue: u64,
+    qe_iden_earliest_expiration: u64,
+}
+
+/// Compute the collateral time window: earliest issue, latest issue, earliest expiration.
+///
+/// Matches Intel QVL's `qve_get_collateral_dates()` which considers **8 date sources**:
+///
+/// 1. Root CA CRL thisUpdate/nextUpdate
+/// 2. PCK CRL thisUpdate/nextUpdate
+/// 3. PCK CRL issuer certificate chain notBefore/notAfter
+/// 4. PCK certificate chain notBefore/notAfter
+/// 5. TCBInfo issuer certificate chain notBefore/notAfter
+/// 6. QEIdentity issuer certificate chain notBefore/notAfter
+/// 7. TCBInfo JSON issueDate/nextUpdate
+/// 8. QEIdentity JSON issueDate/nextUpdate
+#[cfg(feature = "default-x509")]
+fn compute_collateral_time_window(
+    collateral: &QuoteCollateralV3,
+    pck_cert_chain: &[CertificateDer<'_>],
+    tcb_info: &TcbInfo,
+    qe_identity: &QeIdentity,
+) -> Result<CollateralDates> {
+    fn parse_crl_dates(crl_der: &[u8]) -> Result<(u64, Option<u64>)> {
+        use der::Decode as _;
+        let crl: x509_cert::crl::CertificateList<x509_cert::certificate::Rfc5280> =
+            x509_cert::crl::CertificateList::from_der(crl_der)
+                .context("Failed to parse CRL for time window")?;
+        let this_update = crl.tbs_cert_list.this_update.to_unix_duration().as_secs();
+        let next_update = crl
+            .tbs_cert_list
+            .next_update
+            .map(|t| t.to_unix_duration().as_secs());
+        Ok((this_update, next_update))
+    }
+
+    /// Extract notBefore/notAfter from a PEM certificate chain and fold into min/max accumulators.
+    fn fold_cert_chain_dates(
+        pem_chain: &[u8],
+        earliest_issue: &mut u64,
+        latest_issue: &mut u64,
+        earliest_expiration: &mut u64,
+    ) -> Result<()> {
+        let certs = extract_certs(pem_chain)?;
+        fold_der_cert_dates(&certs, earliest_issue, latest_issue, earliest_expiration)
+    }
+
+    fn fold_der_cert_dates(
+        certs: &[CertificateDer<'_>],
+        earliest_issue: &mut u64,
+        latest_issue: &mut u64,
+        earliest_expiration: &mut u64,
+    ) -> Result<()> {
+        use der::Decode as _;
+        for cert_der in certs {
+            let cert = x509_cert::Certificate::from_der(cert_der)
+                .context("Failed to parse certificate for time window")?;
+            let not_before = cert
+                .tbs_certificate()
+                .validity()
+                .not_before
+                .to_unix_duration()
+                .as_secs();
+            let not_after = cert
+                .tbs_certificate()
+                .validity()
+                .not_after
+                .to_unix_duration()
+                .as_secs();
+            *earliest_issue = (*earliest_issue).min(not_before);
+            *latest_issue = (*latest_issue).max(not_before);
+            *earliest_expiration = (*earliest_expiration).min(not_after);
+        }
+        Ok(())
+    }
+
+    // TCBInfo dates (already parsed upstream)
+    let tcb_issue = parse_rfc3339_unix_secs(&tcb_info.issue_date).context("TCBInfo issueDate")?;
+    let tcb_next = parse_rfc3339_unix_secs(&tcb_info.next_update).context("TCBInfo nextUpdate")?;
+
+    // QEIdentity dates (already parsed upstream)
+    let qe_issue =
+        parse_rfc3339_unix_secs(&qe_identity.issue_date).context("QEIdentity issueDate")?;
+    let qe_next =
+        parse_rfc3339_unix_secs(&qe_identity.next_update).context("QEIdentity nextUpdate")?;
+
+    let mut earliest_issue = tcb_issue.min(qe_issue);
+    let mut latest_issue = tcb_issue.max(qe_issue);
+    let mut earliest_expiration = tcb_next.min(qe_next);
+
+    // Include CRL dates (sources 1 & 2)
+    for crl_der in [&collateral.root_ca_crl[..], &collateral.pck_crl[..]] {
+        let (this_update, next_update) = parse_crl_dates(crl_der)?;
+        earliest_issue = earliest_issue.min(this_update);
+        latest_issue = latest_issue.max(this_update);
+        if let Some(next) = next_update {
+            earliest_expiration = earliest_expiration.min(next);
+        }
+    }
+
+    // Include certificate chain dates (sources 3-6)
+    // PCK CRL issuer chain (same PEM as pck_crl_issuer_chain)
+    fold_cert_chain_dates(
+        collateral.pck_crl_issuer_chain.as_bytes(),
+        &mut earliest_issue,
+        &mut latest_issue,
+        &mut earliest_expiration,
+    )?;
+    // PCK certificate chain
+    fold_der_cert_dates(
+        pck_cert_chain,
+        &mut earliest_issue,
+        &mut latest_issue,
+        &mut earliest_expiration,
+    )?;
+    // TCBInfo issuer chain
+    fold_cert_chain_dates(
+        collateral.tcb_info_issuer_chain.as_bytes(),
+        &mut earliest_issue,
+        &mut latest_issue,
+        &mut earliest_expiration,
+    )?;
+    // QEIdentity issuer chain (source [5]) — also track QE-specific dates
+    let mut qe_chain_earliest_issue = u64::MAX;
+    let mut qe_chain_latest_issue = 0u64;
+    let mut qe_chain_earliest_expiration = u64::MAX;
+    fold_cert_chain_dates(
+        collateral.qe_identity_issuer_chain.as_bytes(),
+        &mut qe_chain_earliest_issue,
+        &mut qe_chain_latest_issue,
+        &mut qe_chain_earliest_expiration,
+    )?;
+    // Fold into global window
+    earliest_issue = earliest_issue.min(qe_chain_earliest_issue);
+    latest_issue = latest_issue.max(qe_chain_latest_issue);
+    earliest_expiration = earliest_expiration.min(qe_chain_earliest_expiration);
+
+    // QE Identity-specific window: min/max of source [5] (issuer chain) + source [7] (JSON)
+    let qe_iden_earliest_issue = qe_chain_earliest_issue.min(qe_issue);
+    let qe_iden_latest_issue = qe_chain_latest_issue.max(qe_issue);
+    let qe_iden_earliest_expiration = qe_chain_earliest_expiration.min(qe_next);
+
+    Ok(CollateralDates {
+        earliest_issue,
+        latest_issue,
+        earliest_expiration,
+        qe_iden_earliest_issue,
+        qe_iden_latest_issue,
+        qe_iden_earliest_expiration,
     })
 }
 
@@ -962,7 +1537,6 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
         let td_attrs =
             TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
-        // TUD bit 0 is DEBUG; bits 7:1 are reserved and must always be zero.
         if td_attrs.tud & !0x01 != 0 {
             bail!("Reserved bits in TD attributes are set");
         }
@@ -993,26 +1567,48 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     }
 }
 
-/// Convenience entry points pinning the [`crate::configs::RingConfig`]
-/// (audited cert parser + sig encoder + ring crypto). Equivalent to calling
-/// `verify_with::<RingConfig>(...)` on a default `QuoteVerifier`.
+/// Ring crypto backend module.
+///
+/// Provides a pre-configured [`CryptoBackend`] using ring for ECDSA P-256 and SHA-256.
 #[cfg(all(feature = "ring", feature = "default-x509"))]
 pub mod ring {
     use super::*;
-    pub use crate::configs::RingConfig;
 
-    /// Verify a quote using Intel's trusted root CA and the ring crypto provider.
+    fn ring_sha256(data: &[u8]) -> [u8; 32] {
+        let digest = ::ring::digest::digest(&::ring::digest::SHA256, data);
+        let mut out = [0u8; 32];
+        out.copy_from_slice(digest.as_ref());
+        out
+    }
+
+    fn ring_sha384(data: &[u8]) -> [u8; 48] {
+        let digest = ::ring::digest::digest(&::ring::digest::SHA384, data);
+        let mut out = [0u8; 48];
+        out.copy_from_slice(digest.as_ref());
+        out
+    }
+
+    /// Returns a [`CryptoBackend`] backed by ring.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: webpki::ring::ECDSA_P256_SHA256,
+            sha256: ring_sha256,
+            sha384: ring_sha384,
+            encode_ecdsa: encode_as_der_with::<crate::configs::RingConfig>,
+            parse_pck_extension: crate::intel::parse_pck_extension_with::<crate::configs::RingConfig>,
+        }
+    }
+
     pub fn verify(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new_prod().verify_with::<RingConfig>(raw_quote, collateral, now_secs)
+        QuoteVerifier::new_prod()
+            .with_config::<crate::configs::RingConfig>()
+            .verify(raw_quote, collateral, now_secs)
     }
 
-    /// Verify a quote using Intel's trusted root CA and the ring crypto
-    /// provider, passing a function to override TCB info after the signature
-    /// check.
     #[cfg(feature = "danger-allow-tcb-override")]
     pub fn dangerous_verify_with_tcb_override(
         raw_quote: &[u8],
@@ -1020,37 +1616,52 @@ pub mod ring {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<RingConfig, _>(
-            raw_quote,
-            collateral,
-            now_secs,
-            override_tcb_info,
-        )
+        QuoteVerifier::new_prod()
+            .with_config::<crate::configs::RingConfig>()
+            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
     }
 }
 
-/// Convenience entry points pinning the
-/// [`crate::configs::RustCryptoConfig`] (audited cert parser + sig
-/// encoder + RustCrypto crypto). Equivalent to calling
-/// `verify_with::<RustCryptoConfig>(...)` on a default `QuoteVerifier`.
+/// RustCrypto backend module.
+///
+/// Provides a pre-configured [`CryptoBackend`] using RustCrypto (sha2 + p256) for ECDSA P-256 and SHA-256.
 #[cfg(all(feature = "rustcrypto", feature = "default-x509"))]
 pub mod rustcrypto {
     use super::*;
-    pub use crate::configs::RustCryptoConfig;
 
-    /// Verify a quote using Intel's trusted root CA and the RustCrypto
-    /// crypto provider.
+    fn rustcrypto_sha256(data: &[u8]) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(data).into()
+    }
+
+    fn rustcrypto_sha384(data: &[u8]) -> [u8; 48] {
+        use sha2::Digest;
+        sha2::Sha384::digest(data).into()
+    }
+
+    /// Returns a [`CryptoBackend`] backed by RustCrypto.
+    pub fn backend() -> CryptoBackend {
+        CryptoBackend {
+            sig_algo: webpki::rustcrypto::ECDSA_P256_SHA256,
+            sha256: rustcrypto_sha256,
+            sha384: rustcrypto_sha384,
+            encode_ecdsa: encode_as_der_with::<crate::configs::RustCryptoConfig>,
+            parse_pck_extension: crate::intel::parse_pck_extension_with::<
+                crate::configs::RustCryptoConfig,
+            >,
+        }
+    }
+
     pub fn verify(
         raw_quote: &[u8],
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new_prod().verify_with::<RustCryptoConfig>(raw_quote, collateral, now_secs)
+        QuoteVerifier::new_prod()
+            .with_config::<crate::configs::RustCryptoConfig>()
+            .verify(raw_quote, collateral, now_secs)
     }
 
-    /// Verify a quote using Intel's trusted root CA and the RustCrypto crypto
-    /// provider, passing a function to override TCB info after the signature
-    /// check.
     #[cfg(feature = "danger-allow-tcb-override")]
     pub fn dangerous_verify_with_tcb_override(
         raw_quote: &[u8],
@@ -1058,76 +1669,10 @@ pub mod rustcrypto {
         now_secs: u64,
         override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
     ) -> Result<VerifiedReport> {
-        QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<RustCryptoConfig, _>(
-            raw_quote,
-            collateral,
-            now_secs,
-            override_tcb_info,
-        )
+        QuoteVerifier::new_prod()
+            .with_config::<crate::configs::RustCryptoConfig>()
+            .dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
     }
-}
-
-/// Verify a quote using Intel's trusted root CA, with [`DefaultConfig`].
-///
-/// `DefaultConfig` selects the audited cert parser + sig encoder, plus the
-/// `ring` crypto provider when the `ring` feature is enabled, otherwise
-/// `rustcrypto`. To pin a specific config, use [`verify_with`] or one of the
-/// [`ring::verify`] / [`rustcrypto::verify`] convenience entry points.
-#[cfg(all(feature = "_anycrypto", feature = "default-x509"))]
-pub fn verify(
-    raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
-    now_secs: u64,
-) -> Result<VerifiedReport> {
-    QuoteVerifier::new_prod().verify(raw_quote, collateral, now_secs)
-}
-
-/// Variant of [`verify`] with an explicit [`Config`]. Use this to plug in a
-/// custom backend.
-#[cfg(feature = "_anycrypto")]
-pub fn verify_with<C: Config>(
-    raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
-    now_secs: u64,
-) -> Result<VerifiedReport> {
-    QuoteVerifier::new_prod().verify_with::<C>(raw_quote, collateral, now_secs)
-}
-
-/// Like [`verify`], but takes a closure to mutate TCB info after the
-/// signature check. Uses [`DefaultConfig`].
-#[cfg(all(
-    feature = "_anycrypto",
-    feature = "default-x509",
-    feature = "danger-allow-tcb-override"
-))]
-pub fn dangerous_verify_with_tcb_override(
-    raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
-    now_secs: u64,
-    override_tcb_info: impl FnOnce(TcbInfo) -> TcbInfo,
-) -> Result<VerifiedReport> {
-    QuoteVerifier::new_prod().dangerous_verify_with_tcb_override(
-        raw_quote,
-        collateral,
-        now_secs,
-        override_tcb_info,
-    )
-}
-
-/// Variant of [`dangerous_verify_with_tcb_override`] with an explicit [`Config`].
-#[cfg(all(feature = "_anycrypto", feature = "danger-allow-tcb-override"))]
-pub fn dangerous_verify_with_tcb_override_with<C: Config, F: FnOnce(TcbInfo) -> TcbInfo>(
-    raw_quote: &[u8],
-    collateral: &QuoteCollateralV3,
-    now_secs: u64,
-    override_tcb_info: F,
-) -> Result<VerifiedReport> {
-    QuoteVerifier::new_prod().dangerous_verify_with_tcb_override_with::<C, _>(
-        raw_quote,
-        collateral,
-        now_secs,
-        override_tcb_info,
-    )
 }
 
 // =============================================================================
@@ -1143,11 +1688,11 @@ pub fn dangerous_verify_with_tcb_override_with<C: Config, F: FnOnce(TcbInfo) -> 
 /// - ATTRIBUTES match after applying the mask
 /// - ISVSVN meets minimum requirement from QE Identity TCB levels (Step 9)
 ///
-/// Returns the QE TCB status and advisory IDs based on the QE's ISVSVN.
+/// Returns the matched QeTcbLevel based on the QE's ISVSVN.
 fn verify_qe_identity_policy(
     qe_report: &EnclaveReport,
     qe_identity: &QeIdentity,
-) -> Result<TcbStatusWithAdvisory> {
+) -> Result<QeTcbLevel> {
     // Verify MRSIGNER
     if qe_report.mr_signer != qe_identity.mrsigner {
         bail!(
@@ -1157,7 +1702,6 @@ fn verify_qe_identity_policy(
         );
     }
 
-    // QE must always be production-mode; `allow_debug` only governs the workload.
     validate_sgx_attrs(qe_report, false).context("QE report validation failed")?;
 
     // Verify ISVPRODID
@@ -1211,17 +1755,14 @@ fn verify_qe_identity_policy(
 /// Match QE ISVSVN against QE Identity TCB levels
 ///
 /// TCB levels are expected to be sorted from highest to lowest ISVSVN.
-/// Returns the status and advisory IDs for the matching level.
+/// Returns the matched QeTcbLevel.
 fn match_qe_tcb_level(
     isv_svn: u16,
     tcb_levels: &[crate::qe_identity::QeTcbLevel],
-) -> Result<TcbStatusWithAdvisory> {
+) -> Result<QeTcbLevel> {
     for tcb_level in tcb_levels {
         if isv_svn >= tcb_level.tcb.isvsvn {
-            return Ok(TcbStatusWithAdvisory::new(
-                tcb_level.tcb_status,
-                tcb_level.advisory_ids.clone(),
-            ));
+            return Ok(tcb_level.clone());
         }
     }
 
@@ -1424,9 +1965,9 @@ mod tests {
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
-        let status = result.unwrap();
-        assert_eq!(status.status, UpToDate);
-        assert!(status.advisory_ids.is_empty());
+        let tcb_level = result.unwrap();
+        assert_eq!(tcb_level.tcb_status, UpToDate);
+        assert!(tcb_level.advisory_ids.is_empty());
     }
 
     #[test]
@@ -1437,9 +1978,9 @@ mod tests {
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
-        let status = result.unwrap();
-        assert_eq!(status.status, OutOfDate);
-        assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
+        let tcb_level = result.unwrap();
+        assert_eq!(tcb_level.tcb_status, OutOfDate);
+        assert_eq!(tcb_level.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 
     #[test]
@@ -1450,8 +1991,8 @@ mod tests {
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
-        let status = result.unwrap();
-        assert_eq!(status.status, UpToDate); // Matches first level (isvsvn >= 8)
+        let tcb_level = result.unwrap();
+        assert_eq!(tcb_level.tcb_status, UpToDate); // Matches first level (isvsvn >= 8)
     }
 
     #[test]
@@ -1478,87 +2019,9 @@ mod tests {
 
         let result = verify_qe_identity_policy(&qe_report, &qe_identity);
         assert!(result.is_ok());
-        let status = result.unwrap();
+        let tcb_level = result.unwrap();
         // Should match level with isvsvn=6 (7 >= 6)
-        assert_eq!(status.status, OutOfDate);
-        assert_eq!(status.advisory_ids, vec!["INTEL-SA-00615"]);
-    }
-
-    fn make_sgx_report(attributes_byte0: u8) -> EnclaveReport {
-        let mut report = make_test_qe_report();
-        report.attributes[0] = attributes_byte0;
-        report
-    }
-
-    fn make_td10_report(td_attributes: [u8; 8]) -> TDReport10 {
-        TDReport10 {
-            tee_tcb_svn: [0u8; 16],
-            mr_seam: [0u8; 48],
-            mr_signer_seam: [0u8; 48],
-            seam_attributes: [0u8; 8],
-            td_attributes,
-            xfam: [0u8; 8],
-            mr_td: [0u8; 48],
-            mr_config_id: [0u8; 48],
-            mr_owner: [0u8; 48],
-            mr_owner_config: [0u8; 48],
-            rt_mr0: [0u8; 48],
-            rt_mr1: [0u8; 48],
-            rt_mr2: [0u8; 48],
-            rt_mr3: [0u8; 48],
-            report_data: [0u8; 64],
-        }
-    }
-
-    #[test]
-    fn test_sgx_debug_rejected_by_default() {
-        // SGX attributes byte 0 bit 1 (0x02) is the DEBUG flag.
-        let report = make_sgx_report(0x02);
-        let err = validate_sgx_attrs(&report, false).unwrap_err();
-        assert!(err.to_string().contains("Debug mode is enabled"));
-    }
-
-    #[test]
-    fn test_sgx_debug_allowed_when_opted_in() {
-        let report = make_sgx_report(0x02);
-        validate_sgx_attrs(&report, true).unwrap();
-    }
-
-    #[test]
-    fn test_sgx_non_debug_passes_regardless() {
-        let report = make_sgx_report(0x00);
-        validate_sgx_attrs(&report, false).unwrap();
-        validate_sgx_attrs(&report, true).unwrap();
-    }
-
-    #[test]
-    fn test_td10_debug_rejected_by_default() {
-        // TUD bit 0 = DEBUG, byte 3 bit 4 (0x10) = SEPT_VE_DISABLE (required).
-        let report = Report::TD10(make_td10_report([0x01, 0, 0, 0x10, 0, 0, 0, 0]));
-        let err = validate_attrs(&report, false, false).unwrap_err();
-        assert!(err.to_string().contains("Debug mode is enabled"));
-    }
-
-    #[test]
-    fn test_td10_debug_allowed_when_opted_in() {
-        let report = Report::TD10(make_td10_report([0x01, 0, 0, 0x10, 0, 0, 0, 0]));
-        validate_attrs(&report, false, true).unwrap();
-    }
-
-    #[test]
-    fn test_td10_reserved_tud_bits_always_rejected() {
-        // Bit 1 of TUD is reserved and must remain zero even with allow_debug.
-        let report = Report::TD10(make_td10_report([0x02, 0, 0, 0x10, 0, 0, 0, 0]));
-        let err_default = validate_attrs(&report, false, false).unwrap_err();
-        assert!(err_default.to_string().contains("Reserved bits"));
-        let err_allowed = validate_attrs(&report, false, true).unwrap_err();
-        assert!(err_allowed.to_string().contains("Reserved bits"));
-    }
-
-    #[test]
-    fn test_td10_clean_attrs_pass() {
-        let report = Report::TD10(make_td10_report([0x00, 0, 0, 0x10, 0, 0, 0, 0]));
-        validate_attrs(&report, false, false).unwrap();
-        validate_attrs(&report, false, true).unwrap();
+        assert_eq!(tcb_level.tcb_status, OutOfDate);
+        assert_eq!(tcb_level.advisory_ids, vec!["INTEL-SA-00615"]);
     }
 }

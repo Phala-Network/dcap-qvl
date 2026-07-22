@@ -290,7 +290,7 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 /// * [`fetch_for_fmspc`](Self::fetch_for_fmspc) — when the caller already
 ///   has the FMSPC / CA type (skips PCK chain extraction).
 /// * [`fetch_and_verify`](Self::fetch_and_verify) — fetch collateral and
-///   run [`verify_with`](crate::verify::verify_with) in one shot
+///   run [`QuoteVerifier::verify`](crate::verify::QuoteVerifier::verify) in one shot
 ///   (feature-gated on `_anycrypto`).
 ///
 /// # Examples
@@ -519,7 +519,9 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .context("Failed to get current time")?
             .as_secs();
-        crate::verify::verify_with::<C>(quote, &collateral, now)
+        crate::verify::QuoteVerifier::new_prod()
+            .with_config::<C>()
+            .verify(quote, &collateral, now)
     }
 }
 
