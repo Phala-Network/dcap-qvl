@@ -1,4 +1,9 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 #[cfg(feature = "danger-allow-tcb-override")]
 mod tests {
@@ -17,14 +22,17 @@ mod tests {
         collateral: &QuoteCollateralV3,
         now_secs: u64,
     ) -> anyhow::Result<VerifiedReport> {
-        use dcap_qvl::verify::{ring, rustcrypto};
-        let ring_result = ring::verify(raw_quote, collateral, now_secs);
-        let rustcrypto_result = rustcrypto::verify(raw_quote, collateral, now_secs);
+        use dcap_qvl::verify::QuoteVerifier;
+        let ring_verifier = QuoteVerifier::new_prod();
+        let rustcrypto_verifier = QuoteVerifier::new_prod();
+
+        let ring_result = ring_verifier.verify(raw_quote, collateral, now_secs);
+        let rustcrypto_result = rustcrypto_verifier.verify(raw_quote, collateral, now_secs);
         assert_eq!(
             ring_result.map_err(|e| e.to_string()),
             rustcrypto_result.map_err(|e| e.to_string())
         );
-        ring::verify(raw_quote, collateral, now_secs)
+        ring_verifier.verify(raw_quote, collateral, now_secs)
     }
 
     fn dangerous_verify_with_tcb_override<F>(
@@ -36,14 +44,17 @@ mod tests {
     where
         F: FnOnce(TcbInfo) -> TcbInfo + Copy,
     {
-        use dcap_qvl::verify::{ring, rustcrypto};
-        let ring_result = ring::dangerous_verify_with_tcb_override(
+        use dcap_qvl::verify::QuoteVerifier;
+        let ring_verifier = QuoteVerifier::new_prod();
+        let rustcrypto_verifier = QuoteVerifier::new_prod();
+
+        let ring_result = ring_verifier.dangerous_verify_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
             override_tcb_info,
         );
-        let rustcrypto_result = rustcrypto::dangerous_verify_with_tcb_override(
+        let rustcrypto_result = rustcrypto_verifier.dangerous_verify_with_tcb_override(
             raw_quote,
             collateral,
             now_secs,
@@ -53,7 +64,12 @@ mod tests {
             ring_result.map_err(|e| e.to_string()),
             rustcrypto_result.map_err(|e| e.to_string())
         );
-        ring::dangerous_verify_with_tcb_override(raw_quote, collateral, now_secs, override_tcb_info)
+        ring_verifier.dangerous_verify_with_tcb_override(
+            raw_quote,
+            collateral,
+            now_secs,
+            override_tcb_info,
+        )
     }
 
     fn force_out_of_date(mut tcb_info: TcbInfo) -> TcbInfo {
@@ -106,7 +122,8 @@ mod tests {
         }
 
         fn parse_crl_bounds(crl_der: &[u8]) -> (u64, Option<u64>) {
-            let crl = CertificateList::from_der(crl_der).expect("CRL parse");
+            let crl: CertificateList<x509_cert::certificate::Rfc5280> =
+                CertificateList::from_der(crl_der).expect("CRL parse");
             let this_update = crl.tbs_cert_list.this_update.to_unix_duration().as_secs();
             let next_update = crl
                 .tbs_cert_list
@@ -141,7 +158,7 @@ mod tests {
 
     #[test]
     fn override_can_change_tcb_result_and_runs_once() {
-        use dcap_qvl::verify::ring;
+        use dcap_qvl::verify::QuoteVerifier;
 
         let raw_quote = include_bytes!("../sample/tdx_quote");
         let raw_quote_collateral = include_bytes!("../sample/tdx_quote_collateral.json");
@@ -154,19 +171,21 @@ mod tests {
 
         static OVERRIDE_CALLS: AtomicUsize = AtomicUsize::new(0);
         OVERRIDE_CALLS.store(0, Ordering::SeqCst);
-        let ring_overridden = ring::dangerous_verify_with_tcb_override(
-            raw_quote,
-            &quote_collateral,
-            now,
-            |mut tcb_info| {
-                OVERRIDE_CALLS.fetch_add(1, Ordering::SeqCst);
-                for level in &mut tcb_info.tcb_levels {
-                    level.tcb_status = TcbStatus::OutOfDate;
-                }
-                tcb_info
-            },
-        )
-        .expect("verify with override");
+        let ring_verifier = QuoteVerifier::new_prod();
+        let ring_overridden = ring_verifier
+            .dangerous_verify_with_tcb_override(
+                raw_quote,
+                &quote_collateral,
+                now,
+                |mut tcb_info| {
+                    OVERRIDE_CALLS.fetch_add(1, Ordering::SeqCst);
+                    for level in &mut tcb_info.tcb_levels {
+                        level.tcb_status = TcbStatus::OutOfDate;
+                    }
+                    tcb_info
+                },
+            )
+            .expect("verify with override");
         assert_eq!(OVERRIDE_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(ring_overridden.status, "OutOfDate");
 
@@ -238,7 +257,7 @@ mod tests {
     #[test]
     fn overlong_sgx_components_are_rejected() {
         assert_sgx_count_mismatch_rejected(|c| {
-            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+            c.extend(std::iter::repeat_n(TcbComponents { svn: 0 }, 4))
         });
     }
 
@@ -250,7 +269,7 @@ mod tests {
     #[test]
     fn overlong_tdx_components_are_rejected() {
         assert_tdx_count_mismatch_rejected(|c| {
-            c.extend(std::iter::repeat(TcbComponents { svn: 0 }).take(4))
+            c.extend(std::iter::repeat_n(TcbComponents { svn: 0 }, 4))
         });
     }
 

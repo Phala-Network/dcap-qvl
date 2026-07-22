@@ -51,9 +51,7 @@ pub fn verify(
     now_secs: u64,
 ) -> Result<VerifiedReport, DcapError> {
     let collateral = parse_collateral(&collateral_json)?;
-    let verifier = QuoteVerifier::new_prod();
-    let report = verifier
-        .verify(&raw_quote, &collateral, now_secs)
+    let report = dcap_qvl::verify::verify(&raw_quote, &collateral, now_secs)
         .map_err(DcapError::from_anyhow)?;
     Ok(VerifiedReport::from_core(report))
 }

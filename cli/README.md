@@ -22,6 +22,9 @@ is hex-encoded rather than raw bytes.
 
 ```bash
 dcap-qvl verify quote.bin
+
+# Require a strict UpToDate policy appraisal
+dcap-qvl verify --strict quote.bin
 ```
 
 Collateral is fetched from Phala's PCCS by default. Point it at another PCCS with
@@ -29,6 +32,9 @@ the `PCCS_URL` environment variable:
 
 ```bash
 PCCS_URL=https://your-pccs/sgx/certification/v4/ dcap-qvl verify quote.bin
+
+# Require a strict UpToDate policy appraisal
+dcap-qvl verify --strict quote.bin
 ```
 
 The verified report is printed as JSON on stdout; progress goes to stderr.

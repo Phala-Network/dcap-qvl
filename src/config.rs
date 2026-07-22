@@ -24,7 +24,8 @@
 //!     type Crypto     = dcap_qvl::crypto::RingCrypto;
 //! }
 //!
-//! dcap_qvl::verify::verify_with::<MyConfig>(quote, &collateral, now)?;
+//! dcap_qvl::verify::QuoteVerifier::<MyConfig>::new_with_config(root_ca_der)
+//!     .verify(quote, &collateral, now)?;
 //! ```
 //!
 //! ## Auditing
@@ -132,7 +133,8 @@ pub trait EcdsaSigEncoder {
 }
 
 /// Cryptographic primitives required by quote verification: the ECDSA
-/// signature verification algorithm passed to webpki, plus a SHA-256 hash.
+/// signature verification algorithm passed to webpki, plus SHA-256 and
+/// SHA-384 hashes.
 ///
 /// Implementations are typically zero-sized marker types whose methods are
 /// associated functions delegating to a chosen crypto crate (ring, RustCrypto,
@@ -142,6 +144,8 @@ pub trait CryptoProvider {
     fn sig_algo() -> &'static dyn rustls_pki_types::SignatureVerificationAlgorithm;
     /// SHA-256 of `data`.
     fn sha256(data: &[u8]) -> [u8; 32];
+    /// SHA-384 of `data`, used for Intel QAL `root_key_id`.
+    fn sha384(data: &[u8]) -> [u8; 48];
 }
 
 /// Configuration bundle selecting an implementation for each pluggable

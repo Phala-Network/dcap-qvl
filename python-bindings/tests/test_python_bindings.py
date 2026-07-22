@@ -107,10 +107,11 @@ class TestWithSampleData:
 
         collateral = dcap_qvl.QuoteCollateralV3.from_json(json.dumps(collateral_json))
 
-        # Note: We use a timestamp that might make the test pass
-        # In a real scenario, you'd use the current time or a known good time
         result = dcap_qvl.verify(quote_data, collateral, 1234567890)
 
-        assert isinstance(result, dcap_qvl.VerifiedReport)
-        assert isinstance(result.status, str)
-        assert isinstance(result.advisory_ids, list)
+        assert isinstance(result, dcap_qvl.QuoteClaims)
+        claims = json.loads(result.to_json())
+        assert "tcb" in claims
+        assert "platform" in claims
+        assert "qe" in claims
+        assert "report" in claims

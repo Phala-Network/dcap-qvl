@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use dcap_qvl::{verify::verify, QuoteCollateralV3};
+use dcap_qvl::{verify::{QuoteVerifier, ring}, QuoteCollateralV3};
 use hex::decode;
 use near_sdk::{env, log, near};
 
@@ -57,9 +57,10 @@ impl Contract {
         // Get current timestamp in seconds
         let timestamp_s = get_block_timestamp_secs();
 
-        // Call dcap-qvl::verify::verify() directly
-        match verify(&quote_bytes, &collateral_data, timestamp_s) {
-            Ok(_verified_report) => {
+        // Call dcap-qvl verify
+        let verifier = QuoteVerifier::new_prod();
+        match verifier.verify_with_policy(&quote_bytes, collateral_data, timestamp_s, &dcap_qvl::QuotePolicy::claims_only(timestamp_s)) {
+            Ok(_claims) => {
                 log!("Verification result: Success");
                 true
             }

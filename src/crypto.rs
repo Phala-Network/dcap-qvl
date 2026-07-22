@@ -24,6 +24,13 @@ impl CryptoProvider for RingCrypto {
         out.copy_from_slice(digest.as_ref());
         out
     }
+
+    fn sha384(data: &[u8]) -> [u8; 48] {
+        let digest = ring::digest::digest(&ring::digest::SHA384, data);
+        let mut out = [0u8; 48];
+        out.copy_from_slice(digest.as_ref());
+        out
+    }
 }
 
 /// Audited [`CryptoProvider`] backed by RustCrypto (`sha2` + `p256`, gated by
@@ -40,5 +47,10 @@ impl CryptoProvider for RustCryptoCrypto {
     fn sha256(data: &[u8]) -> [u8; 32] {
         use sha2::Digest;
         sha2::Sha256::digest(data).into()
+    }
+
+    fn sha384(data: &[u8]) -> [u8; 48] {
+        use sha2::Digest as _;
+        sha2::Sha384::digest(data).into()
     }
 }

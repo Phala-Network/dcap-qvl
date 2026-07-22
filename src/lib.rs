@@ -111,6 +111,12 @@ pub struct QuoteCollateralV3 {
     pub pck_certificate_chain: Option<String>,
 }
 
+impl From<&QuoteCollateralV3> for QuoteCollateralV3 {
+    fn from(value: &QuoteCollateralV3) -> Self {
+        value.clone()
+    }
+}
+
 #[cfg(feature = "report")]
 pub mod collateral;
 
@@ -132,11 +138,18 @@ pub mod x509;
 
 mod constants;
 pub mod intel;
-mod qe_identity;
+pub mod policy;
+pub mod qe_identity;
 pub mod tcb_info;
 mod utils;
 
-pub use constants::INTEL_QE_VENDOR_ID;
+pub use constants::{CpuSvn, Fmspc, MrEnclave, MrSigner, Svn, INTEL_QE_VENDOR_ID};
+pub use policy::{
+    PckCertFlag, PckIdentity, PlatformInfo, Policy, QeInfo, QuoteClaims, QuotePolicy,
+    QuotePolicyConfig, TcbVerdict,
+};
+pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
+pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
 
 pub mod quote;
 pub mod verify;
