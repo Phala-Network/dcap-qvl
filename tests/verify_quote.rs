@@ -19,7 +19,8 @@ pub fn verify(
     use dcap_qvl::verify::QuoteVerifier;
 
     let ring_verifier = QuoteVerifier::new_prod();
-    let rustcrypto_verifier = QuoteVerifier::new_prod();
+    let rustcrypto_verifier =
+        QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RustCryptoConfig>();
 
     let ring_result = ring_verifier
         .with_config::<dcap_qvl::configs::RingConfig>()
@@ -549,7 +550,8 @@ fn tdx_claims_cross_validation() {
     assert_eq!(s.platform.root_key_id, expected_root_key_id);
 
     // Verify ring == rustcrypto for all fields
-    let rc_verifier = QuoteVerifier::new_prod();
+    let rc_verifier =
+        QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RustCryptoConfig>();
     let rc_result = rc_verifier
         .verify_with_policy(
             raw_quote,

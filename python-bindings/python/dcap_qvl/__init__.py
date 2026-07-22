@@ -5,7 +5,7 @@ This package provides Python bindings for the DCAP (Data Center Attestation Prim
 quote verification library implemented in Rust.
 
 Claims API (matches Rust):
-1. verify(quote, collateral, now_secs) -> QuoteClaims
+1. verify(quote, collateral, now_secs) -> VerifiedReport
 2. QuoteVerifier.verify_with_policy(...) -> QuoteClaims
 
 Main classes:
@@ -15,7 +15,7 @@ Main classes:
 - QuoteClaims: Detailed serializable claims for downstream policy engines
 
 Main functions:
-- verify: Verify a quote with collateral data (returns QuoteClaims)
+- verify: Verify a quote with collateral data (returns VerifiedReport)
 - get_collateral: Get collateral from PCCS URL
 - get_collateral_from_pcs: Get collateral from Intel PCS
 - get_collateral_and_verify: Get collateral and verify quote
@@ -80,7 +80,7 @@ async def get_collateral_and_verify(
     raw_quote: bytes,
     pccs_url: Optional[str] = None,
 ) -> VerifiedReport:
-    """Get collateral and verify the quote, returning detailed claims.
+    """Get collateral and verify the quote, returning a verified report.
 
     Args:
         raw_quote: Raw quote bytes

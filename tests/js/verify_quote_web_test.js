@@ -402,9 +402,8 @@ async function runTests() {
         const rootCA = await fetchFile("/test_data/certs/root_ca.der");
         const now = BigInt(Math.floor(Date.now() / 1000));
 
-        const result = new QuoteVerifier(rootCA).verify_with_policy(quote, collateral, now, QuotePolicy.claimsOnly(now));
-        const report = result.into_report_unchecked();
-        if (!report || !report.status) {
+        const claims = new QuoteVerifier(rootCA).verify_with_policy(quote, collateral, now, QuotePolicy.claimsOnly(now));
+        if (!claims || !claims.tcb || !claims.platform || !claims.report) {
             throw new Error(
                 "Verification should succeed for PKS enabled quote"
             );

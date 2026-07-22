@@ -322,9 +322,9 @@ class PyQuotePolicy:
     Example::
 
         policy = QuotePolicy.strict(now_secs) \\
-            .allow_status("SWHardeningNeeded") \\
+            .allow_status("OutOfDate") \\
             .reject_advisory("INTEL-SA-00334") \\
-            .collateral_grace_period(90 * 24 * 3600) \\
+            .platform_grace_period(90 * 24 * 3600) \\
             .qe_grace_period(7 * 24 * 3600)
     """
 
@@ -346,10 +346,6 @@ class PyQuotePolicy:
 
     def reject_advisories(self, advisory_ids: List[str]) -> "PyQuotePolicy":
         """Reject multiple advisory IDs at once."""
-        ...
-
-    def collateral_grace_period(self, secs: int) -> "PyQuotePolicy":
-        """Set collateral grace period in seconds."""
         ...
 
     def platform_grace_period(self, secs: int) -> "PyQuotePolicy":

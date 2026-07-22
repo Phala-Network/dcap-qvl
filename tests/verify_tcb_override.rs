@@ -23,8 +23,10 @@ mod tests {
         now_secs: u64,
     ) -> anyhow::Result<VerifiedReport> {
         use dcap_qvl::verify::QuoteVerifier;
-        let ring_verifier = QuoteVerifier::new_prod();
-        let rustcrypto_verifier = QuoteVerifier::new_prod();
+        let ring_verifier =
+            QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RingConfig>();
+        let rustcrypto_verifier =
+            QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RustCryptoConfig>();
 
         let ring_result = ring_verifier.verify(raw_quote, collateral, now_secs);
         let rustcrypto_result = rustcrypto_verifier.verify(raw_quote, collateral, now_secs);
@@ -45,8 +47,10 @@ mod tests {
         F: FnOnce(TcbInfo) -> TcbInfo + Copy,
     {
         use dcap_qvl::verify::QuoteVerifier;
-        let ring_verifier = QuoteVerifier::new_prod();
-        let rustcrypto_verifier = QuoteVerifier::new_prod();
+        let ring_verifier =
+            QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RingConfig>();
+        let rustcrypto_verifier =
+            QuoteVerifier::new_prod().with_config::<dcap_qvl::configs::RustCryptoConfig>();
 
         let ring_result = ring_verifier.dangerous_verify_with_tcb_override(
             raw_quote,

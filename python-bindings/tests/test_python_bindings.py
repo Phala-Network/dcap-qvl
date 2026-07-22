@@ -107,10 +107,24 @@ class TestWithSampleData:
 
         collateral = dcap_qvl.QuoteCollateralV3.from_json(json.dumps(collateral_json))
 
-        result = dcap_qvl.verify(quote_data, collateral, 1234567890)
+        # Pick a time inside the signed collateral JSON validity windows rather
+        # than a hard-coded pre-DCAP timestamp.
+        from datetime import datetime
 
-        assert isinstance(result, dcap_qvl.QuoteClaims)
-        claims = json.loads(result.to_json())
+        issue_dates = [
+            json.loads(collateral_json["tcb_info"])["issueDate"],
+            json.loads(collateral_json["qe_identity"])["issueDate"],
+        ]
+        now = max(int(datetime.fromisoformat(value).timestamp()) for value in issue_dates)
+
+        report = dcap_qvl.verify(quote_data, collateral, now)
+        assert isinstance(report, dcap_qvl.VerifiedReport)
+
+        claims = dcap_qvl.QuoteVerifier().verify_with_policy(
+            quote_data, collateral, now, dcap_qvl.QuotePolicy.claims_only(now)
+        )
+        assert isinstance(claims, dcap_qvl.QuoteClaims)
+        claims = json.loads(claims.to_json())
         assert "tcb" in claims
         assert "platform" in claims
         assert "qe" in claims

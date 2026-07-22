@@ -592,14 +592,6 @@ impl PyQuotePolicy {
             inner: self.inner.clone().reject_advisories(&ids),
         }
     }
-    fn collateral_grace_period(&self, secs: u64) -> Self {
-        Self {
-            inner: self
-                .inner
-                .clone()
-                .collateral_grace_period(Duration::from_secs(secs)),
-        }
-    }
     fn platform_grace_period(&self, secs: u64) -> Self {
         Self {
             inner: self

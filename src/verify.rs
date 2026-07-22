@@ -157,9 +157,10 @@ impl QuoteVerificationResult {
         let root_key_id = self.root_key_id;
 
         // CRL numbers
-        let root_ca_crl_num =
-            crate::utils::extract_crl_number(&self.collateral.root_ca_crl).unwrap_or(0);
-        let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl).unwrap_or(0);
+        let root_ca_crl_num = crate::utils::extract_crl_number(&self.collateral.root_ca_crl)
+            .context("Failed to extract root CA CRL number")?;
+        let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl)
+            .context("Failed to extract PCK CRL number")?;
 
         // tcb_date_tag
         let tcb_date_tag = parse_rfc3339_unix_secs(&self.platform_tcb_level.tcb_date)
@@ -454,7 +455,7 @@ pub fn dangerous_verify_with_tcb_override(
 /// ```js
 /// const policy = new QuotePolicy(now)
 ///     .allow_status("OutOfDate")
-///     .collateral_grace_period(7n * 86400n)
+///     .platform_grace_period(7n * 86400n)
 ///     .allow_smt(true);
 /// ```
 #[cfg(feature = "js")]
@@ -517,15 +518,6 @@ impl JsQuotePolicy {
     pub fn reject_advisories(self, ids: Vec<String>) -> Self {
         Self {
             inner: self.inner.reject_advisories(&ids),
-        }
-    }
-
-    /// Set collateral grace period in seconds.
-    pub fn collateral_grace_period(self, secs: u64) -> Self {
-        Self {
-            inner: self
-                .inner
-                .collateral_grace_period(Duration::from_secs(secs)),
         }
     }
 
@@ -1036,7 +1028,9 @@ fn match_platform_tcb(
             if let Some(module_status) =
                 match_tdx_module_identity(tcb_info, quote).context("TDX module identity check")?
             {
-                matched.tcb_status = matched.tcb_status.max(module_status.status);
+                matched.tcb_status = matched
+                    .tcb_status
+                    .converge_with_component(module_status.status);
                 for advisory in module_status.advisory_ids {
                     if !matched.advisory_ids.contains(&advisory) {
                         matched.advisory_ids.push(advisory);
@@ -1234,6 +1228,9 @@ fn verify_impl(
     let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
     if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
         bail!("Unsupported DCAP quote version");
+    }
+    if quote.header.qe_vendor_id != INTEL_QE_VENDOR_ID {
+        bail!("Unknown QE vendor ID");
     }
     let tee_type = TeeType::from_u32(quote.header.tee_type)?;
     match tee_type {

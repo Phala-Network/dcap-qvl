@@ -18,7 +18,7 @@ or other TEE verifiers and evaluate them with its own policy engine.
 
 ## QuotePolicy
 
-The built-in policy with 9 checks from Intel's Appraisal framework. Strict by default — only `UpToDate` status, no grace period, no advisory blacklist.
+The built-in policy with 10 checks inspired by Intel's Appraisal framework. Strict by default — only `UpToDate` status, no TCB grace period, no advisory blacklist.
 
 ### Basic Usage
 
@@ -43,12 +43,13 @@ let policy = QuotePolicy::strict(now)
     // Accept additional TCB statuses
     .allow_status(TcbStatus::SWHardeningNeeded)
     .allow_status(TcbStatus::ConfigurationNeeded)
+    // OutOfDate must be both allowed and within the platform grace window
+    .allow_status(TcbStatus::OutOfDate)
+    .platform_grace_period(Duration::from_secs(30 * 24 * 3600))
     // Reject specific advisory IDs (case-insensitive)
     .reject_advisory("INTEL-SA-00334")
     .reject_advisory("INTEL-SA-00615")
     .reject_advisories(&["INTEL-SA-00809", "INTEL-SA-00820"])
-    // Collateral freshness: accept expired collateral within grace window
-    .collateral_grace_period(Duration::from_secs(30 * 24 * 3600)) // 30 days
     // Minimum TCB evaluation data number
     .min_tcb_eval_data_number(17)
     // Platform flags (default: reject True)
@@ -59,13 +60,13 @@ let policy = QuotePolicy::strict(now)
     .accepted_sgx_types(&[0, 1]); // Standard + Scalable
 ```
 
-### The 9 Checks
+### The 10 Checks
 
 | # | Check | Default | Builder |
 |---|-------|---------|---------|
 | 1 | **TCB status whitelist** | Only `UpToDate` | `.allow_status(...)` |
 | 2 | **Advisory ID blacklist** | Empty set (allow all) | `.reject_advisory(...)` |
-| 3 | **Collateral expiration** | `earliest_expiration >= now` | `.collateral_grace_period(Duration)` |
+| 3 | **Collateral expiration** | `earliest_expiration >= now` | Not configurable |
 | 4 | **Platform TCB freshness** | Only for OutOfDate statuses | `.platform_grace_period(Duration)` |
 | 4b | **QE TCB freshness** | Only for QE `OutOfDate` | `.qe_grace_period(Duration)` |
 | 5 | **Min TCB eval data number** | Skip | `.min_tcb_eval_data_number(n)` |
@@ -76,13 +77,13 @@ let policy = QuotePolicy::strict(now)
 
 ### Grace Period Behavior
 
-**Collateral grace** (`collateral_grace_period`): Extends the collateral expiration window. If `earliest_expiration + grace >= now`, the quote is accepted.
+Expired collateral is always rejected by the cryptographic verification pipeline. There is no collateral expiration grace period.
 
-**Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level. For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. For pure `OutOfDate`, only the **platform** advisories are skipped during the grace window. For `OutOfDateConfigurationNeeded`, platform advisories are still checked.
+**Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level. For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. The corresponding status must also be explicitly enabled with `allow_status`; setting either option alone does not accept an out-of-date platform.
 
-**QE grace** (`qe_grace_period`): Applies only to the **QE** TCB level. For QE `OutOfDate`, checks `qe.tcb_level.tcb_date + grace >= now`. QE advisories are skipped only while this QE grace is active.
+**QE grace** (`qe_grace_period`): Applies only to the **QE** TCB level. For QE `OutOfDate`, checks `qe.tcb_level.tcb_date + grace >= now`. Because the merged verdict is also out of date, the corresponding merged status must be enabled with `allow_status`.
 
-`collateral_grace_period` is **mutually exclusive** with the TCB grace windows — setting it together with `platform_grace_period` or `qe_grace_period` causes a validation error.
+Advisory blacklists are enforced regardless of whether a platform or QE is inside a grace window.
 
 ### Platform Flags (Three-State)
 

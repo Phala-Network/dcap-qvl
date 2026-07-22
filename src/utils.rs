@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
@@ -168,9 +168,10 @@ pub fn extract_crl_number(crl_der: &[u8]) -> Result<u32> {
                 der::asn1::UintRef::from_der(ext.extn_value.as_bytes()).context("CRL number")?;
             let bytes = crl_num.as_bytes();
             // Convert big-endian bytes to u32 (CRL numbers are typically small)
+            ensure!(bytes.len() <= 4, "CRL number too large for u32");
             let mut val: u32 = 0;
             for &b in bytes {
-                val = val.checked_shl(8).context("CRL number too large for u32")? | u32::from(b);
+                val = (val << 8) | u32::from(b);
             }
             return Ok(val);
         }
