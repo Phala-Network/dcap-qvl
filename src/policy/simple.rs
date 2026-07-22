@@ -316,6 +316,9 @@ impl Policy for QuotePolicy {
 /// All fields default to the strict values (zero / empty / false).
 /// Pass as JSON from FFI (Go, Python) to configure verification policy.
 ///
+/// Unknown fields are rejected so that a stale or misspelled option in a
+/// security policy fails loudly instead of being silently ignored.
+///
 /// ```json
 /// {
 ///   "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
@@ -325,6 +328,7 @@ impl Policy for QuotePolicy {
 /// }
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QuotePolicyConfig {
     #[serde(default)]
     pub allowed_statuses: Vec<TcbStatus>,
@@ -804,5 +808,46 @@ mod tests {
             .allow_status(OutOfDate)
             .qe_grace_period(Duration::from_secs(13_000_000));
         assert!(policy.validate(&data).is_ok());
+    }
+
+    // -- QuotePolicyConfig --
+
+    #[test]
+    fn policy_config_default_is_strict() {
+        let config: QuotePolicyConfig = serde_json::from_str("{}").unwrap();
+        let policy = config.into_policy(1_702_000_000);
+        assert!(policy.validate(&make_test_claims(UpToDate)).is_ok());
+        let err = policy
+            .validate(&make_test_claims(SWHardeningNeeded))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not acceptable"), "{err}");
+    }
+
+    #[test]
+    fn policy_config_into_policy_applies_fields() {
+        let config: QuotePolicyConfig = serde_json::from_str(
+            r#"{
+                "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
+                "rejected_advisory_ids": ["INTEL-SA-00334"],
+                "allow_smt": true
+            }"#,
+        )
+        .unwrap();
+        let policy = config.into_policy(1_702_000_000);
+        assert!(policy.validate(&make_test_claims(SWHardeningNeeded)).is_ok());
+
+        let mut data = make_test_claims(UpToDate);
+        data.platform.tcb_level.advisory_ids = vec!["intel-sa-00334".to_string()];
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("rejected by policy"), "{err}");
+    }
+
+    #[test]
+    fn policy_config_rejects_unknown_fields() {
+        // A stale or misspelled option in a security policy must fail loudly.
+        let result: Result<QuotePolicyConfig, _> =
+            serde_json::from_str(r#"{"collateral_grace_period_secs": 2592000}"#);
+        assert!(result.is_err());
     }
 }

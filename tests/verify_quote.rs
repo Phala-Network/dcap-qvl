@@ -106,6 +106,53 @@ fn could_parse_sgx_quote() {
     );
 }
 
+/// End-to-end policy enforcement through the full verification pipeline:
+/// the strict policy must reject the SGX sample quote (status
+/// ConfigurationAndSWHardeningNeeded with known advisories), allowing the
+/// status must accept it, and blacklisting one of its advisories must
+/// reject it again.
+#[test]
+fn sgx_strict_policy_end_to_end() {
+    use dcap_qvl::verify::QuoteVerifier;
+    use dcap_qvl::{QuotePolicy, TcbStatus};
+
+    let raw_quote = include_bytes!("../sample/sgx_quote").to_vec();
+    let collateral: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/sgx_quote_collateral.json")).unwrap();
+    let now = now_from_collateral(&collateral);
+    let verifier = QuoteVerifier::new_prod();
+
+    // strict() only accepts UpToDate — the sample must be rejected.
+    let err = verifier
+        .verify_with_policy(
+            &raw_quote,
+            collateral.clone(),
+            now,
+            &QuotePolicy::strict(now),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not acceptable"), "{err}");
+
+    // Allowing the sample's status makes the same pipeline accept it.
+    let policy =
+        QuotePolicy::strict(now).allow_status(TcbStatus::ConfigurationAndSWHardeningNeeded);
+    let claims = verifier
+        .verify_with_policy(&raw_quote, collateral.clone(), now, &policy)
+        .expect("allowed status must verify");
+    assert_eq!(claims.claims_version, 1);
+
+    // Blacklisting one of the sample's advisories rejects it again.
+    let policy = QuotePolicy::strict(now)
+        .allow_status(TcbStatus::ConfigurationAndSWHardeningNeeded)
+        .reject_advisory("INTEL-SA-00615");
+    let err = verifier
+        .verify_with_policy(&raw_quote, collateral, now, &policy)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("INTEL-SA-00615"), "{err}");
+}
+
 /// Cross-validate all QuoteClaims fields against independently computed values.
 #[test]
 fn sgx_claims_cross_validation() {

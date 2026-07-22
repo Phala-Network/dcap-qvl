@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use dcap_qvl::{verify::{QuoteVerifier, ring}, QuoteCollateralV3};
+use dcap_qvl::{verify::QuoteVerifier, QuoteCollateralV3};
 use hex::decode;
 use near_sdk::{env, log, near};
 

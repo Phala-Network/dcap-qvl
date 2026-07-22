@@ -115,7 +115,11 @@ class TestWithSampleData:
             json.loads(collateral_json["tcb_info"])["issueDate"],
             json.loads(collateral_json["qe_identity"])["issueDate"],
         ]
-        now = max(int(datetime.fromisoformat(value).timestamp()) for value in issue_dates)
+        # `fromisoformat` only accepts a trailing "Z" on Python >= 3.11.
+        now = max(
+            int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+            for value in issue_dates
+        )
 
         report = dcap_qvl.verify(quote_data, collateral, now)
         assert isinstance(report, dcap_qvl.VerifiedReport)
