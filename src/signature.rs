@@ -15,11 +15,9 @@ pub struct DerSigEncoder;
 
 impl EcdsaSigEncoder for DerSigEncoder {
     fn encode_ecdsa_sig(r: &[u8], s: &[u8]) -> Result<Vec<u8>> {
-        let mut sequence = der::asn1::SequenceOf::<der::asn1::UintRef, 2>::new();
         let r_int = der::asn1::UintRef::new(r).context("Failed to create r INTEGER")?;
-        sequence.add(r_int).context("Failed to add r INTEGER")?;
         let s_int = der::asn1::UintRef::new(s).context("Failed to create s INTEGER")?;
-        sequence.add(s_int).context("Failed to add s INTEGER")?;
+        let sequence = alloc::vec![r_int, s_int];
         // Capacity: SEQUENCE header (≤4) + 2 × (INTEGER header (≤4) + payload + 1 sign byte)
         let cap = 8usize
             .checked_add(r.len())

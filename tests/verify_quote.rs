@@ -5,7 +5,7 @@ use dcap_qvl::{quote::Quote, verify::VerifiedReport, QuoteCollateralV3};
 use der::Decode as DerDecode;
 use scale::Decode as ScaleDecode;
 use serde_json::Value;
-use x509_cert::crl::CertificateList;
+use x509_cert::{certificate::Rfc5280, crl::CertificateList};
 
 pub fn verify(
     raw_quote: &[u8],
@@ -43,7 +43,7 @@ fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {
     }
 
     fn parse_crl_bounds(crl_der: &[u8]) -> (u64, Option<u64>) {
-        let crl = CertificateList::from_der(crl_der).expect("CRL parse");
+        let crl = CertificateList::<Rfc5280>::from_der(crl_der).expect("CRL parse");
         let this_update = crl.tbs_cert_list.this_update.to_unix_duration().as_secs();
         let next_update = crl
             .tbs_cert_list

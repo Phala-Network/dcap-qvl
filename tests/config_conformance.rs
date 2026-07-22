@@ -114,8 +114,8 @@ fn encode_ecdsa_sig_handles_edge_cases() {
         let der = DerSigEncoder::encode_ecdsa_sig(&r, &s).expect("encode succeeds on edge cases");
         // Must start with SEQUENCE tag.
         assert_eq!(der.first(), Some(&0x30), "ECDSA sig must be a SEQUENCE");
-        // Must be parseable back as a SequenceOf<UintRef, 2>.
-        let _decoded: ::der::asn1::SequenceOf<::der::asn1::UintRef, 2> =
+        // Must be parseable back as a sequence of two UintRef values.
+        let _decoded: Vec<::der::asn1::UintRef> =
             ::der::Decode::from_der(&der).expect("re-decode succeeds");
     }
 }

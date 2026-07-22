@@ -118,7 +118,7 @@ fn get_header(response: &HttpResponse, name: &str) -> Result<String> {
 fn extract_crl_url(cert_der: &[u8]) -> Result<Option<String>> {
     let cert: Certificate = DerDecode::from_der(cert_der).context("Failed to parse certificate")?;
 
-    let Some(extensions) = &cert.tbs_certificate.extensions else {
+    let Some(extensions) = &cert.tbs_certificate().extensions() else {
         return Ok(None);
     };
     for ext in extensions.iter() {

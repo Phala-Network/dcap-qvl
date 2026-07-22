@@ -181,8 +181,8 @@ impl PckInfoOutput {
         for (idx, cert) in certs.iter().enumerate() {
             let parsed = Certificate::from_der(cert.as_slice())
                 .map_err(|e| anyhow!("Failed to decode certificate #{idx}: {e}"))?;
-            let subject = parsed.tbs_certificate.subject.to_string();
-            let issuer = parsed.tbs_certificate.issuer.to_string();
+            let subject = parsed.tbs_certificate().subject().to_string();
+            let issuer = parsed.tbs_certificate().issuer().to_string();
             let role = match idx {
                 0 => "Leaf PCK",
                 1 => "PCK CA",
