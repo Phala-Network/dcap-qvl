@@ -486,6 +486,15 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
         fs::read_to_string(format!("{}/tcb_chain.pem", CERT_DIR)).unwrap_or_else(|_| {
             String::from("-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----\n")
         });
+    // The PCK CRL is signed by the TCB Signing CA, not by the end-entity
+    // TCB signer used for TCB Info and QE Identity signatures.
+    let pck_crl_issuer_chain = ["tcb_signing_ca.pem", "root_ca.pem"]
+        .into_iter()
+        .map(|name| fs::read_to_string(format!("{}/{}", CERT_DIR, name)))
+        .collect::<Result<String, _>>()
+        .unwrap_or_else(|_| {
+            String::from("-----BEGIN CERTIFICATE-----\nDUMMY\n-----END CERTIFICATE-----\n")
+        });
 
     // Load CRLs
     let root_crl = fs::read(format!("{}/root_ca.crl.der", CERT_DIR))
@@ -551,7 +560,7 @@ fn generate_base_collateral() -> Result<serde_json::Value> {
     let qe_identity_signature = sign_data(&key_pair, qe_identity_json.as_bytes())?;
 
     Ok(json!({
-        "pck_crl_issuer_chain": tcb_chain,
+        "pck_crl_issuer_chain": pck_crl_issuer_chain,
         "root_ca_crl": hex::encode(&root_crl),
         "pck_crl": hex::encode(&pck_crl),
         "tcb_info_issuer_chain": tcb_chain.clone(),
