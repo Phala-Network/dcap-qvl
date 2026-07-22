@@ -124,10 +124,13 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
     const pckCrl = typeof collateral.pck_crl === 'string'
         ? Buffer.from(collateral.pck_crl, 'hex')
         : Buffer.from(collateral.pck_crl);
-    const crls = [rootCaCrl, pckCrl];
-
-    // Check root CA against CRL
-    checkSingleCertCrl(rootCaDer, crls, nowSecs);
+    const crls = utils.validateCollateralCrls(
+        rootCaDer,
+        collateral.pck_crl_issuer_chain,
+        rootCaCrl,
+        pckCrl,
+        nowSecs,
+    );
 
     // Verify TCB info certificate chain and signature
     const tcbLeafCerts = utils.extractCerts(Buffer.from(collateral.tcb_info_issuer_chain));
@@ -556,35 +559,6 @@ function parseTdAttributes(input) {
             perfmon,
         },
     };
-}
-
-// Check single certificate against CRL
-function checkSingleCertCrl(certDer, crlDers, nowSecs) {
-    const cert = utils.Certificate.decode(certDer, 'der');
-    const certSerial = cert.tbsCertificate.serialNumber.toString();
-
-    for (const crlDer of crlDers) {
-        const crlBuffer = Buffer.isBuffer(crlDer) ? crlDer : Buffer.from(crlDer);
-
-        try {
-            const crl = utils.CertificateList.decode(crlBuffer, 'der');
-
-            if (crl.tbsCertList.revokedCertificates) {
-                for (const revokedCert of crl.tbsCertList.revokedCertificates) {
-                    const revokedSerial = revokedCert.userCertificate.toString();
-
-                    if (certSerial === revokedSerial) {
-                        throw new Error('Certificate is revoked');
-                    }
-                }
-            }
-        } catch (e) {
-            if (e.message === 'Certificate is revoked') {
-                throw e;
-            }
-            // Ignore CRL parse errors
-        }
-    }
 }
 
 // Verify ECDSA signature using certificate

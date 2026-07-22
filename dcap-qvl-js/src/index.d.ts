@@ -436,6 +436,13 @@ export const utils: {
     crls: Buffer[],
     rootCaDer: Buffer
   ): void;
+  validateCollateralCrls(
+    rootCaDer: Buffer,
+    pckCrlIssuerChain: string,
+    rootCaCrl: Buffer,
+    pckCrl: Buffer,
+    nowSecs: number
+  ): Buffer[];
   encodeAsDer(signature: Buffer): Buffer;
   derToPem(der: Buffer, label: string): string;
   getIntelExtension(cert: Buffer): any;
