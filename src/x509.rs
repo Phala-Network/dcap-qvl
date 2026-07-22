@@ -35,7 +35,7 @@ impl X509Codec for X509CertBackend {
 
 impl ParsedCert for X509CertParsed {
     fn pck_ca(&self) -> Option<PckCa> {
-        let issuer_dn = self.cert.tbs_certificate.issuer.to_string();
+        let issuer_dn = self.cert.tbs_certificate().issuer().to_string();
         if issuer_dn.contains(constants::PROCESSOR_ISSUER) {
             return Some(PckCa::Processor);
         }
@@ -50,10 +50,9 @@ impl ParsedCert for X509CertParsed {
             .map_err(|_| anyhow!("Invalid OID encoding"))?;
         let mut iter = self
             .cert
-            .tbs_certificate
-            .extensions
-            .as_deref()
-            .unwrap_or(&[])
+            .tbs_certificate()
+            .extensions()
+            .map_or(&[][..], Vec::as_slice)
             .iter()
             .filter(|e| e.extn_id == oid)
             .map(|e| e.extn_value.clone());
@@ -65,6 +64,6 @@ impl ParsedCert for X509CertParsed {
         if iter.next().is_some() {
             bail!("extension {} appears more than once", oid);
         }
-        Ok(Some(extension.into_bytes()))
+        Ok(Some(extension.into_bytes().into_vec()))
     }
 }
