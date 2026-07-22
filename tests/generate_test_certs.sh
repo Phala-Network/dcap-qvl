@@ -106,6 +106,9 @@ cat "$CERTS_DIR/tcb_signing.pem" "$CERTS_DIR/tcb_signing_ca.pem" "$CERTS_DIR/roo
 # This chain uses the CA cert as the signing cert (wrong!)
 cat "$CERTS_DIR/tcb_signing_ca.pem" "$CERTS_DIR/root_ca.pem" > "$CERTS_DIR/tcb_chain_ca_only.pem"
 
+# Create PCK CRL issuer chain (CRL-signing CA + Root CA)
+cat "$CERTS_DIR/tcb_signing_ca.pem" "$CERTS_DIR/root_ca.pem" > "$CERTS_DIR/pck_crl_issuer_chain.pem"
+
 # Create PCK chain (PCK + TCB Signing CA + Root CA)
 cat "$CERTS_DIR/pck.pem" "$CERTS_DIR/tcb_signing_ca.pem" "$CERTS_DIR/root_ca.pem" > "$CERTS_DIR/pck_chain.pem"
 
