@@ -138,7 +138,8 @@ runnable examples.
 Applications can request detailed serializable claims and optionally apply the built-in policy:
 
 ```rust
-use dcap_qvl::{QuoteVerifier, QuotePolicy, TcbStatus};
+use dcap_qvl::{QuotePolicy, TcbStatus};
+use dcap_qvl::verify::QuoteVerifier;
 
 let policy = QuotePolicy::strict(now)
     .allow_status(TcbStatus::SWHardeningNeeded)

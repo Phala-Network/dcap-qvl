@@ -29,7 +29,6 @@ See [TEST_WEB.md](TEST_WEB.md) for detailed web testing documentation.
 ```bash
 cd tests/js
 node verify_quote_node.js
-node verify_quote_rego_node.js
 ```
 
 ### Verify Quote in Web Browser

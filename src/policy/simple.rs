@@ -27,11 +27,11 @@ use {
 /// // Strict: only UpToDate, collateral must not be expired
 /// let policy = QuotePolicy::strict(now);
 ///
-/// // With 90-day collateral grace period
+/// // Allow an out-of-date platform for 90 days after its TCB level date.
 /// use core::time::Duration;
 /// let policy = QuotePolicy::strict(now)
-///     .allow_status(TcbStatus::SWHardeningNeeded)
-///     .collateral_grace_period(Duration::from_secs(90 * 24 * 3600))
+///     .allow_status(TcbStatus::OutOfDate)
+///     .platform_grace_period(Duration::from_secs(90 * 24 * 3600))
 ///     .reject_advisory("INTEL-SA-00334");
 /// ```
 #[derive(Clone, Debug)]
@@ -39,9 +39,8 @@ pub struct QuotePolicy {
     claims_only: bool,
     acceptable_statuses: u8,
 
-    // Current time + grace periods (mutually exclusive, default 0 = no tolerance)
+    // Current time + TCB grace periods (default 0 = no tolerance)
     now: u64,
-    collateral_grace_period: u64,
     platform_grace_period: u64,
     qe_grace_period: u64,
 
@@ -87,7 +86,6 @@ impl QuotePolicy {
             claims_only: false,
             acceptable_statuses,
             now,
-            collateral_grace_period: 0,
             platform_grace_period: 0,
             qe_grace_period: 0,
             min_tcb_eval_data_number: None,
@@ -117,13 +115,6 @@ impl QuotePolicy {
     /// Allow an additional TCB status.
     pub fn allow_status(mut self, status: TcbStatus) -> Self {
         self.acceptable_statuses |= Self::status_to_flag(status);
-        self
-    }
-
-    /// Set collateral grace period (default: zero). Accepts quotes where
-    /// `earliest_expiration_date + grace_period >= now`.
-    pub fn collateral_grace_period(mut self, duration: Duration) -> Self {
-        self.collateral_grace_period = duration.as_secs();
         self
     }
 
@@ -222,16 +213,12 @@ impl Policy for QuotePolicy {
             );
         }
 
-        // 3. Collateral expiration: earliest_expiration + grace >= now
-        if data
-            .earliest_expiration_date
-            .saturating_add(self.collateral_grace_period)
-            < self.now
-        {
+        // 3. Collateral expiration. The verification pipeline already enforces
+        // this at the same trusted time; retain the check for delayed appraisal.
+        if data.earliest_expiration_date < self.now {
             bail!(
-                "Collateral expired: earliest_expiration {} + grace {} < now {}",
+                "Collateral expired: earliest_expiration {} < now {}",
                 data.earliest_expiration_date,
-                self.collateral_grace_period,
                 self.now
             );
         }
@@ -329,22 +316,24 @@ impl Policy for QuotePolicy {
 /// All fields default to the strict values (zero / empty / false).
 /// Pass as JSON from FFI (Go, Python) to configure verification policy.
 ///
+/// Unknown fields are rejected so that a stale or misspelled option in a
+/// security policy fails loudly instead of being silently ignored.
+///
 /// ```json
 /// {
 ///   "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
 ///   "rejected_advisory_ids": ["INTEL-SA-00334"],
-///   "collateral_grace_period_secs": 2592000,
+///   "platform_grace_period_secs": 2592000,
 ///   "allow_smt": true
 /// }
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct QuotePolicyConfig {
     #[serde(default)]
     pub allowed_statuses: Vec<TcbStatus>,
     #[serde(default)]
     pub rejected_advisory_ids: Vec<String>,
-    #[serde(default)]
-    pub collateral_grace_period_secs: u64,
     #[serde(default)]
     pub platform_grace_period_secs: u64,
     #[serde(default)]
@@ -377,10 +366,6 @@ impl QuotePolicyConfig {
         };
         for id in self.rejected_advisory_ids {
             policy = policy.reject_advisory(id);
-        }
-        if self.collateral_grace_period_secs > 0 {
-            policy = policy
-                .collateral_grace_period(Duration::from_secs(self.collateral_grace_period_secs));
         }
         if self.platform_grace_period_secs > 0 {
             policy =
@@ -587,10 +572,10 @@ mod tests {
         assert!(policy.validate(&data).is_ok());
     }
 
-    // -- Collateral grace period --
+    // -- Collateral expiration --
 
     #[test]
-    fn policy_collateral_expired_no_grace_rejects() {
+    fn policy_collateral_expired_rejects() {
         let data = make_test_claims(UpToDate);
         let policy = QuotePolicy::strict(1_704_000_000);
         let err = policy.validate(&data).unwrap_err().to_string();
@@ -598,24 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_collateral_expired_with_grace_accepts() {
-        let data = make_test_claims(UpToDate);
-        let policy = QuotePolicy::strict(1_704_000_000)
-            .collateral_grace_period(Duration::from_secs(2_000_000));
-        assert!(policy.validate(&data).is_ok());
-    }
-
-    #[test]
-    fn policy_collateral_expired_grace_too_short_rejects() {
-        let data = make_test_claims(UpToDate);
-        let policy = QuotePolicy::strict(1_704_000_000)
-            .collateral_grace_period(Duration::from_secs(500_000));
-        let err = policy.validate(&data).unwrap_err().to_string();
-        assert!(err.contains("Collateral expired"), "{err}");
-    }
-
-    #[test]
-    fn policy_collateral_not_expired_zero_grace_passes() {
+    fn policy_collateral_not_expired_passes() {
         let data = make_test_claims(UpToDate);
         let policy = QuotePolicy::strict(1_702_000_000);
         assert!(policy.validate(&data).is_ok());
@@ -773,18 +741,6 @@ mod tests {
     // -- Advisory blacklist during grace --
 
     #[test]
-    fn policy_blacklist_checked_during_collateral_grace() {
-        let mut data = make_test_claims(UpToDate);
-        data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        data.platform.tcb_level.advisory_ids = vec!["INTEL-SA-00615".to_string()];
-        let policy = QuotePolicy::strict(1_704_000_000)
-            .collateral_grace_period(Duration::from_secs(2_000_000))
-            .reject_advisory("INTEL-SA-00615");
-        let err = policy.validate(&data).unwrap_err().to_string();
-        assert!(err.contains("INTEL-SA-00615"), "{err}");
-    }
-
-    #[test]
     fn policy_blacklist_checked_during_platform_grace() {
         let mut data = make_test_claims(OutOfDate);
         data.tcb.advisory_ids = vec!["INTEL-SA-00615".to_string()];
@@ -852,5 +808,48 @@ mod tests {
             .allow_status(OutOfDate)
             .qe_grace_period(Duration::from_secs(13_000_000));
         assert!(policy.validate(&data).is_ok());
+    }
+
+    // -- QuotePolicyConfig --
+
+    #[test]
+    fn policy_config_default_is_strict() {
+        let config: QuotePolicyConfig = serde_json::from_str("{}").unwrap();
+        let policy = config.into_policy(1_702_000_000);
+        assert!(policy.validate(&make_test_claims(UpToDate)).is_ok());
+        let err = policy
+            .validate(&make_test_claims(SWHardeningNeeded))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not acceptable"), "{err}");
+    }
+
+    #[test]
+    fn policy_config_into_policy_applies_fields() {
+        let config: QuotePolicyConfig = serde_json::from_str(
+            r#"{
+                "allowed_statuses": ["UpToDate", "SWHardeningNeeded"],
+                "rejected_advisory_ids": ["INTEL-SA-00334"],
+                "allow_smt": true
+            }"#,
+        )
+        .unwrap();
+        let policy = config.into_policy(1_702_000_000);
+        assert!(policy
+            .validate(&make_test_claims(SWHardeningNeeded))
+            .is_ok());
+
+        let mut data = make_test_claims(UpToDate);
+        data.platform.tcb_level.advisory_ids = vec!["intel-sa-00334".to_string()];
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("rejected by policy"), "{err}");
+    }
+
+    #[test]
+    fn policy_config_rejects_unknown_fields() {
+        // A stale or misspelled option in a security policy must fail loudly.
+        let result: Result<QuotePolicyConfig, _> =
+            serde_json::from_str(r#"{"collateral_grace_period_secs": 2592000}"#);
+        assert!(result.is_err());
     }
 }

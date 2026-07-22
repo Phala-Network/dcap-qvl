@@ -33,8 +33,8 @@ pub use simple::{QuotePolicy, QuotePolicyConfig};
 /// let now_unix_secs = 1_700_000_000u64;
 ///
 /// let policy = QuotePolicy::strict(now_unix_secs)
-///     .allow_status(TcbStatus::SWHardeningNeeded)
-///     .collateral_grace_period(Duration::from_secs(90 * 24 * 3600))
+///     .allow_status(TcbStatus::OutOfDate)
+///     .platform_grace_period(Duration::from_secs(90 * 24 * 3600))
 ///     .reject_advisory("INTEL-SA-00334");
 /// ```
 ///

@@ -172,13 +172,15 @@ impl TcbStatus {
         }
     }
 
-    fn converge_with_qe(self, qe: TcbStatus) -> TcbStatus {
+    /// Converge a platform status with a QE or TDX module status using Intel's
+    /// appraisal rule for an out-of-date component on a configured platform.
+    pub(crate) fn converge_with_component(self, component: TcbStatus) -> TcbStatus {
         use TcbStatus::*;
-        match (qe, self) {
+        match (component, self) {
             (OutOfDate, ConfigurationNeeded | ConfigurationAndSWHardeningNeeded) => {
                 OutOfDateConfigurationNeeded
             }
-            _ => qe.max(self),
+            _ => component.max(self),
         }
     }
 }
@@ -218,7 +220,7 @@ impl TcbStatusWithAdvisory {
 
     /// Merge a platform status with a QE status using Intel QVL convergence rules.
     pub fn merge(self, other: &TcbStatusWithAdvisory) -> Self {
-        let final_status = self.status.converge_with_qe(other.status);
+        let final_status = self.status.converge_with_component(other.status);
 
         let mut advisory_ids = self.advisory_ids;
         for id in &other.advisory_ids {
