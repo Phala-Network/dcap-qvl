@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: maven-central     # gates secrets behind environment approval
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Derive the version: explicit input > tag > Cargo.toml fallback
       - name: Resolve version
