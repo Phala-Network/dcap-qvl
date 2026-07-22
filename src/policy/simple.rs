@@ -835,7 +835,9 @@ mod tests {
         )
         .unwrap();
         let policy = config.into_policy(1_702_000_000);
-        assert!(policy.validate(&make_test_claims(SWHardeningNeeded)).is_ok());
+        assert!(policy
+            .validate(&make_test_claims(SWHardeningNeeded))
+            .is_ok());
 
         let mut data = make_test_claims(UpToDate);
         data.platform.tcb_level.advisory_ids = vec!["intel-sa-00334".to_string()];
