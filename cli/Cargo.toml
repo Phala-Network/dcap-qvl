@@ -21,7 +21,7 @@ path = "src/bin/generate_all_samples.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4"
 clap = { version = "4.5.27", features = ["derive"] }
 dcap-qvl = { version = "0.6.1", path = "../" }
