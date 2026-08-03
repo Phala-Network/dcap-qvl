@@ -13,7 +13,7 @@ borsh = { version = "1.6.1", default-features = false, features = [
 ], optional = true }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive"] }
-base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 scale = { package = "parity-scale-codec", version = "3.7.5", default-features = false, features = [
     "derive",
 ] }
@@ -27,7 +27,7 @@ chrono = { version = "0.4.44", default-features = false, features = [
 const-oid = { version = "0.10.2", default-features = false }
 x509-cert = { version = "0.3.0", default-features = false, optional = true }
 byteorder = { version = "1.5.0", default-features = false }
-pem = { version = "3", default-features = false }
+pem = { version = "4", default-features = false }
 asn1_der = { version = "0.7", default-features = false, features = [
     "native_types",
 ] }
