@@ -204,10 +204,11 @@ impl TDAttributes {
         let kl = (input[3] & 0x80) != 0; // Bit 31
 
         // Extract OTHER flags (bytes 4-7)
-        let reserved_other = ((input[7] as u32) << 24)
+        // Mask bit 7 of input[7] (= PERFMON, bit 63) out of reserved_other.
+        let reserved_other = (((input[7] as u32) & 0x7F) << 24)
             | ((input[6] as u32) << 16)
             | ((input[5] as u32) << 8)
-            | ((input[4] as u32) & 0x7F);
+            | (input[4] as u32);
         let perfmon = (input[7] & 0x80) != 0; // Bit 63
 
         Ok(TDAttributes {
