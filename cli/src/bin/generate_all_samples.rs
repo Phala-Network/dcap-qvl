@@ -1061,8 +1061,8 @@ fn main() -> Result<()> {
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
-            // Set reserved bit 29 (byte 3, bit 5)
-            report.td_attributes[3] |= 0x20; // Reserved bit 29
+            // Set RESERVED_N bit 23 (byte 2, bit 7).
+            report.td_attributes[2] |= 0x80;
 
             let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
             let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;

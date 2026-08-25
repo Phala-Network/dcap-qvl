@@ -1534,17 +1534,17 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
         let td_attrs =
             TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
-        if td_attrs.tud & !0x01 != 0 {
-            bail!("Reserved bits in TD attributes are set");
-        }
         if td_attrs.tud & 0x01 != 0 && !allow_debug {
             bail!("Debug mode is enabled");
         }
-        if td_attrs.sec.reserved_lower != 0
-            || td_attrs.sec.reserved_bit29
-            || td_attrs.other.reserved != 0
-        {
+        if td_attrs.tud & 0x70 != 0 {
+            bail!("TD profiling is enabled");
+        }
+        if td_attrs.reserved != 0 {
             bail!("Reserved bits in TD attributes are set");
+        }
+        if td_attrs.sec.migratable {
+            bail!("TD migration is enabled");
         }
         if !td_attrs.sec.sept_ve_disable {
             bail!("SEPT_VE_DISABLE is not enabled");
