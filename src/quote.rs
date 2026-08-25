@@ -150,7 +150,25 @@ pub struct TDAttributes {
 
     /// OTHER attributes that do not impact the security of the TD (bits 63:32)
     pub other: OTHERFlags,
+
+    /// Bits that the TDX 1.5 ABI requires attestation verifiers to reject.
+    pub reserved: u64,
 }
+
+const fn ones(range: core::ops::RangeInclusive<u32>) -> u64 {
+    let start = *range.start();
+    let end = *range.end();
+    let right_shift = match 63_u32.checked_sub(end) {
+        Some(shift) => shift,
+        None => panic!("bit range exceeds u64"),
+    };
+    (u64::MAX << start) & (u64::MAX >> right_shift)
+}
+
+// Intel TDX Module ABI Specification 348551-008US, Table 3.23:
+// https://www.intel.com/content/www/us/en/content-details/865802/intel-tdx-module-abi-specification.html
+const TD_ATTRIBUTES_RESERVED_MBZ_MASK: u64 =
+    ones(1..=3) | ones(7..=15) | ones(23..=26) | ones(32..=61);
 
 /// TUD (TD Under Debug) flags (bits 7:0)
 #[derive(Debug, Clone)]
@@ -166,27 +184,36 @@ pub struct TUDFlags {
 /// SEC attributes that may impact the security of the TD (bits 31:8)
 #[derive(Debug, Clone)]
 pub struct SECFlags {
-    /// Reserved for future SEC flags - must be 0 (bits 27:8)
-    pub reserved_lower: u32,
+    /// ICSSD: Enable instruction-count based single-step defense
+    pub icssd: bool,
+
+    /// SERVTD_EXT: Include a hash of SERVTD_EXT_STRUCT in TDREPORT_STRUCT
+    pub servtd_ext: bool,
+
+    /// Positive reserved flags that attestation verifiers may accept (bits 22:18)
+    pub reserved_positive: u64,
+
+    /// LASS: TD is allowed to use Linear Address Space Separation
+    pub lass: bool,
 
     /// SEPT_VE_DISABLE: Disable EPT violation conversion to #VE on TD access of PENDING pages
     pub sept_ve_disable: bool,
 
-    /// Reserved for future SEC flags - must be 0 (bit 29)
-    pub reserved_bit29: bool,
+    /// MIGRATABLE: TD is migratable using a Migration TD
+    pub migratable: bool,
 
     /// PKS: TD is allowed to use Supervisor Protection Keys
     pub pks: bool,
 
-    /// KL: TD is allowed to use Key Locker
-    pub kl: bool,
+    /// Positive reserved bit (formerly KL)
+    pub reserved_positive_bit31: bool,
 }
 
 /// OTHER attributes that do not impact the security of the TD (bits 63:32)
 #[derive(Debug, Clone)]
 pub struct OTHERFlags {
-    /// Reserved for future OTHER flags - must be 0 (bits 62:32)
-    pub reserved: u32,
+    /// TPA: TD is a TDX Connect Provisioning Agent
+    pub tpa: bool,
 
     /// PERFMON: TD is allowed to use Perfmon and PERF_METRICS capabilities
     pub perfmon: bool,
@@ -194,37 +221,85 @@ pub struct OTHERFlags {
 
 impl TDAttributes {
     pub fn parse(input: [u8; 8]) -> Result<Self, scale::Error> {
+        let attributes = u64::from_le_bytes(input);
+        let is_set = |bit: u32| attributes & ones(bit..=bit) != 0;
         let tud = input[0];
-        // Extract SEC flags (27:8 bits, bytes 1-3 and part of byte 4)
-        let reserved_lower =
-            (((input[3] & 0x0f) as u32) << 16) | ((input[2] as u32) << 8) | (input[1] as u32);
-        let sept_ve_disable = (input[3] & 0x10) != 0; // Bit 28
-        let reserved_bit29 = (input[3] & 0x20) != 0; // Bit 29
-        let pks = (input[3] & 0x40) != 0; // Bit 30
-        let kl = (input[3] & 0x80) != 0; // Bit 31
+        let icssd = is_set(16);
+        let servtd_ext = is_set(17);
+        let reserved_positive = attributes & ones(18..=22);
+        let lass = is_set(27);
+        let sept_ve_disable = is_set(28);
+        let migratable = is_set(29);
+        let pks = is_set(30);
+        let reserved_positive_bit31 = is_set(31);
 
-        // Extract OTHER flags (bytes 4-7)
-        // Mask bit 7 of input[7] (= PERFMON, bit 63) out of reserved_other.
-        let reserved_other = (((input[7] as u32) & 0x7F) << 24)
-            | ((input[6] as u32) << 16)
-            | ((input[5] as u32) << 8)
-            | (input[4] as u32);
-        let perfmon = (input[7] & 0x80) != 0; // Bit 63
+        let tpa = is_set(62);
+        let perfmon = is_set(63);
 
         Ok(TDAttributes {
             tud,
             sec: SECFlags {
-                reserved_lower,
+                icssd,
+                servtd_ext,
+                reserved_positive,
+                lass,
                 sept_ve_disable,
-                reserved_bit29,
+                migratable,
                 pks,
-                kl,
+                reserved_positive_bit31,
             },
-            other: OTHERFlags {
-                reserved: reserved_other,
-                perfmon,
-            },
+            other: OTHERFlags { tpa, perfmon },
+            reserved: attributes & TD_ATTRIBUTES_RESERVED_MBZ_MASK,
         })
+    }
+}
+
+#[cfg(test)]
+mod td_attributes_tests {
+    use super::{ones, TDAttributes};
+
+    #[test]
+    fn accepts_all_non_mbz_bits_from_tdx_1_5() {
+        let allowed = [
+            0_u32, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 62, 63,
+        ];
+
+        for bit in allowed {
+            let attributes = TDAttributes::parse(ones(bit..=bit).to_le_bytes()).unwrap();
+            assert_eq!(attributes.reserved, 0, "bit {bit} must be accepted");
+        }
+    }
+
+    #[test]
+    fn rejects_all_mbz_bits_from_tdx_1_5() {
+        let allowed_mask = [
+            0_u32, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 62, 63,
+        ]
+        .into_iter()
+        .fold(0_u64, |mask, bit| mask | ones(bit..=bit));
+
+        for bit in 0..64 {
+            if allowed_mask & ones(bit..=bit) == 0 {
+                let attributes = TDAttributes::parse(ones(bit..=bit).to_le_bytes()).unwrap();
+                assert_ne!(attributes.reserved, 0, "bit {bit} must be rejected");
+            }
+        }
+    }
+
+    #[test]
+    fn parses_new_tdx_1_5_flags() {
+        let value = ones(16..=22) | ones(27..=27) | ones(29..=29) | ones(31..=31) | ones(62..=63);
+        let attributes = TDAttributes::parse(value.to_le_bytes()).unwrap();
+
+        assert!(attributes.sec.icssd);
+        assert!(attributes.sec.servtd_ext);
+        assert_eq!(attributes.sec.reserved_positive, ones(18..=22));
+        assert!(attributes.sec.lass);
+        assert!(attributes.sec.migratable);
+        assert!(attributes.sec.reserved_positive_bit31);
+        assert!(attributes.other.tpa);
+        assert!(attributes.other.perfmon);
+        assert_eq!(attributes.reserved, 0);
     }
 }
 
