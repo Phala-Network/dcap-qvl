@@ -47,11 +47,31 @@ pub const PHALA_PCCS_URL: &str = "https://pccs.phala.network";
 /// Pass this to [`CollateralClient::with_default_http`] to fetch directly from Intel.
 pub const INTEL_PCS_URL: &str = "https://api.trustedservices.intel.com";
 
+/// Which TCB evaluation data set the PCS should serve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TcbEvaluationDataSet {
+    /// The set Intel currently enforces.
+    #[default]
+    Standard,
+    /// The set Intel has published and will enforce at a later promotion.
+    Early,
+}
+
+impl TcbEvaluationDataSet {
+    fn as_update_param(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Early => "early",
+        }
+    }
+}
+
 struct PcsEndpoints {
     base_url: String,
     tee: &'static str,
     fmspc: String,
     ca: String,
+    evaluation_data_set: TcbEvaluationDataSet,
 }
 
 impl PcsEndpoints {
@@ -67,6 +87,7 @@ impl PcsEndpoints {
             tee,
             fmspc,
             ca: ca.to_owned(),
+            evaluation_data_set: TcbEvaluationDataSet::default(),
         }
     }
 
@@ -83,11 +104,16 @@ impl PcsEndpoints {
     }
 
     fn url_tcb(&self) -> String {
-        self.mk_url(self.tee, &format!("tcb?fmspc={}", self.fmspc))
+        let update = self.evaluation_data_set.as_update_param();
+        self.mk_url(
+            self.tee,
+            &format!("tcb?fmspc={}&update={update}", self.fmspc),
+        )
     }
 
     fn url_qe_identity(&self) -> String {
-        self.mk_url(self.tee, "qe/identity?update=standard")
+        let update = self.evaluation_data_set.as_update_param();
+        self.mk_url(self.tee, &format!("qe/identity?update={update}"))
     }
 
     fn mk_url(&self, tee: &str, path: &str) -> String {
@@ -326,6 +352,7 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 pub struct CollateralClient<C: Config = DefaultConfig, H: HttpClient = ReqwestHttp> {
     http: H,
     pccs_url: String,
+    evaluation_data_set: TcbEvaluationDataSet,
     _cfg: PhantomData<fn() -> C>,
 }
 
@@ -334,6 +361,7 @@ impl<C: Config, H: HttpClient + Clone> Clone for CollateralClient<C, H> {
         Self {
             http: self.http.clone(),
             pccs_url: self.pccs_url.clone(),
+            evaluation_data_set: self.evaluation_data_set,
             _cfg: PhantomData,
         }
     }
@@ -351,6 +379,7 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         Self {
             http,
             pccs_url: pccs_url.into(),
+            evaluation_data_set: TcbEvaluationDataSet::default(),
             _cfg: PhantomData,
         }
     }
@@ -360,8 +389,19 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         CollateralClient {
             http: self.http,
             pccs_url: self.pccs_url,
+            evaluation_data_set: self.evaluation_data_set,
             _cfg: PhantomData,
         }
+    }
+
+    /// Choose which TCB evaluation data set the PCS serves, defaulting to
+    /// [`TcbEvaluationDataSet::Standard`].
+    ///
+    /// [`Early`](TcbEvaluationDataSet::Early) answers whether a platform will
+    /// still be accepted once Intel promotes the set it has already published.
+    pub fn with_evaluation_data_set(mut self, evaluation_data_set: TcbEvaluationDataSet) -> Self {
+        self.evaluation_data_set = evaluation_data_set;
+        self
     }
 
     /// Fetch collateral for the given raw DCAP quote.
@@ -406,7 +446,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         ca: &str,
         for_sgx: bool,
     ) -> Result<QuoteCollateralV3> {
-        let endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
+        let mut endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
+        endpoints.evaluation_data_set = self.evaluation_data_set;
         let client = &self.http;
 
         // Send a GET and fail with a useful message on non-2xx, so the
@@ -739,7 +780,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
         );
         assert_eq!(
             sgx_endpoints.url_tcb(),
-            "https://pccs.example.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://pccs.example.com/sgx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
 
         // Test TDX TCB URL
@@ -751,7 +792,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
         );
         assert_eq!(
             tdx_endpoints.url_tcb(),
-            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
     }
 
@@ -783,6 +824,26 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
     }
 
     #[test]
+    fn test_pcs_endpoints_early_evaluation_data_set() {
+        let mut endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        endpoints.evaluation_data_set = TcbEvaluationDataSet::Early;
+
+        assert_eq!(
+            endpoints.url_tcb(),
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&update=early"
+        );
+        assert_eq!(
+            endpoints.url_qe_identity(),
+            "https://pccs.example.com/tdx/certification/v4/qe/identity?update=early"
+        );
+    }
+
+    #[test]
     fn test_intel_pcs_url() {
         // Test the Intel PCS URL constant
         assert_eq!(INTEL_PCS_URL, "https://api.trustedservices.intel.com");
@@ -807,7 +868,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
 
         assert_eq!(
             intel_endpoints.url_tcb(),
-            "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
 
         assert_eq!(
