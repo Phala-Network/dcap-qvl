@@ -1,5 +1,5 @@
 use alloc::string::{String, ToString};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use core::marker::PhantomData;
 use der::Decode as DerDecode;
 use scale::Decode;
@@ -53,16 +53,34 @@ pub enum TcbEvaluationDataSet {
     /// The set Intel currently enforces.
     #[default]
     Standard,
-    /// The set Intel has published and will enforce at a later promotion.
+    /// The newest set Intel has published for early evaluation.
     Early,
+    /// A specific evaluation data set, identified by its data number.
+    Number(u32),
 }
 
 impl TcbEvaluationDataSet {
-    fn as_update_param(self) -> &'static str {
+    fn into_query_param(self) -> String {
         match self {
-            Self::Standard => "standard",
-            Self::Early => "early",
+            Self::Standard => "update=standard".to_owned(),
+            Self::Early => "update=early".to_owned(),
+            Self::Number(number) => format!("tcbEvaluationDataNumber={number}"),
         }
+    }
+
+    fn validate_response(self, response: &serde_json::Value, kind: &str) -> Result<()> {
+        let Self::Number(expected) = self else {
+            return Ok(());
+        };
+        let actual = response
+            .get("tcbEvaluationDataNumber")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| anyhow!("{kind} response is missing tcbEvaluationDataNumber"))?;
+        ensure!(
+            actual == u64::from(expected),
+            "{kind} response returned TCB evaluation data number {actual}, expected {expected}"
+        );
+        Ok(())
     }
 }
 
@@ -104,16 +122,13 @@ impl PcsEndpoints {
     }
 
     fn url_tcb(&self) -> String {
-        let update = self.evaluation_data_set.as_update_param();
-        self.mk_url(
-            self.tee,
-            &format!("tcb?fmspc={}&update={update}", self.fmspc),
-        )
+        let selector = self.evaluation_data_set.into_query_param();
+        self.mk_url(self.tee, &format!("tcb?fmspc={}&{selector}", self.fmspc))
     }
 
     fn url_qe_identity(&self) -> String {
-        let update = self.evaluation_data_set.as_update_param();
-        self.mk_url(self.tee, &format!("qe/identity?update={update}"))
+        let selector = self.evaluation_data_set.into_query_param();
+        self.mk_url(self.tee, &format!("qe/identity?{selector}"))
     }
 
     fn mk_url(&self, tee: &str, path: &str) -> String {
@@ -523,6 +538,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
 
         let tcb_info_resp: TcbInfoResponse =
             serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
+        self.evaluation_data_set
+            .validate_response(&tcb_info_resp.tcb_info, "TCB Info")?;
         let tcb_info = tcb_info_resp.tcb_info.to_string();
         let tcb_info_signature = hex::decode(&tcb_info_resp.signature)
             .ok()
@@ -530,6 +547,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
 
         let qe_identity_resp: QeIdentityResponse =
             serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
+        self.evaluation_data_set
+            .validate_response(&qe_identity_resp.enclave_identity, "QE Identity")?;
         let qe_identity = qe_identity_resp.enclave_identity.to_string();
         let qe_identity_signature = hex::decode(&qe_identity_resp.signature)
             .ok()
@@ -840,6 +859,48 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
         assert_eq!(
             endpoints.url_qe_identity(),
             "https://pccs.example.com/tdx/certification/v4/qe/identity?update=early"
+        );
+    }
+
+    #[test]
+    fn test_pcs_endpoints_numbered_evaluation_data_set() {
+        let mut endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        endpoints.evaluation_data_set = TcbEvaluationDataSet::Number(21);
+
+        assert_eq!(
+            endpoints.url_tcb(),
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&tcbEvaluationDataNumber=21"
+        );
+        assert_eq!(
+            endpoints.url_qe_identity(),
+            "https://pccs.example.com/tdx/certification/v4/qe/identity?tcbEvaluationDataNumber=21"
+        );
+    }
+
+    #[test]
+    fn test_numbered_evaluation_data_set_validates_response() {
+        let selector = TcbEvaluationDataSet::Number(21);
+        selector
+            .validate_response(
+                &serde_json::json!({ "tcbEvaluationDataNumber": 21 }),
+                "TCB Info",
+            )
+            .unwrap();
+
+        let error = selector
+            .validate_response(
+                &serde_json::json!({ "tcbEvaluationDataNumber": 20 }),
+                "TCB Info",
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "TCB Info response returned TCB evaluation data number 20, expected 21"
         );
     }
 
