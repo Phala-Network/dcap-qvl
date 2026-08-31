@@ -1,5 +1,5 @@
 use alloc::string::{String, ToString};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use core::marker::PhantomData;
 use der::Decode as DerDecode;
 use scale::Decode;
@@ -47,11 +47,49 @@ pub const PHALA_PCCS_URL: &str = "https://pccs.phala.network";
 /// Pass this to [`CollateralClient::with_default_http`] to fetch directly from Intel.
 pub const INTEL_PCS_URL: &str = "https://api.trustedservices.intel.com";
 
+/// Which TCB evaluation data set the PCS should serve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TcbEvaluationDataSet {
+    /// The set Intel currently enforces.
+    #[default]
+    Standard,
+    /// The newest set Intel has published for early evaluation.
+    Early,
+    /// A specific evaluation data set, identified by its data number.
+    Number(u32),
+}
+
+impl TcbEvaluationDataSet {
+    fn into_query_param(self) -> String {
+        match self {
+            Self::Standard => "update=standard".to_owned(),
+            Self::Early => "update=early".to_owned(),
+            Self::Number(number) => format!("tcbEvaluationDataNumber={number}"),
+        }
+    }
+
+    fn validate_response(self, response: &serde_json::Value, kind: &str) -> Result<()> {
+        let Self::Number(expected) = self else {
+            return Ok(());
+        };
+        let actual = response
+            .get("tcbEvaluationDataNumber")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| anyhow!("{kind} response is missing tcbEvaluationDataNumber"))?;
+        ensure!(
+            actual == u64::from(expected),
+            "{kind} response returned TCB evaluation data number {actual}, expected {expected}"
+        );
+        Ok(())
+    }
+}
+
 struct PcsEndpoints {
     base_url: String,
     tee: &'static str,
     fmspc: String,
     ca: String,
+    evaluation_data_set: TcbEvaluationDataSet,
 }
 
 impl PcsEndpoints {
@@ -67,6 +105,7 @@ impl PcsEndpoints {
             tee,
             fmspc,
             ca: ca.to_owned(),
+            evaluation_data_set: TcbEvaluationDataSet::default(),
         }
     }
 
@@ -83,11 +122,13 @@ impl PcsEndpoints {
     }
 
     fn url_tcb(&self) -> String {
-        self.mk_url(self.tee, &format!("tcb?fmspc={}", self.fmspc))
+        let selector = self.evaluation_data_set.into_query_param();
+        self.mk_url(self.tee, &format!("tcb?fmspc={}&{selector}", self.fmspc))
     }
 
     fn url_qe_identity(&self) -> String {
-        self.mk_url(self.tee, "qe/identity?update=standard")
+        let selector = self.evaluation_data_set.into_query_param();
+        self.mk_url(self.tee, &format!("qe/identity?{selector}"))
     }
 
     fn mk_url(&self, tee: &str, path: &str) -> String {
@@ -326,6 +367,7 @@ async fn get_pck_chain<H: HttpClient>(client: &H, pccs_url: &str, quote: &Quote)
 pub struct CollateralClient<C: Config = DefaultConfig, H: HttpClient = ReqwestHttp> {
     http: H,
     pccs_url: String,
+    evaluation_data_set: TcbEvaluationDataSet,
     _cfg: PhantomData<fn() -> C>,
 }
 
@@ -334,6 +376,7 @@ impl<C: Config, H: HttpClient + Clone> Clone for CollateralClient<C, H> {
         Self {
             http: self.http.clone(),
             pccs_url: self.pccs_url.clone(),
+            evaluation_data_set: self.evaluation_data_set,
             _cfg: PhantomData,
         }
     }
@@ -351,6 +394,7 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         Self {
             http,
             pccs_url: pccs_url.into(),
+            evaluation_data_set: TcbEvaluationDataSet::default(),
             _cfg: PhantomData,
         }
     }
@@ -360,8 +404,19 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         CollateralClient {
             http: self.http,
             pccs_url: self.pccs_url,
+            evaluation_data_set: self.evaluation_data_set,
             _cfg: PhantomData,
         }
+    }
+
+    /// Choose which TCB evaluation data set the PCS serves, defaulting to
+    /// [`TcbEvaluationDataSet::Standard`].
+    ///
+    /// [`Early`](TcbEvaluationDataSet::Early) answers whether a platform will
+    /// still be accepted once Intel promotes the set it has already published.
+    pub fn with_evaluation_data_set(mut self, evaluation_data_set: TcbEvaluationDataSet) -> Self {
+        self.evaluation_data_set = evaluation_data_set;
+        self
     }
 
     /// Fetch collateral for the given raw DCAP quote.
@@ -406,7 +461,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
         ca: &str,
         for_sgx: bool,
     ) -> Result<QuoteCollateralV3> {
-        let endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
+        let mut endpoints = PcsEndpoints::new(&self.pccs_url, for_sgx, fmspc.to_owned(), ca);
+        endpoints.evaluation_data_set = self.evaluation_data_set;
         let client = &self.http;
 
         // Send a GET and fail with a useful message on non-2xx, so the
@@ -482,6 +538,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
 
         let tcb_info_resp: TcbInfoResponse =
             serde_json::from_str(&raw_tcb_info).context("TCB Info should be valid JSON")?;
+        self.evaluation_data_set
+            .validate_response(&tcb_info_resp.tcb_info, "TCB Info")?;
         let tcb_info = tcb_info_resp.tcb_info.to_string();
         let tcb_info_signature = hex::decode(&tcb_info_resp.signature)
             .ok()
@@ -489,6 +547,8 @@ impl<C: Config, H: HttpClient> CollateralClient<C, H> {
 
         let qe_identity_resp: QeIdentityResponse =
             serde_json::from_str(&raw_qe_identity).context("QE Identity should be valid JSON")?;
+        self.evaluation_data_set
+            .validate_response(&qe_identity_resp.enclave_identity, "QE Identity")?;
         let qe_identity = qe_identity_resp.enclave_identity.to_string();
         let qe_identity_signature = hex::decode(&qe_identity_resp.signature)
             .ok()
@@ -739,7 +799,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
         );
         assert_eq!(
             sgx_endpoints.url_tcb(),
-            "https://pccs.example.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://pccs.example.com/sgx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
 
         // Test TDX TCB URL
@@ -751,7 +811,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
         );
         assert_eq!(
             tdx_endpoints.url_tcb(),
-            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
     }
 
@@ -783,6 +843,68 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
     }
 
     #[test]
+    fn test_pcs_endpoints_early_evaluation_data_set() {
+        let mut endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        endpoints.evaluation_data_set = TcbEvaluationDataSet::Early;
+
+        assert_eq!(
+            endpoints.url_tcb(),
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&update=early"
+        );
+        assert_eq!(
+            endpoints.url_qe_identity(),
+            "https://pccs.example.com/tdx/certification/v4/qe/identity?update=early"
+        );
+    }
+
+    #[test]
+    fn test_pcs_endpoints_numbered_evaluation_data_set() {
+        let mut endpoints = PcsEndpoints::new(
+            "https://pccs.example.com",
+            false,
+            "B0C06F000000".to_string(),
+            PROCESSOR_ISSUER_ID,
+        );
+        endpoints.evaluation_data_set = TcbEvaluationDataSet::Number(21);
+
+        assert_eq!(
+            endpoints.url_tcb(),
+            "https://pccs.example.com/tdx/certification/v4/tcb?fmspc=B0C06F000000&tcbEvaluationDataNumber=21"
+        );
+        assert_eq!(
+            endpoints.url_qe_identity(),
+            "https://pccs.example.com/tdx/certification/v4/qe/identity?tcbEvaluationDataNumber=21"
+        );
+    }
+
+    #[test]
+    fn test_numbered_evaluation_data_set_validates_response() {
+        let selector = TcbEvaluationDataSet::Number(21);
+        selector
+            .validate_response(
+                &serde_json::json!({ "tcbEvaluationDataNumber": 21 }),
+                "TCB Info",
+            )
+            .unwrap();
+
+        let error = selector
+            .validate_response(
+                &serde_json::json!({ "tcbEvaluationDataNumber": 20 }),
+                "TCB Info",
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "TCB Info response returned TCB evaluation data number 20, expected 21"
+        );
+    }
+
+    #[test]
     fn test_intel_pcs_url() {
         // Test the Intel PCS URL constant
         assert_eq!(INTEL_PCS_URL, "https://api.trustedservices.intel.com");
@@ -807,7 +929,7 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
 
         assert_eq!(
             intel_endpoints.url_tcb(),
-            "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=B0C06F000000"
+            "https://api.trustedservices.intel.com/sgx/certification/v4/tcb?fmspc=B0C06F000000&update=standard"
         );
 
         assert_eq!(
