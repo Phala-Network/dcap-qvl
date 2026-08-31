@@ -43,7 +43,7 @@ manifest-path = "../Cargo.toml"
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21.0",
-    "maturin>=1.0,<2.0",
+    "maturin>=1.15,<2.0",
     "asyncio",
     "black>=22.0.0",
 ]
