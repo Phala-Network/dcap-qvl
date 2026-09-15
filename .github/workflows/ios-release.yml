@@ -46,7 +46,7 @@ jobs:
           echo "Tag=$TAG Version=$VERSION"
 
       - name: Setup Rust + Apple targets
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: stable
           target: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
