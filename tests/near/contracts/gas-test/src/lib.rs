@@ -1,8 +1,7 @@
 extern crate alloc;
 
-use dcap_qvl::{verify::QuoteVerifier, QuoteCollateralV3};
-use hex::decode;
-use near_sdk::{env, log, near};
+use dcap_qvl::{verify::QuoteVerifier, QuoteCollateralV3, QuotePolicy};
+use near_sdk::{env, near};
 
 /// Returns the current block timestamp in seconds.
 /// When the `test` feature is enabled, returns a fixed timestamp
@@ -20,54 +19,33 @@ pub fn get_block_timestamp_secs() -> u64 {
     }
 }
 
+fn decode_args(quote_hex: &str, collateral: &str) -> (Vec<u8>, QuoteCollateralV3) {
+    let quote = hex::decode(quote_hex).unwrap_or_else(|_| env::panic_str("Invalid quote hex"));
+    let collateral = near_sdk::serde_json::from_str(collateral)
+        .unwrap_or_else(|_| env::panic_str("Invalid collateral format"));
+    (quote, collateral)
+}
+
 #[near(contract_state)]
 #[derive(Default)]
 pub struct Contract;
 
 #[near]
 impl Contract {
-    /// Verifies a TEE attestation using dcap-qvl::verify::verify().
-    ///
-    /// # Parameters
-    /// - `quote_hex`: Hex-encoded quote bytes
-    /// - `collateral`: JSON string containing quote collateral data (QuoteCollateralV3 format)
-    ///
-    /// # Returns
-    /// `true` if verification succeeds, `false` otherwise.
-    #[must_use]
-    pub fn verify_attestation(&self, quote_hex: String, collateral: String) -> bool {
-        // Decode quote bytes from hex
-        let quote_bytes = match decode(&quote_hex) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                log!("Invalid quote hex: {} (error: {:?})", quote_hex, e);
-                env::panic_str("Invalid quote hex");
-            }
-        };
+    /// Verifies a quote with `QuoteVerifier::verify`.
+    pub fn verify(&self, quote_hex: String, collateral: String) {
+        let (quote, collateral) = decode_args(&quote_hex, &collateral);
+        QuoteVerifier::new_prod()
+            .verify(&quote, &collateral, get_block_timestamp_secs())
+            .unwrap_or_else(|e| env::panic_str(&format!("{e:?}")));
+    }
 
-        // Parse collateral JSON
-        let collateral_data: QuoteCollateralV3 = match near_sdk::serde_json::from_str(&collateral) {
-            Ok(c) => c,
-            Err(e) => {
-                log!("Invalid collateral format: {} (error: {:?})", collateral, e);
-                env::panic_str("Invalid collateral format");
-            }
-        };
-
-        // Get current timestamp in seconds
-        let timestamp_s = get_block_timestamp_secs();
-
-        // Call dcap-qvl verify
-        let verifier = QuoteVerifier::new_prod();
-        match verifier.verify_with_policy(&quote_bytes, collateral_data, timestamp_s, &dcap_qvl::QuotePolicy::claims_only(timestamp_s)) {
-            Ok(_claims) => {
-                log!("Verification result: Success");
-                true
-            }
-            Err(e) => {
-                log!("Verification failed: {:?}", e);
-                false
-            }
-        }
+    /// Verifies a quote with `QuoteVerifier::verify_with_policy` and a pass-through policy.
+    pub fn verify_with_policy(&self, quote_hex: String, collateral: String) {
+        let (quote, collateral) = decode_args(&quote_hex, &collateral);
+        let now = get_block_timestamp_secs();
+        QuoteVerifier::new_prod()
+            .verify_with_policy(&quote, collateral, now, &QuotePolicy::claims_only(now))
+            .unwrap_or_else(|e| env::panic_str(&format!("{e:?}")));
     }
 }
