@@ -26,8 +26,8 @@ make test_near_gas
 Sample output:
 
 ```
-verify: 175.4 TGas (175366469690312 gas)
-verify_with_policy: 176.7 TGas (176718452860904 gas)
+verify: 149.8 TGas (149773997106552 gas)
+verify_with_policy: 151.1 TGas (151125925152492 gas)
 ```
 
 ## Troubleshooting
