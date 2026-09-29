@@ -110,13 +110,14 @@ test_wasm_node:
 
 test_wasm: test_wasm_node
 
-# NEAR gas test targets
+# NEAR gas test targets (NEAR_GAS_BACKEND: ring or rustcrypto)
+NEAR_GAS_BACKEND ?= rustcrypto
 test_near_gas:
 	@echo "Building NEAR gas test contract..."
 	@rustup target add wasm32-unknown-unknown
-	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test
+	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test,$(NEAR_GAS_BACKEND)
 	@echo "Running NEAR gas consumption tests..."
-	cd tests/near/contracts/gas-test && cargo test --features test -- --nocapture
+	cd tests/near/contracts/gas-test && cargo test --features test,$(NEAR_GAS_BACKEND) -- --nocapture
 
 
 # Mobile binding targets (Kotlin / Swift via UniFFI)
