@@ -76,7 +76,7 @@ sha2 = { version = "0.11", default-features = false, optional = true }
 p256 = { version = "0.14", default-features = false, features = ["ecdsa"], optional = true }
 signature = { version = "3.0", default-features = false, optional = true }
 
-dcap-qvl-webpki = { version = "=0.103.6", features = ["alloc"] }
+dcap-qvl-webpki = { version = "=0.103.8", features = ["alloc"] }
 
 
 [dev-dependencies]

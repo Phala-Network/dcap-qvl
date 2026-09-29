@@ -76,9 +76,9 @@
 //! # On-chain gas
 //!
 //! On `wasm32`, `rustcrypto` verifies signatures faster than `ring`. On NEAR a
-//! full `verify` costs about 103 TGas with `rustcrypto` and 124 TGas with `ring`,
+//! full `verify` costs about 98 TGas with `rustcrypto` and 124 TGas with `ring`,
 //! built with `opt-level = 3`. Size-oriented profiles cost much more gas:
-//! `opt-level = "z"` raises it to about 175 TGas with `rustcrypto` and 135 TGas
+//! `opt-level = "z"` raises it to about 169 TGas with `rustcrypto` and 135 TGas
 //! with `ring`. See `tests/near` in the repository for the benchmark.
 
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
