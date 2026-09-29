@@ -42,7 +42,8 @@ use serde::{Deserialize, Serialize};
 /// needed by the verification logic. Use [`ring::backend()`] or
 /// [`rustcrypto::backend()`] to obtain a pre-configured instance.
 pub struct CryptoBackend {
-    /// ECDSA P-256 SHA-256 algorithm for certificate and raw signature verification
+    /// ECDSA P-256 SHA-256, the only algorithm accepted for certificate, CRL and raw
+    /// signature verification
     pub sig_algo: &'static dyn rustls_pki_types::SignatureVerificationAlgorithm,
     /// SHA-256 hash function
     pub sha256: fn(&[u8]) -> [u8; 32],
@@ -687,7 +688,14 @@ fn verify_tcb_info_signature(
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
         .context("Failed to parse TCB Info leaf certificate")?;
-    verify_certificate_chain(&tcb_leaf_cert, tcb_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(
+        &tcb_leaf_cert,
+        tcb_chain,
+        now,
+        crls,
+        trust_anchor,
+        backend.sig_algo,
+    )?;
 
     // Verify signature
     let asn1_signature = (backend.encode_ecdsa)(&collateral.tcb_info_signature)?;
@@ -744,7 +752,14 @@ fn verify_qe_identity_signature(
     // Intel signs TCB Info and QE Identity with the same certificate, whose chain
     // was already verified in step 1.
     if qe_id_certs != tcb_info_certs {
-        verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
+        verify_certificate_chain(
+            &qe_id_leaf_cert,
+            qe_id_chain,
+            now,
+            crls,
+            trust_anchor,
+            backend.sig_algo,
+        )?;
     }
 
     // Verify signature
@@ -798,7 +813,14 @@ fn verify_pck_cert_chain(
     // Verify PCK certificate chain
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
-    verify_certificate_chain(&pck_leaf_cert, pck_chain, now, crls, trust_anchor)?;
+    verify_certificate_chain(
+        &pck_leaf_cert,
+        pck_chain,
+        now,
+        crls,
+        trust_anchor,
+        backend.sig_algo,
+    )?;
 
     // Extract Intel extension data from PCK cert (parsed once)
     let pck_ext = (backend.parse_pck_extension)(pck_leaf)?;
@@ -1224,10 +1246,11 @@ fn verify_impl(
         &collateral.root_ca_crl,
         &collateral.pck_crl,
         &trust_anchor.subject_public_key_info,
+        backend.sig_algo,
     )?;
 
     // Check root CA against CRL
-    webpki::check_single_cert_revocation(root_ca_der, &crls.each_ref(), now)?;
+    webpki::check_single_cert_revocation(root_ca_der, &crls.each_ref(), &[backend.sig_algo], now)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;

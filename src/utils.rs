@@ -4,7 +4,7 @@ use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
-use rustls_pki_types::{CertificateDer, TrustAnchor, UnixTime};
+use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, TrustAnchor, UnixTime};
 use webpki::CertRevocationList;
 use webpki::{self, OwnedCertRevocationList};
 
@@ -181,20 +181,17 @@ pub(crate) fn parse_crl_info(crl_der: &[u8]) -> Result<CrlInfo> {
 /// verifications.
 ///
 /// Every chain checks the root CA CRL, so its signature is verified here once with the
-/// root CA key (`root_spki`) instead of on each chain.
+/// root CA key (`root_spki`) and `sig_algo` instead of on each chain.
 pub fn parse_crls(
     root_ca_crl: &[u8],
     pck_crl: &[u8],
     root_spki: &[u8],
+    sig_algo: &dyn SignatureVerificationAlgorithm,
 ) -> Result<[CertRevocationList<'static>; 2]> {
     Ok([
-        OwnedCertRevocationList::from_der_verified(
-            root_ca_crl,
-            root_spki,
-            webpki::ALL_VERIFICATION_ALGS,
-        )
-        .context("Failed to parse root CA CRL")?
-        .into(),
+        OwnedCertRevocationList::from_der_verified(root_ca_crl, root_spki, &[sig_algo])
+            .context("Failed to parse root CA CRL")?
+            .into(),
         OwnedCertRevocationList::from_der(pck_crl)
             .context("Failed to parse PCK CRL")?
             .into(),
@@ -204,16 +201,19 @@ pub fn parse_crls(
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
 /// a valid certificate chain that is rooted in one of the trust anchors that was compiled into the pallet
 ///
-/// It will also check that the certificate is not revoked according to the CRL
+/// It will also check that the certificate is not revoked according to the CRL.
+///
+/// `sig_algo` is the only accepted signature algorithm: Intel's PKI uses ECDSA
+/// P-256/SHA-256 throughout, and not referencing other algorithms keeps them out of
+/// the binary.
 pub fn verify_certificate_chain(
     leaf_cert: &webpki::EndEntityCert,
     intermediate_certs: &[CertificateDer],
     time: UnixTime,
     crls: &[CertRevocationList<'_>],
     trust_anchor: TrustAnchor<'_>,
+    sig_algo: &dyn SignatureVerificationAlgorithm,
 ) -> Result<()> {
-    let sig_algs = webpki::ALL_VERIFICATION_ALGS;
-
     let crl_slice = crls.iter().collect::<Vec<_>>();
 
     // Create a RevocationOptions object with the CRL
@@ -229,7 +229,7 @@ pub fn verify_certificate_chain(
 
     leaf_cert
         .verify_for_usage(
-            sig_algs,
+            &[sig_algo],
             &[trust_anchor],
             intermediate_certs,
             time,
