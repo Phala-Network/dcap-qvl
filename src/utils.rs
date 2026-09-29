@@ -87,14 +87,6 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     }
 }
 
-pub(crate) fn extract_raw_certs(cert_chain: &[u8]) -> Result<Vec<Vec<u8>>> {
-    Ok(pem::parse_many(cert_chain)
-        .context("Failed to parse certs")?
-        .iter()
-        .map(|i| i.contents().to_vec())
-        .collect())
-}
-
 pub(crate) fn parse_rfc3339_unix_secs(value: &str) -> Result<u64> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map_err(|e| anyhow!("Failed to parse RFC3339 datetime: {e}"))?
@@ -129,16 +121,12 @@ pub(crate) mod serde_vec_bytes {
     }
 }
 
-pub fn extract_certs<'a>(cert_chain: &'a [u8]) -> Result<Vec<CertificateDer<'a>>> {
-    let mut certs = Vec::<CertificateDer<'a>>::new();
-
-    let raw_certs = extract_raw_certs(cert_chain)?;
-    for raw_cert in raw_certs.iter() {
-        let cert = rustls_pki_types::CertificateDer::<'a>::from(raw_cert.to_vec());
-        certs.push(cert);
-    }
-
-    Ok(certs)
+pub fn extract_certs(cert_chain: &[u8]) -> Result<Vec<CertificateDer<'static>>> {
+    Ok(pem::parse_many(cert_chain)
+        .context("Failed to parse certs")?
+        .into_iter()
+        .map(|pem| CertificateDer::from(pem.into_contents()))
+        .collect())
 }
 
 /// Split a 64-byte raw `r ‖ s` payload at byte 32 and DER-encode it as
@@ -149,34 +137,44 @@ pub fn encode_as_der_with<C: Config>(data: &[u8]) -> Result<Vec<u8>> {
     C::SigEncoder::encode_ecdsa_sig(first, second)
 }
 
-/// Extract the CRL Number (OID 2.5.29.20) from a DER-encoded CRL.
-///
-/// Returns `Ok(0)` if the CRL Number extension is not present.
+/// Dates and CRL Number of a CRL.
 #[cfg(feature = "default-x509")]
-pub fn extract_crl_number(crl_der: &[u8]) -> Result<u32> {
+pub(crate) struct CrlInfo {
+    pub this_update: u64,
+    pub next_update: Option<u64>,
+    /// CRL Number (OID 2.5.29.20), or 0 if the extension is not present.
+    pub number: u32,
+}
+
+#[cfg(feature = "default-x509")]
+pub(crate) fn parse_crl_info(crl_der: &[u8]) -> Result<CrlInfo> {
     use der::Decode as _;
     let crl: x509_cert::crl::CertificateList<x509_cert::certificate::Rfc5280> =
         x509_cert::crl::CertificateList::from_der(crl_der).context("Failed to parse CRL")?;
-    let Some(extensions) = &crl.tbs_cert_list.crl_extensions else {
-        return Ok(0);
-    };
-    for ext in extensions.iter() {
-        // OID 2.5.29.20 = id-ce-cRLNumber
-        if ext.extn_id.to_string() == "2.5.29.20" {
-            // CRL Number is encoded as an ASN.1 INTEGER
-            let crl_num =
-                der::asn1::UintRef::from_der(ext.extn_value.as_bytes()).context("CRL number")?;
-            let bytes = crl_num.as_bytes();
-            // Convert big-endian bytes to u32 (CRL numbers are typically small)
-            ensure!(bytes.len() <= 4, "CRL number too large for u32");
-            let mut val: u32 = 0;
-            for &b in bytes {
-                val = (val << 8) | u32::from(b);
-            }
-            return Ok(val);
+    let tbs = &crl.tbs_cert_list;
+    let mut number = 0;
+    // OID 2.5.29.20 = id-ce-cRLNumber
+    if let Some(ext) = tbs
+        .crl_extensions
+        .iter()
+        .flatten()
+        .find(|ext| ext.extn_id.to_string() == "2.5.29.20")
+    {
+        // CRL Number is encoded as an ASN.1 INTEGER
+        let crl_num =
+            der::asn1::UintRef::from_der(ext.extn_value.as_bytes()).context("CRL number")?;
+        let bytes = crl_num.as_bytes();
+        // Convert big-endian bytes to u32 (CRL numbers are typically small)
+        ensure!(bytes.len() <= 4, "CRL number too large for u32");
+        for &b in bytes {
+            number = (number << 8) | u32::from(b);
         }
     }
-    Ok(0)
+    Ok(CrlInfo {
+        this_update: tbs.this_update.to_unix_duration().as_secs(),
+        next_update: tbs.next_update.map(|t| t.to_unix_duration().as_secs()),
+        number,
+    })
 }
 
 /// Parse CRL DER bytes into CertRevocationList objects.

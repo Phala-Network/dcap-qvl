@@ -4,32 +4,18 @@ This directory contains NEAR smart contract integration tests for measuring gas 
 
 ## Overview
 
-The `dcap-qvl-gas-test` contract is a minimal NEAR contract that tests gas consumption of `dcap-qvl::verify::verify()`. It directly calls the core verification function with quote bytes and collateral data.
+The `dcap-qvl-gas-test` contract exposes `verify` and `verify_with_policy`, which call
+`QuoteVerifier::verify` and `QuoteVerifier::verify_with_policy` on the sample quote in
+`contracts/gas-test/tests/quote/`. The test measures the gas burnt by each call and fails if
+`verify` exceeds `MAX_VERIFY_GAS` or if `verify_with_policy` costs more than
+`MAX_CLAIMS_OVERHEAD_GAS` on top of `verify` (see `tests/constants.rs`). CI runs it on every PR.
 
 ## Prerequisites
 
-- Rust and Cargo (latest stable version)
-- [cargo-near](https://github.com/near/cargo-near) - NEAR smart contract development toolkit
-- `near-sandbox` and `near-api` (automatically included as dev dependencies)
+- [cargo-near](https://github.com/near/cargo-near)
+- Linux x86_64 or macOS ARM64 (required by `near-sandbox`)
 
-## Building and Testing
-
-### Build the Contract
-
-From the `dcap-qvl` project root:
-
-```bash
-make build_near_gas_test
-```
-
-Or manually:
-
-```bash
-cd tests/near/contracts/dcap-qvl-gas-test
-cargo near build non-reproducible-wasm --features test --locked
-```
-
-### Run the Tests
+## Running
 
 From the `dcap-qvl` project root:
 
@@ -37,46 +23,12 @@ From the `dcap-qvl` project root:
 make test_near_gas
 ```
 
-Or manually:
-
-```bash
-cd tests/near/contracts/dcap-qvl-gas-test
-cargo test --features test -- --nocapture
-```
-
-### Build and Test Together
-
-```bash
-make near_gas_test
-```
-
-## Test Output
-
-The tests will output detailed gas consumption statistics:
+Sample output:
 
 ```
-=== Starting Gas Consumption Test ===
-
-Deploying contract...
-Testing with Alice's attestation data...
-Using public key: ed25519:...
-
---- Gas Consumption Test: dcap-qvl::verify::verify() ---
-Gas burnt: ... gas units
-Result: Success
-Gas consumed: ... TGas
-Gas consumed: ... gas units
-
-=== Gas Consumption Test Complete ===
+verify: 175.4 TGas (175366469690312 gas)
+verify_with_policy: 176.7 TGas (176718452860904 gas)
 ```
-
-## Notes
-
-- The contract uses `dcap-qvl` from the parent project (via relative path dependency)
-- Tests use `near-sandbox` for local blockchain testing
-- The contract directly calls `dcap-qvl::verify::verify()` with quote bytes and collateral
-- Sample attestation data is included in `tests/samples/` for testing
-- The contract is simplified to only test the core `dcap-qvl::verify::verify()` function
 
 ## Troubleshooting
 
@@ -99,7 +51,7 @@ cargo update -p darling@0.23.0 --precise 0.21.3
 
 ### WASM Path Issues
 
-If the test fails to find the WASM file, ensure the contract has been built first using `make build_near_gas_test` or `cargo near build`.
+If the test fails to find the WASM file, ensure the contract has been built first using `make test_near_gas` or `cargo near build non-reproducible-wasm --features test`.
 
 ### Sandbox Platform Compatibility
 

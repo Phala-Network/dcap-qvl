@@ -6,11 +6,14 @@ use scale::Decode;
 
 #[cfg(feature = "default-x509")]
 use crate::policy::{PckIdentity, PlatformInfo, Policy, QeInfo, QuoteClaims, TcbVerdict};
+#[cfg(feature = "default-x509")]
+use crate::utils::{parse_crl_info, CrlInfo};
 use {
     crate::constants::*,
     crate::policy::PckCertFlag,
     crate::qe_identity::{QeIdentity, QeTcbLevel},
     crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleTcbLevel},
+    alloc::collections::BTreeMap,
     alloc::string::String,
     alloc::vec::Vec,
 };
@@ -109,15 +112,16 @@ use core::marker::PhantomData;
 ///
 /// [`QuoteClaims`] is built lazily via [`claims()`](Self::claims) —
 /// the `verify()` call itself does the minimum work (crypto only).
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
-#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+///
+/// Parsed collateral is kept so that [`claims()`](Self::claims) does not parse it again.
 struct QuoteVerificationResult {
     header: crate::quote::Header,
     report: Report,
     collateral: QuoteCollateralV3,
-    #[serde(with = "crate::utils::serde_vec_bytes")]
-    pck_cert_chain_der: Vec<Vec<u8>>,
+    tcb_info: TcbInfo,
+    qe_identity: QeIdentity,
+    tcb_info_chain: Vec<CertificateDer<'static>>,
+    qe_identity_chain: Vec<CertificateDer<'static>>,
     // -- core verification results (always computed) --
     tee_type: u32,
     tcb_status: TcbStatus,
@@ -128,7 +132,6 @@ struct QuoteVerificationResult {
     qe_report: EnclaveReport,
     tcb_eval_data_number: u32,
     qe_tcb_eval_data_number: u32,
-    #[serde(with = "serde_bytes")]
     root_key_id: [u8; 48],
 }
 
@@ -139,28 +142,25 @@ impl QuoteVerificationResult {
     /// 2 CRLs, 4 certificate chains), root_key_id SHA-384, CRL numbers, and tcb_date_tag.
     #[cfg(feature = "default-x509")]
     pub fn claims(&self) -> Result<QuoteClaims> {
-        // Parse collateral JSON for time window computation
-        let tcb_info: TcbInfo = serde_json::from_str(&self.collateral.tcb_info)
-            .context("Failed to parse TcbInfo for claims")?;
-        let qe_identity: QeIdentity = serde_json::from_str(&self.collateral.qe_identity)
-            .context("Failed to parse QeIdentity for claims")?;
-        let pck_certs: Vec<CertificateDer<'_>> = self
-            .pck_cert_chain_der
-            .iter()
-            .map(|cert| CertificateDer::from(cert.as_slice()))
-            .collect();
-
-        let collateral_dates =
-            compute_collateral_time_window(&self.collateral, &pck_certs, &tcb_info, &qe_identity)?;
+        let root_ca_crl = parse_crl_info(&self.collateral.root_ca_crl)
+            .context("Failed to parse root CA CRL for claims")?;
+        let pck_crl = parse_crl_info(&self.collateral.pck_crl)
+            .context("Failed to parse PCK CRL for claims")?;
+        let pck_crl_issuer_chain = extract_certs(self.collateral.pck_crl_issuer_chain.as_bytes())?;
+        let collateral_dates = compute_collateral_time_window(
+            &self.tcb_info,
+            &self.qe_identity,
+            &[&root_ca_crl, &pck_crl],
+            pck_crl_issuer_chain
+                .iter()
+                .map(|cert| &cert[..])
+                .chain(self.pck_ext.pck_cert_chain_der.iter().map(|cert| &cert[..]))
+                .chain(self.tcb_info_chain.iter().map(|cert| &cert[..])),
+            &self.qe_identity_chain,
+        )?;
 
         // root_key_id: SHA-384 of root CA's raw public key bytes
         let root_key_id = self.root_key_id;
-
-        // CRL numbers
-        let root_ca_crl_num = crate::utils::extract_crl_number(&self.collateral.root_ca_crl)
-            .context("Failed to extract root CA CRL number")?;
-        let pck_crl_num = crate::utils::extract_crl_number(&self.collateral.pck_crl)
-            .context("Failed to extract PCK CRL number")?;
 
         // tcb_date_tag
         let tcb_date_tag = parse_rfc3339_unix_secs(&self.platform_tcb_level.tcb_date)
@@ -197,8 +197,8 @@ impl QuoteVerificationResult {
                     platform_provider_id: None,
                 },
                 root_key_id: root_key_id.to_vec(),
-                pck_crl_num,
-                root_ca_crl_num,
+                pck_crl_num: pck_crl.number,
+                root_ca_crl_num: root_ca_crl.number,
             },
             qe: QeInfo {
                 tcb_level: self.qe_tcb_level.clone(),
@@ -206,12 +206,12 @@ impl QuoteVerificationResult {
                 tcb_eval_data_number: self.qe_tcb_eval_data_number,
             },
             report: self.report.clone(),
-            earliest_issue_date: collateral_dates.earliest_issue,
-            latest_issue_date: collateral_dates.latest_issue,
-            earliest_expiration_date: collateral_dates.earliest_expiration,
-            qe_iden_earliest_issue_date: collateral_dates.qe_iden_earliest_issue,
-            qe_iden_latest_issue_date: collateral_dates.qe_iden_latest_issue,
-            qe_iden_earliest_expiration_date: collateral_dates.qe_iden_earliest_expiration,
+            earliest_issue_date: collateral_dates.all.earliest_issue,
+            latest_issue_date: collateral_dates.all.latest_issue,
+            earliest_expiration_date: collateral_dates.all.earliest_expiration,
+            qe_iden_earliest_issue_date: collateral_dates.qe_identity.earliest_issue,
+            qe_iden_latest_issue_date: collateral_dates.qe_identity.latest_issue,
+            qe_iden_earliest_expiration_date: collateral_dates.qe_identity.earliest_expiration,
         })
     }
 
@@ -659,6 +659,7 @@ impl JsQuoteVerifier {
 /// Verify TCB Info collateral: certificate chain, signature, parsing, and expiration check
 fn verify_tcb_info_signature(
     collateral: &QuoteCollateralV3,
+    tcb_certs: &[CertificateDer<'_>],
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
@@ -681,8 +682,7 @@ fn verify_tcb_info_signature(
     }
 
     // Verify certificate chain
-    let tcb_certs = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
-    let [tcb_leaf, tcb_chain @ ..] = &tcb_certs[..] else {
+    let [tcb_leaf, tcb_chain @ ..] = tcb_certs else {
         bail!("Certificate chain is too short for TCB Info");
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
@@ -712,6 +712,7 @@ fn verify_tcb_info_signature(
 /// Verify QE Identity collateral: certificate chain, signature, parsing, and expiration check
 fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
+    qe_id_certs: &[CertificateDer<'_>],
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
@@ -734,8 +735,7 @@ fn verify_qe_identity_signature(
     }
 
     // Verify certificate chain
-    let qe_id_certs = extract_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
-    let [qe_id_leaf, qe_id_chain @ ..] = &qe_id_certs[..] else {
+    let [qe_id_leaf, qe_id_chain @ ..] = qe_id_certs else {
         bail!("Certificate chain is too short for QE Identity");
     };
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
@@ -1251,8 +1251,15 @@ fn verify_impl(
     let auth_data = quote.auth_data.clone().into_v3();
 
     // Step 1: Verify TCB Info signature
-    let mut tcb_info =
-        verify_tcb_info_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
+    let tcb_info_chain = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
+    let mut tcb_info = verify_tcb_info_signature(
+        &collateral,
+        &tcb_info_chain,
+        now,
+        &crls,
+        trust_anchor.clone(),
+        backend,
+    )?;
 
     #[cfg(feature = "danger-allow-tcb-override")]
     if let Some(override_tcb_info) = override_tcb_info {
@@ -1261,8 +1268,15 @@ fn verify_impl(
     tcb_info.canonicalize_tcb_levels();
 
     // Step 2: Verify QE Identity signature
-    let qe_identity =
-        verify_qe_identity_signature(&collateral, now, &crls, trust_anchor.clone(), backend)?;
+    let qe_identity_chain = extract_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
+    let qe_identity = verify_qe_identity_signature(
+        &collateral,
+        &qe_identity_chain,
+        now,
+        &crls,
+        trust_anchor.clone(),
+        backend,
+    )?;
     let (expected_qe_id, allowed_qe_versions): (&str, &[u8]) = match tee_type {
         TeeType::Sgx => ("QE", &[2]),
         TeeType::Tdx => ("TD_QE", &[2, 3]),
@@ -1346,7 +1360,6 @@ fn verify_impl(
         header: quote.header,
         report: quote.report,
         collateral,
-        pck_cert_chain_der: pck_result.pck_cert_chain_der.clone(),
         tee_type: quote.header.tee_type,
         tcb_status: final_status.status,
         advisory_ids: final_status.advisory_ids,
@@ -1359,19 +1372,45 @@ fn verify_impl(
             .min(qe_identity.tcb_evaluation_data_number),
         qe_tcb_eval_data_number: qe_identity.tcb_evaluation_data_number,
         root_key_id,
+        tcb_info,
+        qe_identity,
+        tcb_info_chain,
+        qe_identity_chain,
     })
+}
+
+/// Earliest issue, latest issue and earliest expiration over a set of dated items.
+#[cfg(feature = "default-x509")]
+#[derive(Clone, Copy)]
+struct DateWindow {
+    earliest_issue: u64,
+    latest_issue: u64,
+    earliest_expiration: u64,
+}
+
+#[cfg(feature = "default-x509")]
+impl DateWindow {
+    const EMPTY: Self = Self {
+        earliest_issue: u64::MAX,
+        latest_issue: 0,
+        earliest_expiration: u64::MAX,
+    };
+
+    fn add(&mut self, issue: u64, expiration: Option<u64>) {
+        self.earliest_issue = self.earliest_issue.min(issue);
+        self.latest_issue = self.latest_issue.max(issue);
+        if let Some(expiration) = expiration {
+            self.earliest_expiration = self.earliest_expiration.min(expiration);
+        }
+    }
 }
 
 /// Collateral time window dates (8 sources + QE Identity subset).
 #[cfg(feature = "default-x509")]
 struct CollateralDates {
-    earliest_issue: u64,
-    latest_issue: u64,
-    earliest_expiration: u64,
+    all: DateWindow,
     /// QE Identity-specific dates (sources \[5\] + \[7\] only).
-    qe_iden_earliest_issue: u64,
-    qe_iden_latest_issue: u64,
-    qe_iden_earliest_expiration: u64,
+    qe_identity: DateWindow,
 }
 
 /// Compute the collateral time window: earliest issue, latest issue, earliest expiration.
@@ -1386,139 +1425,60 @@ struct CollateralDates {
 /// 6. QEIdentity issuer certificate chain notBefore/notAfter
 /// 7. TCBInfo JSON issueDate/nextUpdate
 /// 8. QEIdentity JSON issueDate/nextUpdate
+///
+/// `certs` holds the certificates of sources 3-5. Certificates shared between chains
+/// (e.g. the root CA) are parsed only once.
 #[cfg(feature = "default-x509")]
-fn compute_collateral_time_window(
-    collateral: &QuoteCollateralV3,
-    pck_cert_chain: &[CertificateDer<'_>],
+fn compute_collateral_time_window<'a>(
     tcb_info: &TcbInfo,
     qe_identity: &QeIdentity,
+    crls: &[&CrlInfo],
+    certs: impl Iterator<Item = &'a [u8]>,
+    qe_identity_chain: &'a [CertificateDer<'_>],
 ) -> Result<CollateralDates> {
-    fn parse_crl_dates(crl_der: &[u8]) -> Result<(u64, Option<u64>)> {
+    let mut validity_cache = BTreeMap::<&[u8], (u64, u64)>::new();
+    let mut validity = |cert_der: &'a [u8]| -> Result<(u64, u64)> {
         use der::Decode as _;
-        let crl: x509_cert::crl::CertificateList<x509_cert::certificate::Rfc5280> =
-            x509_cert::crl::CertificateList::from_der(crl_der)
-                .context("Failed to parse CRL for time window")?;
-        let this_update = crl.tbs_cert_list.this_update.to_unix_duration().as_secs();
-        let next_update = crl
-            .tbs_cert_list
-            .next_update
-            .map(|t| t.to_unix_duration().as_secs());
-        Ok((this_update, next_update))
-    }
-
-    /// Extract notBefore/notAfter from a PEM certificate chain and fold into min/max accumulators.
-    fn fold_cert_chain_dates(
-        pem_chain: &[u8],
-        earliest_issue: &mut u64,
-        latest_issue: &mut u64,
-        earliest_expiration: &mut u64,
-    ) -> Result<()> {
-        let certs = extract_certs(pem_chain)?;
-        fold_der_cert_dates(&certs, earliest_issue, latest_issue, earliest_expiration)
-    }
-
-    fn fold_der_cert_dates(
-        certs: &[CertificateDer<'_>],
-        earliest_issue: &mut u64,
-        latest_issue: &mut u64,
-        earliest_expiration: &mut u64,
-    ) -> Result<()> {
-        use der::Decode as _;
-        for cert_der in certs {
-            let cert = x509_cert::Certificate::from_der(cert_der)
-                .context("Failed to parse certificate for time window")?;
-            let not_before = cert
-                .tbs_certificate()
-                .validity()
-                .not_before
-                .to_unix_duration()
-                .as_secs();
-            let not_after = cert
-                .tbs_certificate()
-                .validity()
-                .not_after
-                .to_unix_duration()
-                .as_secs();
-            *earliest_issue = (*earliest_issue).min(not_before);
-            *latest_issue = (*latest_issue).max(not_before);
-            *earliest_expiration = (*earliest_expiration).min(not_after);
+        if let Some(validity) = validity_cache.get(cert_der) {
+            return Ok(*validity);
         }
-        Ok(())
+        let cert = x509_cert::Certificate::from_der(cert_der)
+            .context("Failed to parse certificate for time window")?;
+        let validity = cert.tbs_certificate().validity();
+        let validity = (
+            validity.not_before.to_unix_duration().as_secs(),
+            validity.not_after.to_unix_duration().as_secs(),
+        );
+        validity_cache.insert(cert_der, validity);
+        Ok(validity)
+    };
+
+    let mut qe = DateWindow::EMPTY;
+    qe.add(
+        parse_rfc3339_unix_secs(&qe_identity.issue_date).context("QEIdentity issueDate")?,
+        Some(parse_rfc3339_unix_secs(&qe_identity.next_update).context("QEIdentity nextUpdate")?),
+    );
+    for cert in qe_identity_chain {
+        let (not_before, not_after) = validity(cert)?;
+        qe.add(not_before, Some(not_after));
     }
 
-    // TCBInfo dates (already parsed upstream)
-    let tcb_issue = parse_rfc3339_unix_secs(&tcb_info.issue_date).context("TCBInfo issueDate")?;
-    let tcb_next = parse_rfc3339_unix_secs(&tcb_info.next_update).context("TCBInfo nextUpdate")?;
-
-    // QEIdentity dates (already parsed upstream)
-    let qe_issue =
-        parse_rfc3339_unix_secs(&qe_identity.issue_date).context("QEIdentity issueDate")?;
-    let qe_next =
-        parse_rfc3339_unix_secs(&qe_identity.next_update).context("QEIdentity nextUpdate")?;
-
-    let mut earliest_issue = tcb_issue.min(qe_issue);
-    let mut latest_issue = tcb_issue.max(qe_issue);
-    let mut earliest_expiration = tcb_next.min(qe_next);
-
-    // Include CRL dates (sources 1 & 2)
-    for crl_der in [&collateral.root_ca_crl[..], &collateral.pck_crl[..]] {
-        let (this_update, next_update) = parse_crl_dates(crl_der)?;
-        earliest_issue = earliest_issue.min(this_update);
-        latest_issue = latest_issue.max(this_update);
-        if let Some(next) = next_update {
-            earliest_expiration = earliest_expiration.min(next);
-        }
+    let mut all = qe;
+    all.add(
+        parse_rfc3339_unix_secs(&tcb_info.issue_date).context("TCBInfo issueDate")?,
+        Some(parse_rfc3339_unix_secs(&tcb_info.next_update).context("TCBInfo nextUpdate")?),
+    );
+    for crl in crls {
+        all.add(crl.this_update, crl.next_update);
     }
-
-    // Include certificate chain dates (sources 3-6)
-    // PCK CRL issuer chain (same PEM as pck_crl_issuer_chain)
-    fold_cert_chain_dates(
-        collateral.pck_crl_issuer_chain.as_bytes(),
-        &mut earliest_issue,
-        &mut latest_issue,
-        &mut earliest_expiration,
-    )?;
-    // PCK certificate chain
-    fold_der_cert_dates(
-        pck_cert_chain,
-        &mut earliest_issue,
-        &mut latest_issue,
-        &mut earliest_expiration,
-    )?;
-    // TCBInfo issuer chain
-    fold_cert_chain_dates(
-        collateral.tcb_info_issuer_chain.as_bytes(),
-        &mut earliest_issue,
-        &mut latest_issue,
-        &mut earliest_expiration,
-    )?;
-    // QEIdentity issuer chain (source [5]) — also track QE-specific dates
-    let mut qe_chain_earliest_issue = u64::MAX;
-    let mut qe_chain_latest_issue = 0u64;
-    let mut qe_chain_earliest_expiration = u64::MAX;
-    fold_cert_chain_dates(
-        collateral.qe_identity_issuer_chain.as_bytes(),
-        &mut qe_chain_earliest_issue,
-        &mut qe_chain_latest_issue,
-        &mut qe_chain_earliest_expiration,
-    )?;
-    // Fold into global window
-    earliest_issue = earliest_issue.min(qe_chain_earliest_issue);
-    latest_issue = latest_issue.max(qe_chain_latest_issue);
-    earliest_expiration = earliest_expiration.min(qe_chain_earliest_expiration);
-
-    // QE Identity-specific window: min/max of source [5] (issuer chain) + source [7] (JSON)
-    let qe_iden_earliest_issue = qe_chain_earliest_issue.min(qe_issue);
-    let qe_iden_latest_issue = qe_chain_latest_issue.max(qe_issue);
-    let qe_iden_earliest_expiration = qe_chain_earliest_expiration.min(qe_next);
+    for cert in certs {
+        let (not_before, not_after) = validity(cert)?;
+        all.add(not_before, Some(not_after));
+    }
 
     Ok(CollateralDates {
-        earliest_issue,
-        latest_issue,
-        earliest_expiration,
-        qe_iden_earliest_issue,
-        qe_iden_latest_issue,
-        qe_iden_earliest_expiration,
+        all,
+        qe_identity: qe,
     })
 }
 
