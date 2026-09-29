@@ -177,14 +177,28 @@ pub(crate) fn parse_crl_info(crl_der: &[u8]) -> Result<CrlInfo> {
     })
 }
 
-/// Parse CRL DER bytes into CertRevocationList objects.
-/// Call this once and pass the results to `verify_certificate_chain`.
-pub fn parse_crls(crl_der: &[&[u8]]) -> Result<Vec<CertRevocationList<'static>>> {
-    crl_der
-        .iter()
-        .map(|der| OwnedCertRevocationList::from_der(der).map(CertRevocationList::from))
-        .collect::<Result<Vec<_>, _>>()
-        .context("Failed to parse CRL")
+/// Parse the root CA CRL and the PCK CRL for reuse across all certificate chain
+/// verifications.
+///
+/// Every chain checks the root CA CRL, so its signature is verified here once with the
+/// root CA key (`root_spki`) instead of on each chain.
+pub fn parse_crls(
+    root_ca_crl: &[u8],
+    pck_crl: &[u8],
+    root_spki: &[u8],
+) -> Result<[CertRevocationList<'static>; 2]> {
+    Ok([
+        OwnedCertRevocationList::from_der_verified(
+            root_ca_crl,
+            root_spki,
+            webpki::ALL_VERIFICATION_ALGS,
+        )
+        .context("Failed to parse root CA CRL")?
+        .into(),
+        OwnedCertRevocationList::from_der(pck_crl)
+            .context("Failed to parse PCK CRL")?
+            .into(),
+    ])
 }
 
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes

@@ -1220,13 +1220,14 @@ fn verify_impl(
     let trust_anchor =
         webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
-    let raw_crls = [&collateral.root_ca_crl[..], &collateral.pck_crl];
+    let crls = parse_crls(
+        &collateral.root_ca_crl,
+        &collateral.pck_crl,
+        &trust_anchor.subject_public_key_info,
+    )?;
 
     // Check root CA against CRL
-    webpki::check_single_cert_crl(root_ca_der, &raw_crls, now)?;
-
-    // Parse CRLs once for reuse across all certificate chain verifications
-    let crls = parse_crls(&raw_crls)?;
+    webpki::check_single_cert_revocation(root_ca_der, &crls.each_ref(), now)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;
