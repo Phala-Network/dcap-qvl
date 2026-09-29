@@ -713,6 +713,7 @@ fn verify_tcb_info_signature(
 fn verify_qe_identity_signature(
     collateral: &QuoteCollateralV3,
     qe_id_certs: &[CertificateDer<'_>],
+    tcb_info_certs: &[CertificateDer<'_>],
     now: UnixTime,
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
@@ -740,7 +741,11 @@ fn verify_qe_identity_signature(
     };
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
         .context("Failed to parse QE Identity leaf certificate")?;
-    verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
+    // Intel signs TCB Info and QE Identity with the same certificate, whose chain
+    // was already verified in step 1.
+    if qe_id_certs != tcb_info_certs {
+        verify_certificate_chain(&qe_id_leaf_cert, qe_id_chain, now, crls, trust_anchor)?;
+    }
 
     // Verify signature
     let qe_id_asn1_signature = (backend.encode_ecdsa)(&collateral.qe_identity_signature)?;
@@ -1272,6 +1277,7 @@ fn verify_impl(
     let qe_identity = verify_qe_identity_signature(
         &collateral,
         &qe_identity_chain,
+        &tcb_info_chain,
         now,
         &crls,
         trust_anchor.clone(),
