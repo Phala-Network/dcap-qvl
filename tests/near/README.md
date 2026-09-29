@@ -28,8 +28,8 @@ make test_near_gas NEAR_GAS_BACKEND=ring     # ring backend
 Sample output:
 
 ```
-verify: 103.3 TGas (103295861175707 gas)
-verify_with_policy: 104.7 TGas (104654101405679 gas)
+verify: 98.2 TGas (98162610346450 gas)
+verify_with_policy: 99.5 TGas (99520700012074 gas)
 ```
 
 ## Troubleshooting

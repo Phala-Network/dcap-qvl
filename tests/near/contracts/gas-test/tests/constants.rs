@@ -7,8 +7,8 @@ pub const TEST_QUOTE_COLLATERAL: &str = include_str!("quote/quote_collateral.jso
 // Measured with ring: verify 124.2 TGas, verify_with_policy 125.6 TGas.
 #[cfg(feature = "ring")]
 pub const MAX_VERIFY_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(126);
-// Measured with rustcrypto: verify 103.3 TGas, verify_with_policy 104.7 TGas.
+// Measured with rustcrypto: verify 98.2 TGas, verify_with_policy 99.5 TGas.
 #[cfg(not(feature = "ring"))]
-pub const MAX_VERIFY_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(105);
+pub const MAX_VERIFY_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(100);
 /// Extra gas `verify_with_policy` may spend on building claims on top of `verify`.
 pub const MAX_CLAIMS_OVERHEAD_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(2);
