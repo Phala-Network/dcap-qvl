@@ -8,7 +8,8 @@ The `dcap-qvl-gas-test` contract exposes `verify` and `verify_with_policy`, whic
 `QuoteVerifier::verify` and `QuoteVerifier::verify_with_policy` on the sample quote in
 `contracts/gas-test/tests/quote/`. The test measures the gas burnt by each call and fails if
 `verify` exceeds `MAX_VERIFY_GAS` or if `verify_with_policy` costs more than
-`MAX_CLAIMS_OVERHEAD_GAS` on top of `verify` (see `tests/constants.rs`). CI runs it on every PR.
+`MAX_CLAIMS_OVERHEAD_GAS` on top of `verify` (see `tests/constants.rs`). CI runs it on every PR
+with both crypto backends.
 
 ## Prerequisites
 
@@ -20,14 +21,15 @@ The `dcap-qvl-gas-test` contract exposes `verify` and `verify_with_policy`, whic
 From the `dcap-qvl` project root:
 
 ```bash
-make test_near_gas
+make test_near_gas                          # rustcrypto backend
+make test_near_gas NEAR_GAS_BACKEND=ring     # ring backend
 ```
 
 Sample output:
 
 ```
-verify: 124.2 TGas (124200802358974 gas)
-verify_with_policy: 125.6 TGas (125552316558646 gas)
+verify: 103.3 TGas (103295861175707 gas)
+verify_with_policy: 104.7 TGas (104654101405679 gas)
 ```
 
 ## Troubleshooting

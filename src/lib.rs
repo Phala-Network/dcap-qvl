@@ -63,15 +63,23 @@
 //!
 //! ```toml
 //! # Default: both backends, std, the PCCS collateral client, and x509 parsing.
-//! dcap-qvl = "0.5"
+//! dcap-qvl = "0.6"
 //!
-//! # Minimal verifier for WASM / on-chain (smaller, ring only, no_std-friendly):
-//! dcap-qvl = { version = "0.5", default-features = false, features = ["std", "ring"] }
+//! # Minimal verifier for WASM / on-chain (no PCCS client):
+//! dcap-qvl = { version = "0.6", default-features = false, features = ["std", "rustcrypto", "default-x509"] }
 //! ```
 //!
 //! `no_std` builds are supported by disabling default features. The `report`
 //! feature pulls in the async PCCS collateral client (`reqwest` + `tokio`); drop
 //! it for offline verification on size-constrained targets.
+//!
+//! # On-chain gas
+//!
+//! On `wasm32`, `rustcrypto` verifies signatures faster than `ring`. On NEAR a
+//! full `verify` costs about 103 TGas with `rustcrypto` and 124 TGas with `ring`,
+//! built with `opt-level = 3`. Size-oriented profiles cost much more gas:
+//! `opt-level = "z"` raises it to about 175 TGas with `rustcrypto` and 135 TGas
+//! with `ring`. See `tests/near` in the repository for the benchmark.
 
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
