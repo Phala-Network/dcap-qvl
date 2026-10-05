@@ -9,7 +9,7 @@ use crate::{
     collateral::CollateralClient,
     intel,
     policy::{QuoteClaims, QuotePolicy},
-    quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15},
+    quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15, TDReport15Ex},
     tcb_info::TcbStatus,
     verify::{QuoteVerifier, VerifiedReport},
     QuoteCollateralV3,
@@ -338,6 +338,129 @@ impl PyTdReport15 {
 
 #[pyclass(from_py_object)]
 #[derive(Clone, Copy)]
+pub struct PyTdReport15Ex {
+    inner: TDReport15Ex,
+}
+
+#[pymethods]
+impl PyTdReport15Ex {
+    // Flatten fields from base TDReport10
+    #[getter]
+    fn tee_tcb_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.tee_tcb_svn).unbind()
+    }
+    #[getter]
+    fn mr_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_seam).unbind()
+    }
+    #[getter]
+    fn mr_signer_seam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_signer_seam).unbind()
+    }
+    #[getter]
+    fn seam_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.seam_attributes).unbind()
+    }
+    #[getter]
+    fn td_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.td_attributes).unbind()
+    }
+    #[getter]
+    fn xfam(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.xfam).unbind()
+    }
+    #[getter]
+    fn mr_td(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_td).unbind()
+    }
+    #[getter]
+    fn mr_config_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_config_id).unbind()
+    }
+    #[getter]
+    fn mr_owner(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_owner).unbind()
+    }
+    #[getter]
+    fn mr_owner_config(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.mr_owner_config).unbind()
+    }
+    #[getter]
+    fn rt_mr0(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.rt_mr0).unbind()
+    }
+    #[getter]
+    fn rt_mr1(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.rt_mr1).unbind()
+    }
+    #[getter]
+    fn rt_mr2(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.rt_mr2).unbind()
+    }
+    #[getter]
+    fn rt_mr3(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.rt_mr3).unbind()
+    }
+    #[getter]
+    fn report_data(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.base.report_data).unbind()
+    }
+
+    // TD15 fields
+    #[getter]
+    fn tee_tcb_svn2(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.tee_tcb_svn2).unbind()
+    }
+    #[getter]
+    fn mr_service_td(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.base.mr_service_td).unbind()
+    }
+
+    // TD15Ex extra fields
+    #[getter]
+    fn vmid(&self) -> u8 {
+        self.inner.vmid
+    }
+    #[getter]
+    fn td_id(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.td_id).unbind()
+    }
+    #[getter]
+    fn dev_info(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.dev_info).unbind()
+    }
+    #[getter]
+    fn init_service_td_hash(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.init_service_td_hash).unbind()
+    }
+    #[getter]
+    fn init_service_td_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.init_service_td_attributes).unbind()
+    }
+    #[getter]
+    fn init_cpu_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.init_cpu_svn).unbind()
+    }
+    #[getter]
+    fn init_tee_tcb_svn(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.init_tee_tcb_svn).unbind()
+    }
+    #[getter]
+    fn init_tee_fmspc(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.init_tee_fmspc).unbind()
+    }
+    #[getter]
+    fn cur_service_td_hash(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.cur_service_td_hash).unbind()
+    }
+    #[getter]
+    fn cur_service_td_attributes(&self, py: Python<'_>) -> Py<PyBytes> {
+        PyBytes::new(py, &self.inner.cur_service_td_attributes).unbind()
+    }
+}
+
+#[pyclass(from_py_object)]
+#[derive(Clone, Copy)]
 pub struct PySgxEnclaveReport {
     inner: EnclaveReport,
 }
@@ -458,7 +581,7 @@ impl PyQuote {
         }
     }
 
-    /// Parsed quote report (TDX TDREPORT10/15 or SGX enclave report).
+    /// Parsed quote report (TDX TDREPORT10/15/15ex or SGX enclave report).
     #[getter]
     fn report<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         match &self.inner.report {
@@ -471,6 +594,10 @@ impl PyQuote {
                 .unwrap()
                 .into_any()),
             Report::TD15(r) => Ok(Py::new(py, PyTdReport15 { inner: *r })?
+                .into_pyobject(py)
+                .unwrap()
+                .into_any()),
+            Report::TD15Ex(r) => Ok(Py::new(py, PyTdReport15Ex { inner: *r })?
                 .into_pyobject(py)
                 .unwrap()
                 .into_any()),
@@ -757,6 +884,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyQuoteHeader>()?;
     m.add_class::<PyTdReport10>()?;
     m.add_class::<PyTdReport15>()?;
+    m.add_class::<PyTdReport15Ex>()?;
     m.add_class::<PySgxEnclaveReport>()?;
     m.add_class::<PyPckExtension>()?;
     m.add_class::<PyQuote>()?;

@@ -129,15 +129,34 @@ export class TDReport15 {
   static decode(reader: BinaryReader): TDReport15;
 }
 
-export class Report {
-  type: 'sgx' | 'td10' | 'td15';
-  data: EnclaveReport | TDReport10 | TDReport15;
+/** TD report for TDX 1.5ex (quote v5 body type 4). */
+export class TDReport15Ex {
+  base: TDReport15;
+  vmid: number;
+  tdId: Uint8Array;
+  devInfo: Uint8Array;
+  initServiceTdHash: Uint8Array;
+  initServiceTdAttributes: Uint8Array;
+  initCpuSvn: Uint8Array;
+  initTeeTcbSvn: Uint8Array;
+  initTeeFmspc: Uint8Array;
+  curServiceTdHash: Uint8Array;
+  curServiceTdAttributes: Uint8Array;
 
-  constructor(type: 'sgx' | 'td10' | 'td15', data: EnclaveReport | TDReport10 | TDReport15);
+  constructor(base: TDReport15, data: Omit<TDReport15Ex, 'base'>);
+  static decode(reader: BinaryReader): TDReport15Ex;
+}
+
+export class Report {
+  type: 'sgx' | 'td10' | 'td15' | 'td15ex';
+  data: EnclaveReport | TDReport10 | TDReport15 | TDReport15Ex;
+
+  constructor(type: 'sgx' | 'td10' | 'td15' | 'td15ex', data: EnclaveReport | TDReport10 | TDReport15 | TDReport15Ex);
 
   isSgx(): boolean;
   asTd10(): TDReport10 | null;
   asTd15(): TDReport15 | null;
+  asTd15Ex(): TDReport15Ex | null;
   asSgx(): EnclaveReport | null;
 }
 
@@ -466,11 +485,13 @@ export const constants: {
   ENCLAVE_REPORT_BYTE_LEN: number;
   TD_REPORT10_BYTE_LEN: number;
   TD_REPORT15_BYTE_LEN: number;
+  TD_REPORT15_EX_BYTE_LEN: number;
   TEE_TYPE_SGX: number;
   TEE_TYPE_TDX: number;
   BODY_SGX_ENCLAVE_REPORT_TYPE: number;
   BODY_TD_REPORT10_TYPE: number;
   BODY_TD_REPORT15_TYPE: number;
+  BODY_TD_REPORT15_EX_TYPE: number;
   ECDSA_SIGNATURE_BYTE_LEN: number;
   ECDSA_PUBKEY_BYTE_LEN: number;
   QE_REPORT_SIG_BYTE_LEN: number;

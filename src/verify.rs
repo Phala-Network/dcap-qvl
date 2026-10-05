@@ -1549,6 +1549,8 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     }
     match &report {
         Report::TD15(report) => validate_td15(report, allow_service_td, allow_debug),
+        // Same checks as TDX 1.5, as in Intel's QVL: the 1.5ex fields carry no attributes to validate.
+        Report::TD15Ex(report) => validate_td15(&report.base, allow_service_td, allow_debug),
         Report::TD10(report) => validate_td10(report, allow_debug),
         Report::SgxEnclave(report) => validate_sgx_attrs(report, allow_debug),
     }

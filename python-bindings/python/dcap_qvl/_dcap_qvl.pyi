@@ -252,6 +252,40 @@ class PyTdReport15(PyTdReport10):
     def mr_service_td(self) -> bytes: ...
 
 
+class PyTdReport15Ex(PyTdReport15):
+    """TDX TDREPORT 1.5ex structure (quote v5 body type 4)."""
+
+    @property
+    def vmid(self) -> int: ...
+
+    @property
+    def td_id(self) -> bytes: ...
+
+    @property
+    def dev_info(self) -> bytes: ...
+
+    @property
+    def init_service_td_hash(self) -> bytes: ...
+
+    @property
+    def init_service_td_attributes(self) -> bytes: ...
+
+    @property
+    def init_cpu_svn(self) -> bytes: ...
+
+    @property
+    def init_tee_tcb_svn(self) -> bytes: ...
+
+    @property
+    def init_tee_fmspc(self) -> bytes: ...
+
+    @property
+    def cur_service_td_hash(self) -> bytes: ...
+
+    @property
+    def cur_service_td_attributes(self) -> bytes: ...
+
+
 class PySgxEnclaveReport:
     """SGX enclave report structure."""
 
@@ -429,8 +463,8 @@ class PyQuote:
         ...
 
     @property
-    def report(self) -> Union[PyTdReport10, PyTdReport15, PySgxEnclaveReport]:
-        """Structured quote report (TDX TDREPORT10/15 or SGX enclave report)."""
+    def report(self) -> Union[PyTdReport10, PyTdReport15, PyTdReport15Ex, PySgxEnclaveReport]:
+        """Structured quote report (TDX TDREPORT10/15/15ex or SGX enclave report)."""
         ...
 
     def cert_chain_pem_bytes(self) -> Optional[bytes]:

@@ -6,11 +6,13 @@ const {
     ENCLAVE_REPORT_BYTE_LEN,
     TD_REPORT10_BYTE_LEN,
     TD_REPORT15_BYTE_LEN,
+    TD_REPORT15_EX_BYTE_LEN,
     TEE_TYPE_SGX,
     TEE_TYPE_TDX,
     BODY_SGX_ENCLAVE_REPORT_TYPE,
     BODY_TD_REPORT10_TYPE,
     BODY_TD_REPORT15_TYPE,
+    BODY_TD_REPORT15_EX_TYPE,
     ECDSA_SIGNATURE_BYTE_LEN,
     ECDSA_PUBKEY_BYTE_LEN,
     QE_REPORT_SIG_BYTE_LEN,
@@ -201,9 +203,43 @@ class TDReport15 {
     }
 }
 
+// TD report for TDX 1.5ex: quote v5 body type 4 (sgx_report2_body_v1_5_ex_t in Intel's sgx_quote_5.h),
+// the TDX 1.5 report followed by the fields below. Verified like a TDX 1.5 report, as Intel's QVL does.
+class TDReport15Ex {
+    constructor(base, data) {
+        this.base = base;
+        this.vmid = data.vmid;
+        this.tdId = data.tdId;
+        this.devInfo = data.devInfo;
+        this.initServiceTdHash = data.initServiceTdHash;
+        this.initServiceTdAttributes = data.initServiceTdAttributes;
+        this.initCpuSvn = data.initCpuSvn;
+        this.initTeeTcbSvn = data.initTeeTcbSvn;
+        this.initTeeFmspc = data.initTeeFmspc;
+        this.curServiceTdHash = data.curServiceTdHash;
+        this.curServiceTdAttributes = data.curServiceTdAttributes;
+    }
+
+    static decode(reader) {
+        const base = TDReport15.decode(reader);
+        return new TDReport15Ex(base, {
+            vmid: reader.readU8(),
+            tdId: reader.readBytes(32),
+            devInfo: reader.readBytes(48),
+            initServiceTdHash: reader.readBytes(48),
+            initServiceTdAttributes: reader.readBytes(8),
+            initCpuSvn: reader.readBytes(16),
+            initTeeTcbSvn: reader.readBytes(16),
+            initTeeFmspc: reader.readBytes(12),
+            curServiceTdHash: reader.readBytes(48),
+            curServiceTdAttributes: reader.readBytes(8),
+        });
+    }
+}
+
 class Report {
     constructor(type, data) {
-        this.type = type; // 'sgx', 'td10', or 'td15'
+        this.type = type; // 'sgx', 'td10', 'td15', or 'td15ex'
         this.data = data;
     }
 
@@ -214,11 +250,18 @@ class Report {
     asTd10() {
         if (this.type === 'td10') return this.data;
         if (this.type === 'td15') return this.data.base;
+        if (this.type === 'td15ex') return this.data.base.base;
         return null;
     }
 
     asTd15() {
-        return this.type === 'td15' ? this.data : null;
+        if (this.type === 'td15') return this.data;
+        if (this.type === 'td15ex') return this.data.base;
+        return null;
+    }
+
+    asTd15Ex() {
+        return this.type === 'td15ex' ? this.data : null;
     }
 
     asSgx() {
@@ -371,6 +414,8 @@ class Quote {
                 report = new Report('td10', TDReport10.decode(reader));
             } else if (body.bodyType === BODY_TD_REPORT15_TYPE) {
                 report = new Report('td15', TDReport15.decode(reader));
+            } else if (body.bodyType === BODY_TD_REPORT15_EX_TYPE) {
+                report = new Report('td15ex', TDReport15Ex.decode(reader));
             } else {
                 throw new Error('Unsupported body type');
             }
@@ -480,6 +525,8 @@ class Quote {
             len = HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN;
         } else if (this.report.type === 'td15') {
             len = HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN;
+        } else if (this.report.type === 'td15ex') {
+            len = HEADER_BYTE_LEN + TD_REPORT15_EX_BYTE_LEN;
         }
 
         if (this.header.version === 5) {
@@ -497,6 +544,7 @@ module.exports = {
     EnclaveReport,
     TDReport10,
     TDReport15,
+    TDReport15Ex,
     Report,
     CertificationData,
     QEReportCertificationData,

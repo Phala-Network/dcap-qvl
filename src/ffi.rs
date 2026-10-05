@@ -7,7 +7,7 @@ use scale::Decode;
 use serde::Serialize;
 
 use crate::intel;
-use crate::quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15};
+use crate::quote::{EnclaveReport, Header, Quote, Report, TDReport10, TDReport15, TDReport15Ex};
 use crate::verify::{self, VerifiedReport};
 use crate::QuoteCollateralV3;
 
@@ -79,6 +79,27 @@ struct FfiReport {
     tee_tcb_svn2: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
     mr_service_td: Option<Vec<u8>>,
+    // TD15Ex extra
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vmid: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    td_id: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    dev_info: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    init_service_td_hash: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    init_service_td_attributes: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    init_cpu_svn: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    init_tee_tcb_svn: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    init_tee_fmspc: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    cur_service_td_hash: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
+    cur_service_td_attributes: Option<Vec<u8>>,
     // SGX fields
     #[serde(skip_serializing_if = "Option::is_none", with = "crate::ffi::opt_hex")]
     cpu_svn: Option<Vec<u8>>,
@@ -132,6 +153,16 @@ impl FfiReport {
             rt_mr3: Some(r.rt_mr3.to_vec()),
             tee_tcb_svn2: None,
             mr_service_td: None,
+            vmid: None,
+            td_id: None,
+            dev_info: None,
+            init_service_td_hash: None,
+            init_service_td_attributes: None,
+            init_cpu_svn: None,
+            init_tee_tcb_svn: None,
+            init_tee_fmspc: None,
+            cur_service_td_hash: None,
+            cur_service_td_attributes: None,
             cpu_svn: None,
             misc_select: None,
             attributes: None,
@@ -147,6 +178,22 @@ impl FfiReport {
         ffi.r#type = "TD15";
         ffi.tee_tcb_svn2 = Some(r.tee_tcb_svn2.to_vec());
         ffi.mr_service_td = Some(r.mr_service_td.to_vec());
+        ffi
+    }
+
+    fn from_td15_ex(r: &TDReport15Ex) -> Self {
+        let mut ffi = Self::from_td15(&r.base);
+        ffi.r#type = "TD15Ex";
+        ffi.vmid = Some(r.vmid);
+        ffi.td_id = Some(r.td_id.to_vec());
+        ffi.dev_info = Some(r.dev_info.to_vec());
+        ffi.init_service_td_hash = Some(r.init_service_td_hash.to_vec());
+        ffi.init_service_td_attributes = Some(r.init_service_td_attributes.to_vec());
+        ffi.init_cpu_svn = Some(r.init_cpu_svn.to_vec());
+        ffi.init_tee_tcb_svn = Some(r.init_tee_tcb_svn.to_vec());
+        ffi.init_tee_fmspc = Some(r.init_tee_fmspc.to_vec());
+        ffi.cur_service_td_hash = Some(r.cur_service_td_hash.to_vec());
+        ffi.cur_service_td_attributes = Some(r.cur_service_td_attributes.to_vec());
         ffi
     }
 
@@ -177,6 +224,16 @@ impl FfiReport {
             rt_mr3: None,
             tee_tcb_svn2: None,
             mr_service_td: None,
+            vmid: None,
+            td_id: None,
+            dev_info: None,
+            init_service_td_hash: None,
+            init_service_td_attributes: None,
+            init_cpu_svn: None,
+            init_tee_tcb_svn: None,
+            init_tee_fmspc: None,
+            cur_service_td_hash: None,
+            cur_service_td_attributes: None,
         }
     }
 
@@ -185,6 +242,7 @@ impl FfiReport {
             Report::SgxEnclave(r) => Self::from_sgx(r),
             Report::TD10(r) => Self::from_td10(r),
             Report::TD15(r) => Self::from_td15(r),
+            Report::TD15Ex(r) => Self::from_td15_ex(r),
         }
     }
 }
