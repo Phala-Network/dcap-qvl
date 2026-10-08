@@ -256,6 +256,33 @@ jobs:
       - name: Check wasm32 build
         run: cargo check --target wasm32-unknown-unknown --features js
 
+  features:
+    name: Check feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Add no_std target
+        run: rustup target add thumbv7em-none-eabihf
+      - name: Clippy std builds without default features
+        run: |
+          for features in std std,ring std,default-x509 std,rustcrypto,default-x509 \
+              std,danger-allow-tcb-override; do
+            echo "::group::features: '$features'"
+            cargo clippy --no-default-features --features "$features" -- -D warnings
+            echo "::endgroup::"
+          done
+      # Only the rlib: the cdylib/staticlib crate types need an allocator and a
+      # panic handler, which a no_std library does not provide.
+      - name: Check no_std builds
+        run: |
+          for features in "" rustcrypto default-x509 rustcrypto,default-x509 \
+              danger-allow-tcb-override; do
+            echo "::group::features: '$features'"
+            cargo rustc --lib --crate-type rlib --target thumbv7em-none-eabihf \
+              --no-default-features --features "$features" -- -D warnings
+            echo "::endgroup::"
+          done
+
   near-gas:
     name: NEAR gas regression (${{ matrix.backend }})
     runs-on: ubuntu-latest

@@ -55,7 +55,8 @@
 //!
 //! The top-level [`verify::verify`] selects the backend from enabled features:
 //! `ring` wins when both are on, `rustcrypto` is used when only it is enabled,
-//! and enabling neither is a compile error. Because Cargo features are additive,
+//! and with neither it is unavailable: use [`verify::QuoteVerifier`] with your own
+//! [`config::Config`]. Because Cargo features are additive,
 //! any crate in your dependency tree that enables `ring` makes the top-level
 //! `verify()` use ring — reach for the explicit modules to avoid surprises.
 //!
@@ -86,6 +87,7 @@
 #[macro_use]
 extern crate alloc;
 
+use alloc::{string::String, vec::Vec};
 use scale::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
@@ -125,6 +127,9 @@ impl From<&QuoteCollateralV3> for QuoteCollateralV3 {
     }
 }
 
+#[cfg(all(feature = "report", not(feature = "_anycrypto")))]
+compile_error!("the `report` feature requires the `ring` or `rustcrypto` feature");
+
 #[cfg(feature = "report")]
 pub mod collateral;
 
@@ -135,7 +140,7 @@ pub use collateral::PHALA_PCCS_URL;
 pub mod http;
 
 pub mod config;
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub mod configs;
 pub mod crypto;
 pub mod oids;

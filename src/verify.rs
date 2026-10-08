@@ -13,8 +13,7 @@ use {
     crate::policy::PckCertFlag,
     crate::qe_identity::{QeIdentity, QeTcbLevel},
     crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleTcbLevel},
-    alloc::collections::BTreeMap,
-    alloc::string::String,
+    alloc::string::{String, ToString},
     alloc::vec::Vec,
 };
 
@@ -115,6 +114,7 @@ use core::marker::PhantomData;
 /// the `verify()` call itself does the minimum work (crypto only).
 ///
 /// Parsed collateral is kept so that [`claims()`](Self::claims) does not parse it again.
+#[cfg_attr(not(feature = "default-x509"), allow(dead_code))]
 struct QuoteVerificationResult {
     header: crate::quote::Header,
     report: Report,
@@ -263,6 +263,7 @@ pub struct VerifiedReport {
 /// Quote verifier with configurable root certificate and crypto backend.
 ///
 /// Provides both the backwards-compatible report API and the detailed claims API.
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub struct QuoteVerifier<C: Config = crate::configs::DefaultConfig> {
     root_ca_der: Vec<u8>,
     allow_service_td: bool,
@@ -270,7 +271,16 @@ pub struct QuoteVerifier<C: Config = crate::configs::DefaultConfig> {
     config: PhantomData<C>,
 }
 
-#[cfg(feature = "default-x509")]
+/// Quote verifier with configurable root certificate and crypto backend.
+#[cfg(not(all(feature = "default-x509", feature = "_anycrypto")))]
+pub struct QuoteVerifier<C: Config> {
+    root_ca_der: Vec<u8>,
+    allow_service_td: bool,
+    allow_debug: bool,
+    config: PhantomData<C>,
+}
+
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 impl QuoteVerifier<crate::configs::DefaultConfig> {
     /// Create a new verifier with a custom root certificate.
     pub fn new(root_ca_der: Vec<u8>) -> Self {
@@ -412,7 +422,7 @@ impl<C: Config> QuoteVerifier<C> {
         )
     }
 
-    #[cfg(all(feature = "danger-allow-tcb-override", feature = "default-x509"))]
+    #[cfg(feature = "danger-allow-tcb-override")]
     pub fn dangerous_verify_with_tcb_override(
         &self,
         raw_quote: &[u8],
@@ -431,7 +441,7 @@ impl<C: Config> QuoteVerifier<C> {
 }
 
 /// Backwards-compatible one-shot verification using [`DefaultConfig`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn verify(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,
@@ -441,7 +451,11 @@ pub fn verify(
         .verify(raw_quote, collateral, now_secs)
 }
 
-#[cfg(all(feature = "default-x509", feature = "danger-allow-tcb-override"))]
+#[cfg(all(
+    feature = "default-x509",
+    feature = "_anycrypto",
+    feature = "danger-allow-tcb-override"
+))]
 pub fn dangerous_verify_with_tcb_override(
     raw_quote: &[u8],
     collateral: &QuoteCollateralV3,
@@ -692,6 +706,7 @@ fn verify_tcb_info_signature(
         bail!("Certificate chain is too short for TCB Info");
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
+        .map_err(anyhow::Error::msg)
         .context("Failed to parse TCB Info leaf certificate")?;
     let tcb_path = verify_certificate_chain(
         &tcb_leaf_cert,
@@ -753,6 +768,7 @@ fn verify_qe_identity_signature(
         bail!("Certificate chain is too short for QE Identity");
     };
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
+        .map_err(anyhow::Error::msg)
         .context("Failed to parse QE Identity leaf certificate")?;
     // Intel signs TCB Info and QE Identity with the same certificate, whose chain
     // was already verified in step 1. `None` means the TCB Info path applies.
@@ -818,8 +834,9 @@ fn verify_pck_cert_chain(
     };
 
     // Verify PCK certificate chain
-    let pck_leaf_cert =
-        webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
+    let pck_leaf_cert = webpki::EndEntityCert::try_from(pck_leaf)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to parse PCK certificate")?;
     let pck_path = verify_certificate_chain(
         &pck_leaf_cert,
         pck_chain,
@@ -892,8 +909,9 @@ fn verify_qe_report_signature(
     auth_data: &crate::quote::AuthDataV3,
     backend: &CryptoBackend,
 ) -> Result<EnclaveReport> {
-    let pck_leaf_cert =
-        webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
+    let pck_leaf_cert = webpki::EndEntityCert::try_from(pck_leaf)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to parse PCK certificate")?;
 
     // Verify QE report signature (signed by PCK)
     let qe_report_signature = (backend.encode_ecdsa)(&auth_data.qe_report_signature)?;
@@ -906,8 +924,9 @@ fn verify_qe_report_signature(
 
     // Decode QE report
     let mut qe_report_slice = auth_data.qe_report.as_slice();
-    let qe_report =
-        EnclaveReport::decode(&mut qe_report_slice).context("Failed to decode QE report")?;
+    let qe_report = EnclaveReport::decode(&mut qe_report_slice)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to decode QE report")?;
 
     Ok(qe_report)
 }
@@ -1243,8 +1262,9 @@ fn verify_impl(
 ) -> Result<QuoteVerificationResult> {
     // Setup trust anchor and time
     let root_ca = CertificateDer::from_slice(root_ca_der);
-    let trust_anchor =
-        webpki::anchor_from_trusted_cert(&root_ca).context("Failed to load root ca")?;
+    let trust_anchor = webpki::anchor_from_trusted_cert(&root_ca)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to load root ca")?;
     let now = UnixTime::since_unix_epoch(Duration::from_secs(now_secs));
     let crls = parse_crls(
         &collateral.root_ca_crl,
@@ -1254,11 +1274,14 @@ fn verify_impl(
     )?;
 
     // Check root CA against CRL
-    webpki::check_single_cert_revocation(root_ca_der, &crls.each_ref(), &[backend.sig_algo], now)?;
+    webpki::check_single_cert_revocation(root_ca_der, &crls.each_ref(), &[backend.sig_algo], now)
+        .map_err(anyhow::Error::msg)?;
 
     // Parse quote and validate header
     let mut quote_slice = raw_quote;
-    let quote = Quote::decode(&mut quote_slice).context("Failed to decode quote")?;
+    let quote = Quote::decode(&mut quote_slice)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to decode quote")?;
     if !ALLOWED_QUOTE_VERSIONS.contains(&quote.header.version) {
         bail!("Unsupported DCAP quote version");
     }
@@ -1473,7 +1496,7 @@ fn compute_collateral_time_window<'a>(
     certs: impl Iterator<Item = &'a [u8]>,
     qe_identity_chain: impl Iterator<Item = &'a [u8]>,
 ) -> Result<CollateralDates> {
-    let mut validity_cache = BTreeMap::<&[u8], (u64, u64)>::new();
+    let mut validity_cache = alloc::collections::BTreeMap::<&[u8], (u64, u64)>::new();
     let mut validity = |cert_der: &'a [u8]| -> Result<(u64, u64)> {
         use der::Decode as _;
         if let Some(validity) = validity_cache.get(cert_der) {
@@ -1529,8 +1552,9 @@ fn validate_sgx_attrs(report: &EnclaveReport, allow_debug: bool) -> Result<()> {
 
 fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) -> Result<()> {
     fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
-        let td_attrs =
-            TDAttributes::parse(report.td_attributes).context("Failed to parse TD attributes")?;
+        let td_attrs = TDAttributes::parse(report.td_attributes)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to parse TD attributes")?;
         if td_attrs.tud & !0x01 != 0 {
             bail!("Reserved bits in TD attributes are set");
         }
