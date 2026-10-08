@@ -263,20 +263,24 @@ jobs:
       - uses: actions/checkout@v7
       - name: Add no_std target
         run: rustup target add thumbv7em-none-eabihf
-      - name: Clippy without default features
+      - name: Clippy std builds without default features
         run: |
-          for features in "" ring rustcrypto default-x509 rustcrypto,default-x509 \
-              danger-allow-tcb-override std std,ring std,default-x509 \
-              std,rustcrypto,default-x509; do
+          for features in std std,ring std,default-x509 std,rustcrypto,default-x509 \
+              std,danger-allow-tcb-override; do
             echo "::group::features: '$features'"
             cargo clippy --no-default-features --features "$features" -- -D warnings
             echo "::endgroup::"
           done
-      - name: Check no_std target
+      # Only the rlib: the cdylib/staticlib crate types need an allocator and a
+      # panic handler, which a no_std library does not provide.
+      - name: Check no_std builds
         run: |
-          for features in "" rustcrypto,default-x509; do
+          for features in "" rustcrypto default-x509 rustcrypto,default-x509 \
+              danger-allow-tcb-override; do
+            echo "::group::features: '$features'"
             cargo rustc --lib --crate-type rlib --target thumbv7em-none-eabihf \
               --no-default-features --features "$features" -- -D warnings
+            echo "::endgroup::"
           done
 
   near-gas:
