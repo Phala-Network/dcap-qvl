@@ -256,6 +256,29 @@ jobs:
       - name: Check wasm32 build
         run: cargo check --target wasm32-unknown-unknown --features js
 
+  features:
+    name: Check feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Add no_std target
+        run: rustup target add thumbv7em-none-eabihf
+      - name: Clippy without default features
+        run: |
+          for features in "" ring rustcrypto default-x509 rustcrypto,default-x509 \
+              danger-allow-tcb-override std std,ring std,default-x509 \
+              std,rustcrypto,default-x509; do
+            echo "::group::features: '$features'"
+            cargo clippy --no-default-features --features "$features" -- -D warnings
+            echo "::endgroup::"
+          done
+      - name: Check no_std target
+        run: |
+          for features in "" rustcrypto,default-x509; do
+            cargo rustc --lib --crate-type rlib --target thumbv7em-none-eabihf \
+              --no-default-features --features "$features" -- -D warnings
+          done
+
   near-gas:
     name: NEAR gas regression (${{ matrix.backend }})
     runs-on: ubuntu-latest

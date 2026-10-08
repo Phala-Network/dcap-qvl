@@ -1,5 +1,6 @@
 use core::time::Duration;
 
+use alloc::string::ToString;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 

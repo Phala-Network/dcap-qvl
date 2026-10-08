@@ -4,6 +4,7 @@
 //! `rustcrypto`) are selected by [`crate::configs::RingConfig`] /
 //! [`crate::configs::RustCryptoConfig`] respectively.
 
+#[cfg(feature = "_anycrypto")]
 use crate::config::CryptoProvider;
 
 /// Audited [`CryptoProvider`] backed by the `ring` crate (gated by the `ring`

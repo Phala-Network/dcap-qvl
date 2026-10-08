@@ -4,6 +4,8 @@ const fn oid(s: &str) -> ObjectIdentifier {
     ObjectIdentifier::new_unwrap(s)
 }
 
+pub const CRL_NUMBER: ObjectIdentifier = oid("2.5.29.20");
+
 pub const SGX_EXTENSION: ObjectIdentifier = oid("1.2.840.113741.1.13.1");
 pub const PPID: ObjectIdentifier = oid("1.2.840.113741.1.13.1.1");
 pub const TCB: ObjectIdentifier = oid("1.2.840.113741.1.13.1.2");

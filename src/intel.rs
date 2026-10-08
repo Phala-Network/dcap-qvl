@@ -1,10 +1,11 @@
+use alloc::vec::Vec;
 use anyhow::{anyhow, bail, Context, Result};
 use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
 };
 
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 use crate::configs::DefaultConfig;
 use crate::{
     config::{Config, ParsedCert, PckCa, X509Codec},
@@ -42,7 +43,9 @@ impl PckExtension {
     /// The search is recursive: nested SEQUENCE containers are walked
     /// automatically so the caller only needs to supply the leaf OID.
     pub fn get_value(&self, oid: &const_oid::ObjectIdentifier) -> Result<Option<Vec<u8>>> {
-        let obj = DerObject::decode(&self.raw_extension).context("Failed to decode DER object")?;
+        let obj = DerObject::decode(&self.raw_extension)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to decode DER object")?;
         find_recursive(oid, obj, 0)
     }
 }
@@ -121,7 +124,7 @@ pub fn parse_pck_extension_with<C: Config>(cert_der: &[u8]) -> Result<PckExtensi
 ///
 /// Uses the audited [`DefaultConfig`]. For a custom backend, use
 /// [`parse_pck_extension_with`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn parse_pck_extension(cert_der: &[u8]) -> Result<PckExtension> {
     parse_pck_extension_with::<DefaultConfig>(cert_der)
 }
@@ -140,7 +143,7 @@ pub fn parse_pck_extension_from_pem_with<C: Config>(pem_data: &[u8]) -> Result<P
 /// The first (leaf) certificate in the chain is used. Uses the audited
 /// [`DefaultConfig`]. For a custom backend, use
 /// [`parse_pck_extension_from_pem_with`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn parse_pck_extension_from_pem(pem_data: &[u8]) -> Result<PckExtension> {
     parse_pck_extension_from_pem_with::<DefaultConfig>(pem_data)
 }
@@ -160,7 +163,7 @@ pub fn pck_ca_with<C: Config>(cert_der: &[u8]) -> Result<PckCa> {
 }
 
 /// [`pck_ca_with`] under the audited [`DefaultConfig`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn pck_ca(cert_der: &[u8]) -> Result<PckCa> {
     pck_ca_with::<DefaultConfig>(cert_der)
 }
@@ -176,7 +179,7 @@ pub fn quote_fmspc_with<C: Config>(quote: &Quote) -> Result<Fmspc> {
 }
 
 /// [`quote_fmspc_with`] under the audited [`DefaultConfig`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn quote_fmspc(quote: &Quote) -> Result<Fmspc> {
     quote_fmspc_with::<DefaultConfig>(quote)
 }
@@ -191,7 +194,7 @@ pub fn quote_ca_with<C: Config>(quote: &Quote) -> Result<PckCa> {
 }
 
 /// [`quote_ca_with`] under the audited [`DefaultConfig`].
-#[cfg(feature = "default-x509")]
+#[cfg(all(feature = "default-x509", feature = "_anycrypto"))]
 pub fn quote_ca(quote: &Quote) -> Result<PckCa> {
     quote_ca_with::<DefaultConfig>(quote)
 }
@@ -208,9 +211,13 @@ fn find_extension_optional(
     path: &[const_oid::ObjectIdentifier],
     extension: &[u8],
 ) -> Result<Option<Vec<u8>>> {
-    let mut obj = DerObject::decode(extension).context("Failed to decode DER object")?;
+    let mut obj = DerObject::decode(extension)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to decode DER object")?;
     for oid in path {
-        let seq = Sequence::load(obj).context("Failed to load sequence")?;
+        let seq = Sequence::load(obj)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to load sequence")?;
         match sub_object_opt(oid, seq)? {
             Some(value) => obj = value,
             None => return Ok(None),
@@ -226,10 +233,19 @@ fn sub_object_opt<'a>(
     for idx in 0..seq.len() {
         let entry = seq
             .get(idx)
+            .map_err(anyhow::Error::msg)
             .context("Failed to read entry inside Intel extension")?;
-        let entry_seq = Sequence::load(entry).context("Failed to load nested sequence")?;
-        let name = entry_seq.get(0).context("Failed to read OID")?;
-        let value = entry_seq.get(1).context("Failed to read value")?;
+        let entry_seq = Sequence::load(entry)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to load nested sequence")?;
+        let name = entry_seq
+            .get(0)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to read OID")?;
+        let value = entry_seq
+            .get(1)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to read value")?;
         if name.value() == oid.as_bytes() {
             return Ok(Some(value));
         }

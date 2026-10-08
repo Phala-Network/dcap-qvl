@@ -601,7 +601,7 @@ impl Quote {
     /// Parse a TEE quote from a byte slice.
     pub fn parse(quote: &[u8]) -> Result<Self> {
         let mut input = quote;
-        let quote = Quote::decode(&mut input)?;
+        let quote = Quote::decode(&mut input).map_err(anyhow::Error::msg)?;
         Ok(quote)
     }
 
@@ -692,9 +692,11 @@ impl Quote {
         let mut cert_body = self.inner_cert_data();
         let params = match self.inner_cert_type() {
             PCK_ID_ENCRYPTED_PPID_2048 => EncPpidDecoder::<256>::decode(&mut cert_body)
+                .map_err(anyhow::Error::msg)
                 .context("Failed to decode ENCRYPTED_PPID_2048")?
                 .into_params(),
             PCK_ID_ENCRYPTED_PPID_3072 => EncPpidDecoder::<384>::decode(&mut cert_body)
+                .map_err(anyhow::Error::msg)
                 .context("Failed to decode ENCRYPTED_PPID_3072")?
                 .into_params(),
             other => bail!("encrypted_ppid_params() requires cert_type 2 or 3, got {other}"),

@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use asn1_der::{
     typed::{DerDecodable, Sequence},
     DerObject,
@@ -23,14 +23,18 @@ pub fn get_intel_extension_with<C: Config>(der_encoded: &[u8]) -> Result<Vec<u8>
 }
 
 pub fn find_extension(path: &[&[u8]], raw: &[u8]) -> Result<Vec<u8>> {
-    let obj = DerObject::decode(raw).context("Failed to decode DER object")?;
+    let obj = DerObject::decode(raw)
+        .map_err(anyhow::Error::msg)
+        .context("Failed to decode DER object")?;
     let subobj = get_obj(path, obj).context("Failed to get subobject")?;
     Ok(subobj.value().to_vec())
 }
 
 fn get_obj<'a>(path: &[&[u8]], mut obj: DerObject<'a>) -> Result<DerObject<'a>> {
     for oid in path {
-        let seq = Sequence::load(obj).context("Failed to load sequence")?;
+        let seq = Sequence::load(obj)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to load sequence")?;
         obj = sub_obj(oid, seq).context("Failed to get subobject")?;
     }
     Ok(obj)
@@ -38,10 +42,21 @@ fn get_obj<'a>(path: &[&[u8]], mut obj: DerObject<'a>) -> Result<DerObject<'a>> 
 
 fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>> {
     for i in 0..seq.len() {
-        let entry = seq.get(i).context("Failed to get entry")?;
-        let entry = Sequence::load(entry).context("Failed to load sequence")?;
-        let name = entry.get(0).context("Failed to get name")?;
-        let value = entry.get(1).context("Failed to get value")?;
+        let entry = seq
+            .get(i)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to get entry")?;
+        let entry = Sequence::load(entry)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to load sequence")?;
+        let name = entry
+            .get(0)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to get name")?;
+        let value = entry
+            .get(1)
+            .map_err(anyhow::Error::msg)
+            .context("Failed to get value")?;
         if name.value() == oid {
             return Ok(value);
         }
@@ -123,6 +138,7 @@ pub(crate) mod serde_vec_bytes {
 
 pub fn extract_certs(cert_chain: &[u8]) -> Result<Vec<CertificateDer<'static>>> {
     Ok(pem::parse_many(cert_chain)
+        .map_err(anyhow::Error::msg)
         .context("Failed to parse certs")?
         .into_iter()
         .map(|pem| CertificateDer::from(pem.into_contents()))
@@ -153,19 +169,18 @@ pub(crate) fn parse_crl_info(crl_der: &[u8]) -> Result<CrlInfo> {
         x509_cert::crl::CertificateList::from_der(crl_der).context("Failed to parse CRL")?;
     let tbs = &crl.tbs_cert_list;
     let mut number = 0;
-    // OID 2.5.29.20 = id-ce-cRLNumber
     if let Some(ext) = tbs
         .crl_extensions
         .iter()
         .flatten()
-        .find(|ext| ext.extn_id.to_string() == "2.5.29.20")
+        .find(|ext| ext.extn_id == crate::oids::CRL_NUMBER)
     {
         // CRL Number is encoded as an ASN.1 INTEGER
         let crl_num =
             der::asn1::UintRef::from_der(ext.extn_value.as_bytes()).context("CRL number")?;
         let bytes = crl_num.as_bytes();
         // Convert big-endian bytes to u32 (CRL numbers are typically small)
-        ensure!(bytes.len() <= 4, "CRL number too large for u32");
+        anyhow::ensure!(bytes.len() <= 4, "CRL number too large for u32");
         for &b in bytes {
             number = (number << 8) | u32::from(b);
         }
@@ -190,9 +205,11 @@ pub fn parse_crls(
 ) -> Result<[CertRevocationList<'static>; 2]> {
     Ok([
         OwnedCertRevocationList::from_der_verified(root_ca_crl, root_spki, &[sig_algo])
+            .map_err(anyhow::Error::msg)
             .context("Failed to parse root CA CRL")?
             .into(),
         OwnedCertRevocationList::from_der(pck_crl)
+            .map_err(anyhow::Error::msg)
             .context("Failed to parse PCK CRL")?
             .into(),
     ])
@@ -241,6 +258,7 @@ pub fn verify_certificate_chain(
             Some(revocation),
             None,
         )
+        .map_err(anyhow::Error::msg)
         .context("Failed to verify certificate chain")?;
 
     Ok(core::iter::once(path.end_entity().der())
