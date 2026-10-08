@@ -368,6 +368,69 @@ fn claims_use_quote_embedded_pck_chain_when_collateral_omits_it() {
     );
 }
 
+/// Certificates that are not on a verified path must not affect the claims.
+#[test]
+fn claims_ignore_unverified_certificates() {
+    use dcap_qvl::verify::QuoteVerifier;
+
+    // Self-signed, non-Intel, valid from 2020-01-01 to 2020-01-02.
+    const FAKE_CERT: &str = "\
+-----BEGIN CERTIFICATE-----
+MIIBHjCBxaADAgECAgEBMAoGCCqGSM49BAMCMBkxFzAVBgNVBAMMDkZha2UgTm90
+IEludGVsMB4XDTIwMDEwMTAwMDAwMFoXDTIwMDEwMjAwMDAwMFowGTEXMBUGA1UE
+AwwORmFrZSBOb3QgSW50ZWwwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASk21aS
+fKJMYLyaOW+o6BNLOZyTLr8FcMi6yO9P+/qrrHwQWGnQ0l9l55qzf0EwuvBlSvtE
+huag/zFSLJazynAPMAoGCCqGSM49BAMCA0gAMEUCICxZHKUXa5/X4YBMtaKbE0Rb
+PWdV7BLvBozsPMOw3JN0AiEAz/GFHfnNONFjaRNt3L3rrBRUrwGdMSiYDxSr7VGd
+hbw=
+-----END CERTIFICATE-----
+";
+    const UNPARSABLE_CERT: &str = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n";
+
+    let raw_quote = include_bytes!("../sample/sgx_quote").to_vec();
+    let collateral: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/sgx_quote_collateral.json")).unwrap();
+    let now = now_from_collateral(&collateral);
+    let embedded_pck_chain = String::from_utf8_lossy(
+        Quote::decode(&mut &raw_quote[..])
+            .unwrap()
+            .raw_cert_chain()
+            .unwrap(),
+    )
+    .trim_end_matches('\0')
+    .to_string();
+
+    let claims = |collateral: QuoteCollateralV3| {
+        QuoteVerifier::new_prod()
+            .verify_with_policy(
+                &raw_quote,
+                collateral,
+                now,
+                &dcap_qvl::QuotePolicy::claims_only(now),
+            )
+            .unwrap()
+    };
+    let expected = claims(collateral.clone());
+
+    for cert in [FAKE_CERT, UNPARSABLE_CERT] {
+        let mut tampered = collateral.clone();
+        tampered.pck_crl_issuer_chain = cert.to_string();
+        assert_eq!(claims(tampered), expected);
+
+        let mut tampered = collateral.clone();
+        tampered.tcb_info_issuer_chain += cert;
+        assert_eq!(claims(tampered), expected);
+
+        let mut tampered = collateral.clone();
+        tampered.qe_identity_issuer_chain += cert;
+        assert_eq!(claims(tampered), expected);
+
+        let mut tampered = collateral.clone();
+        tampered.pck_certificate_chain = Some(format!("{embedded_pck_chain}\n{cert}"));
+        assert_eq!(claims(tampered), expected);
+    }
+}
+
 #[test]
 fn could_parse_tdx_quote() {
     let raw_quote = include_bytes!("../sample/tdx_quote");

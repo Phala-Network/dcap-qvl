@@ -203,6 +203,9 @@ pub fn parse_crls(
 ///
 /// It will also check that the certificate is not revoked according to the CRL.
 ///
+/// Returns the certificates of the verified path (leaf first, trust anchor excluded).
+/// Certificates in `intermediate_certs` that are not on the path are left out.
+///
 /// `sig_algo` is the only accepted signature algorithm: Intel's PKI uses ECDSA
 /// P-256/SHA-256 throughout, and not referencing other algorithms keeps them out of
 /// the binary.
@@ -213,7 +216,7 @@ pub fn verify_certificate_chain(
     crls: &[CertRevocationList<'_>],
     trust_anchor: TrustAnchor<'_>,
     sig_algo: &dyn SignatureVerificationAlgorithm,
-) -> Result<()> {
+) -> Result<Vec<CertificateDer<'static>>> {
     let crl_slice = crls.iter().collect::<Vec<_>>();
 
     // Create a RevocationOptions object with the CRL
@@ -227,10 +230,11 @@ pub fn verify_certificate_chain(
         .with_expiration_policy(webpki::ExpirationPolicy::Enforce)
         .build();
 
-    leaf_cert
+    let trust_anchors = [trust_anchor];
+    let path = leaf_cert
         .verify_for_usage(
             &[sig_algo],
-            &[trust_anchor],
+            &trust_anchors,
             intermediate_certs,
             time,
             webpki::KeyUsage::server_auth(),
@@ -239,5 +243,8 @@ pub fn verify_certificate_chain(
         )
         .context("Failed to verify certificate chain")?;
 
-    Ok(())
+    Ok(core::iter::once(path.end_entity().der())
+        .chain(path.intermediate_certificates().map(|cert| cert.der()))
+        .map(CertificateDer::into_owned)
+        .collect())
 }
