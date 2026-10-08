@@ -121,8 +121,10 @@ struct QuoteVerificationResult {
     collateral: QuoteCollateralV3,
     tcb_info: TcbInfo,
     qe_identity: QeIdentity,
-    tcb_info_chain: Vec<CertificateDer<'static>>,
-    qe_identity_chain: Vec<CertificateDer<'static>>,
+    /// Verified certificate paths (leaf first, root CA excluded).
+    tcb_info_path: Vec<CertificateDer<'static>>,
+    qe_identity_path: Vec<CertificateDer<'static>>,
+    root_ca_der: Vec<u8>,
     // -- core verification results (always computed) --
     tee_type: u32,
     tcb_status: TcbStatus,
@@ -139,25 +141,28 @@ struct QuoteVerificationResult {
 impl QuoteVerificationResult {
     /// Build the full [`QuoteClaims`] from verification intermediates.
     ///
-    /// Computes the collateral time window from all 8 sources (TCBInfo, QEIdentity,
-    /// 2 CRLs, 4 certificate chains), root_key_id SHA-384, CRL numbers, and tcb_date_tag.
+    /// Computes the collateral time window from TCBInfo, QEIdentity, the 2 CRLs and the
+    /// verified certificate paths, root_key_id SHA-384, CRL numbers, and tcb_date_tag.
     #[cfg(feature = "default-x509")]
     pub fn claims(&self) -> Result<QuoteClaims> {
         let root_ca_crl = parse_crl_info(&self.collateral.root_ca_crl)
             .context("Failed to parse root CA CRL for claims")?;
         let pck_crl = parse_crl_info(&self.collateral.pck_crl)
             .context("Failed to parse PCK CRL for claims")?;
-        let pck_crl_issuer_chain = extract_certs(self.collateral.pck_crl_issuer_chain.as_bytes())?;
+        let root_ca = &self.root_ca_der[..];
         let collateral_dates = compute_collateral_time_window(
             &self.tcb_info,
             &self.qe_identity,
             &[&root_ca_crl, &pck_crl],
-            pck_crl_issuer_chain
+            self.pck_ext
+                .pck_cert_chain_der
                 .iter()
                 .map(|cert| &cert[..])
-                .chain(self.pck_ext.pck_cert_chain_der.iter().map(|cert| &cert[..]))
-                .chain(self.tcb_info_chain.iter().map(|cert| &cert[..])),
-            &self.qe_identity_chain,
+                .chain(self.tcb_info_path.iter().map(|cert| &cert[..])),
+            self.qe_identity_path
+                .iter()
+                .map(|cert| &cert[..])
+                .chain([root_ca]),
         )?;
 
         // root_key_id: SHA-384 of root CA's raw public key bytes
@@ -665,7 +670,7 @@ fn verify_tcb_info_signature(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
     backend: &CryptoBackend,
-) -> Result<TcbInfo> {
+) -> Result<(TcbInfo, Vec<CertificateDer<'static>>)> {
     // Parse TCB Info
     let tcb_info = serde_json::from_str::<TcbInfo>(&collateral.tcb_info)
         .context("Failed to decode TcbInfo")?;
@@ -688,7 +693,7 @@ fn verify_tcb_info_signature(
     };
     let tcb_leaf_cert = webpki::EndEntityCert::try_from(tcb_leaf)
         .context("Failed to parse TCB Info leaf certificate")?;
-    verify_certificate_chain(
+    let tcb_path = verify_certificate_chain(
         &tcb_leaf_cert,
         tcb_chain,
         now,
@@ -710,7 +715,7 @@ fn verify_tcb_info_signature(
         bail!("Signature is invalid for tcb_info in quote_collateral");
     }
 
-    Ok(tcb_info)
+    Ok((tcb_info, tcb_path))
 }
 
 // =============================================================================
@@ -726,7 +731,7 @@ fn verify_qe_identity_signature(
     crls: &[webpki::CertRevocationList<'_>],
     trust_anchor: rustls_pki_types::TrustAnchor,
     backend: &CryptoBackend,
-) -> Result<QeIdentity> {
+) -> Result<(QeIdentity, Option<Vec<CertificateDer<'static>>>)> {
     // Parse QE Identity
     let qe_identity = serde_json::from_str::<QeIdentity>(&collateral.qe_identity)
         .context("Failed to decode QeIdentity")?;
@@ -750,17 +755,19 @@ fn verify_qe_identity_signature(
     let qe_id_leaf_cert = webpki::EndEntityCert::try_from(qe_id_leaf)
         .context("Failed to parse QE Identity leaf certificate")?;
     // Intel signs TCB Info and QE Identity with the same certificate, whose chain
-    // was already verified in step 1.
-    if qe_id_certs != tcb_info_certs {
-        verify_certificate_chain(
+    // was already verified in step 1. `None` means the TCB Info path applies.
+    let qe_id_path = if qe_id_certs == tcb_info_certs {
+        None
+    } else {
+        Some(verify_certificate_chain(
             &qe_id_leaf_cert,
             qe_id_chain,
             now,
             crls,
             trust_anchor,
             backend.sig_algo,
-        )?;
-    }
+        )?)
+    };
 
     // Verify signature
     let qe_id_asn1_signature = (backend.encode_ecdsa)(&collateral.qe_identity_signature)?;
@@ -775,7 +782,7 @@ fn verify_qe_identity_signature(
         bail!("Signature is invalid for qe_identity in quote_collateral");
     }
 
-    Ok(qe_identity)
+    Ok((qe_identity, qe_id_path))
 }
 
 // =============================================================================
@@ -813,7 +820,7 @@ fn verify_pck_cert_chain(
     // Verify PCK certificate chain
     let pck_leaf_cert =
         webpki::EndEntityCert::try_from(pck_leaf).context("Failed to parse PCK certificate")?;
-    verify_certificate_chain(
+    let pck_path = verify_certificate_chain(
         &pck_leaf_cert,
         pck_chain,
         now,
@@ -835,10 +842,7 @@ fn verify_pck_cert_chain(
     });
 
     Ok(PckCertChainResult {
-        pck_cert_chain_der: certification_certs
-            .iter()
-            .map(|cert| cert.as_ref().to_vec())
-            .collect(),
+        pck_cert_chain_der: pck_path.iter().map(|cert| cert.to_vec()).collect(),
         pck_leaf_der: pck_leaf.as_ref().to_vec(),
         ppid: pck_ext.ppid,
         cpu_svn: pck_ext.cpu_svn,
@@ -1281,7 +1285,7 @@ fn verify_impl(
 
     // Step 1: Verify TCB Info signature
     let tcb_info_chain = extract_certs(collateral.tcb_info_issuer_chain.as_bytes())?;
-    let mut tcb_info = verify_tcb_info_signature(
+    let (mut tcb_info, tcb_info_path) = verify_tcb_info_signature(
         &collateral,
         &tcb_info_chain,
         now,
@@ -1298,7 +1302,7 @@ fn verify_impl(
 
     // Step 2: Verify QE Identity signature
     let qe_identity_chain = extract_certs(collateral.qe_identity_issuer_chain.as_bytes())?;
-    let qe_identity = verify_qe_identity_signature(
+    let (qe_identity, qe_identity_path) = verify_qe_identity_signature(
         &collateral,
         &qe_identity_chain,
         &tcb_info_chain,
@@ -1404,8 +1408,9 @@ fn verify_impl(
         root_key_id,
         tcb_info,
         qe_identity,
-        tcb_info_chain,
-        qe_identity_chain,
+        qe_identity_path: qe_identity_path.unwrap_or_else(|| tcb_info_path.clone()),
+        tcb_info_path,
+        root_ca_der: root_ca_der.to_vec(),
     })
 }
 
@@ -1456,15 +1461,17 @@ struct CollateralDates {
 /// 7. TCBInfo JSON issueDate/nextUpdate
 /// 8. QEIdentity JSON issueDate/nextUpdate
 ///
-/// `certs` holds the certificates of sources 3-5. Certificates shared between chains
-/// (e.g. the root CA) are parsed only once.
+/// Only verified certificates are counted: `certs` holds the verified PCK and TCBInfo
+/// paths and `qe_identity_chain` the verified QEIdentity path plus the root CA.
+/// Source 3 is covered by the PCK path, since the PCK CRL must be signed by the PCK
+/// leaf's issuer. Certificates shared between chains are parsed only once.
 #[cfg(feature = "default-x509")]
 fn compute_collateral_time_window<'a>(
     tcb_info: &TcbInfo,
     qe_identity: &QeIdentity,
     crls: &[&CrlInfo],
     certs: impl Iterator<Item = &'a [u8]>,
-    qe_identity_chain: &'a [CertificateDer<'_>],
+    qe_identity_chain: impl Iterator<Item = &'a [u8]>,
 ) -> Result<CollateralDates> {
     let mut validity_cache = BTreeMap::<&[u8], (u64, u64)>::new();
     let mut validity = |cert_der: &'a [u8]| -> Result<(u64, u64)> {
