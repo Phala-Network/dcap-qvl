@@ -130,7 +130,9 @@ pub struct TcbVerdict {
 /// Platform-level verification results.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformInfo {
-    /// The matched platform TCB level (unmerged).
+    /// The matched platform TCB level, not merged with the QE. For TDX it is
+    /// converged with the matched TDX module TCB level (worst status, union of
+    /// advisories, oldest date).
     pub tcb_level: TcbLevel,
     /// Platform TCB level date as unix timestamp (precomputed from `tcb_level.tcb_date`).
     pub tcb_date_tag: u64,
