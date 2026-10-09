@@ -25,7 +25,7 @@ class TcbLevel {
 }
 
 class TcbInfo {
-    constructor(id, version, issueDate, nextUpdate, fmspc, pceId, tcbType, tcbEvaluationDataNumber, tcbLevels) {
+    constructor(id, version, issueDate, nextUpdate, fmspc, pceId, tcbType, tcbEvaluationDataNumber, tcbLevels, tdxModule, tdxModuleIdentities) {
         this.id = id;
         this.version = version;
         this.issueDate = issueDate;
@@ -35,6 +35,8 @@ class TcbInfo {
         this.tcbType = tcbType;
         this.tcbEvaluationDataNumber = tcbEvaluationDataNumber;
         this.tcbLevels = tcbLevels;
+        this.tdxModule = tdxModule || null;
+        this.tdxModuleIdentities = tdxModuleIdentities || [];
     }
 
     static fromJSON(json) {
@@ -61,7 +63,9 @@ class TcbInfo {
             obj.pceId,
             obj.tcbType,
             obj.tcbEvaluationDataNumber,
-            tcbLevels
+            tcbLevels,
+            obj.tdxModule,
+            obj.tdxModuleIdentities
         );
     }
 }
@@ -107,11 +111,18 @@ class TcbStatus {
         }
     }
 
-    // Merge two TCB statuses, taking the worse status and combining advisory IDs
+    // Merge a platform status with a QE or TDX module status using Intel's
+    // convergence rule, combining advisory IDs
     merge(other) {
-        const finalStatus = tcbStatusSeverity(other.status) > tcbStatusSeverity(this.status)
-            ? other.status
-            : this.status;
+        let finalStatus;
+        if (other.status === 'OutOfDate' &&
+            (this.status === 'ConfigurationNeeded' || this.status === 'ConfigurationAndSWHardeningNeeded')) {
+            finalStatus = 'OutOfDateConfigurationNeeded';
+        } else {
+            finalStatus = tcbStatusSeverity(other.status) > tcbStatusSeverity(this.status)
+                ? other.status
+                : this.status;
+        }
 
         const advisoryIds = [...this.advisoryIds];
         for (const id of other.advisoryIds) {

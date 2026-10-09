@@ -2,7 +2,7 @@
 
 /// Comprehensive test sample generator for DCAP quote verification
 /// Generates samples in the correct directory structure with quote.bin, collateral.json, and expected.json
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dcap_qvl::{quote::*, INTEL_QE_VENDOR_ID};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -15,6 +15,45 @@ const CERT_DIR: &str = "test_data/certs";
 const SAMPLES_DIR: &str = "test_data/samples";
 
 type CollateralModifier = Box<dyn Fn(&mut serde_json::Value) -> Result<()>>;
+
+/// Turns the collateral into TDX TCB Info whose module identity `TDX_01`
+/// expects `mrsigner` and a module ISVSVN of at least `min_isvsvn`.
+fn tdx_collateral_with_module(mrsigner: [u8; 48], min_isvsvn: u8) -> CollateralModifier {
+    Box::new(move |collateral| {
+        let mut tcb: serde_json::Value =
+            serde_json::from_str(collateral["tcb_info"].as_str().context("tcb_info")?)?;
+        tcb["version"] = json!(3);
+        tcb["id"] = json!("TDX");
+        for level in tcb["tcbLevels"].as_array_mut().context("tcbLevels")? {
+            // Above the quote's module ISVSVN (1): with a non-zero module version
+            // the module SVNs are appraised by the module identity only.
+            level["tcb"]["tdxtcbcomponents"] = make_tcb_components(&[2]);
+        }
+        tcb["tdxModule"] = json!({
+            "mrsigner": hex::encode([0x02u8; 48]),
+            "attributes": hex::encode([0u8; 8]),
+            "attributesMask": hex::encode([0u8; 8]),
+        });
+        tcb["tdxModuleIdentities"] = json!([{
+            "id": "TDX_01",
+            "mrsigner": hex::encode(mrsigner),
+            "attributes": hex::encode([0u8; 8]),
+            "attributesMask": hex::encode([0u8; 8]),
+            "tcbLevels": [{
+                "tcb": { "isvsvn": min_isvsvn },
+                "tcbDate": tcb["issueDate"].clone(),
+                "tcbStatus": "UpToDate",
+                "advisoryIDs": [],
+            }],
+        }]);
+        let new_tcb_info = serde_json::to_string(&tcb)?;
+        let key_pair = load_private_key(&format!("{}/tcb_signing.pkcs8.key", CERT_DIR))?;
+        let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+        collateral["tcb_info"] = json!(new_tcb_info);
+        collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+        update_qe_identity(collateral, "TD_QE", 2)
+    })
+}
 
 struct TestSample {
     name: String,
@@ -241,8 +280,21 @@ fn generate_base_quote(version: u16, key_type: u16, debug: bool) -> Result<Vec<u
 }
 
 fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
-    let header = create_sgx_header(4, 2, 0x00000081); // TEE_TYPE_TDX = 0x81
-    let report = create_tdx_report();
+    generate_tdx_quote(4, Report::TD10(create_tdx_report()))
+}
+
+/// A v5 TD 1.5 quote whose current TCB (TEE_TCB_SVN2) is `tee_tcb_svn2`.
+fn generate_tdx_quote_v5(tee_tcb_svn2: [u8; 16]) -> Result<Vec<u8>> {
+    let report = TDReport15 {
+        base: create_tdx_report(),
+        tee_tcb_svn2,
+        mr_service_td: [0u8; 48],
+    };
+    generate_tdx_quote(5, Report::TD15(report))
+}
+
+fn generate_tdx_quote(version: u16, report: Report) -> Result<Vec<u8>> {
+    let header = create_sgx_header(version, 2, 0x00000081); // TEE_TYPE_TDX = 0x81
 
     // Load PCK certificate chain
     let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))
@@ -282,11 +334,6 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     // Sign QE report with PCK key
     let qe_report_signature = sign_data(&pck_key_pair, &qe_report)?;
 
-    // Sign the quote with attestation key (header + report)
-    let mut signed_data = header.encode();
-    signed_data.extend_from_slice(&report.encode());
-    let ecdsa_signature = sign_data(&attestation_key_pair, &signed_data)?;
-
     // Create auth data v4 with nested structure
     let qe_report_data = QEReportCertificationData {
         qe_report,
@@ -298,22 +345,28 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
         },
     };
 
-    let auth_data = AuthData::V4(AuthDataV4 {
-        ecdsa_signature,
-        ecdsa_attestation_key,
-        certification_data: CertificationData {
-            cert_type: 5,
-            body: Data::<u32>::new(vec![]), // Empty for v4
-        },
-        qe_report_data,
-    });
-
-    let quote = Quote {
+    let mut quote = Quote {
         header,
-        report: Report::TD10(report),
-        auth_data,
+        report,
+        auth_data: AuthData::V4(AuthDataV4 {
+            ecdsa_signature: [0u8; 64],
+            ecdsa_attestation_key,
+            certification_data: CertificationData {
+                cert_type: 5,
+                body: Data::<u32>::new(vec![]), // Empty for v4
+            },
+            qe_report_data,
+        }),
     };
 
+    // Sign the quote with attestation key (header + body)
+    let signature = sign_data(
+        &attestation_key_pair,
+        &quote.encode()[..quote.signed_length()],
+    )?;
+    if let AuthData::V4(auth_data) = &mut quote.auth_data {
+        auth_data.ecdsa_signature = signature;
+    }
     Ok(quote.encode())
 }
 
@@ -670,64 +723,7 @@ fn main() -> Result<()> {
         should_succeed: true,
         expected_error: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
-        collateral_modifier: Some(Box::new(|collateral| {
-            // TDX requires TCB info version 3 with id="TDX" and tdxtcbcomponents in main tcbLevels
-            if let Some(tcb_str) = collateral["tcb_info"].as_str() {
-                if let Ok(mut tcb) = serde_json::from_str::<serde_json::Value>(tcb_str) {
-                    tcb["version"] = json!(3);
-                    tcb["id"] = json!("TDX");
-
-                    // Add tdxtcbcomponents to the main TCB levels
-                    if let Some(tcb_levels) = tcb["tcbLevels"].as_array_mut() {
-                        for level in tcb_levels.iter_mut() {
-                            if let Some(tcb_obj) = level["tcb"].as_object_mut() {
-                                tcb_obj.insert(
-                                    "tdxtcbcomponents".to_string(),
-                                    make_tcb_components(&[]),
-                                );
-                            }
-                        }
-                    }
-
-                    // Add minimal TDX Module and Module Identities so that
-                    // TDX Module Identity verification can run for this sample.
-                    // For the purposes of the test suite we keep the fields
-                    // internally consistent with the generated quote but do not
-                    // try to model real-world module versions.
-                    tcb["tdxModule"] = json!({
-                        // Match create_tdx_report(): mr_signer_seam is 0x02 repeated.
-                        "mrsigner": hex::encode([0x02u8; 48]),
-                        "attributes": hex::encode([0u8; 8]),
-                        "attributesMask": hex::encode([0u8; 8]),
-                    });
-                    // A single identity whose TCB levels accept ISVSVN=1 (tee_tcb_svn[0])
-                    tcb["tdxModuleIdentities"] = json!([{
-                        "id": "TDX_01",
-                        "mrsigner": hex::encode([0x02u8; 48]),
-                        "attributes": hex::encode([0u8; 8]),
-                        "attributesMask": hex::encode([0u8; 8]),
-                        "tcbLevels": [{
-                            "tcb": { "isvsvn": 1 },
-                            "tcbDate": tcb["issueDate"].clone(),
-                            "tcbStatus": "UpToDate",
-                            "advisoryIDs": [],
-                        }],
-                    }]);
-
-                    let new_tcb_info = serde_json::to_string(&tcb)?;
-
-                    // Re-sign the modified TCB info
-                    let key_path = &format!("{}/tcb_signing.pkcs8.key", CERT_DIR);
-                    let key_pair = load_private_key(key_path)?;
-                    let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
-
-                    collateral["tcb_info"] = json!(new_tcb_info);
-                    collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
-                }
-            }
-            update_qe_identity(collateral, "TD_QE", 2)?;
-            Ok(())
-        })),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
     });
 
     samples.push(TestSample {
@@ -825,6 +821,46 @@ fn main() -> Result<()> {
             update_qe_identity(collateral, "QE", 2)?;
             Ok(())
         })),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_module_mrsigner_mismatch".to_string(),
+        description: "TDX quote whose MRSIGNERSEAM differs from the module identity".to_string(),
+        should_succeed: false,
+        expected_error: Some("TDX module MRSIGNER mismatch".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(tdx_collateral_with_module([0x03; 48], 1)),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_module_isvsvn_too_low".to_string(),
+        description: "TDX quote whose module ISVSVN is below every module TCB level".to_string(),
+        should_succeed: false,
+        expected_error: Some("is below minimum required from TDX module TCB levels".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 2)),
+    });
+
+    samples.push(TestSample {
+        name: "valid_tdx_v5_td15".to_string(),
+        description: "Valid TDX quote v5 with a TD 1.5 report".to_string(),
+        should_succeed: true,
+        expected_error: None,
+        quote_generator: Box::new(|| generate_tdx_quote_v5([1; 16])),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_td15_svn2_unappraisable".to_string(),
+        description: "TD 1.5 quote whose current module ISVSVN (TEE_TCB_SVN2) is below every module TCB level".to_string(),
+        should_succeed: false,
+        expected_error: Some("Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)".to_string()),
+        quote_generator: Box::new(|| {
+            let mut tee_tcb_svn2 = [1; 16];
+            tee_tcb_svn2[0] = 0;
+            generate_tdx_quote_v5(tee_tcb_svn2)
+        }),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
     });
 
     samples.push(TestSample {
