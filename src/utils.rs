@@ -293,3 +293,52 @@ pub fn verify_certificate_chain(
         .map(CertificateDer::into_owned)
         .collect())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seq_entries_yields_each_entry_in_order() {
+        let seq = |der: &'static [u8]| Sequence::decode(der).unwrap();
+        let values = |der| {
+            seq_entries(&seq(der))
+                .map(|e| e.unwrap().value().to_vec())
+                .collect::<Vec<_>>()
+        };
+        assert!(values(&[0x30, 0x00]).is_empty());
+        assert_eq!(
+            values(&[0x30, 0x07, 0x02, 0x01, 0x01, 0x04, 0x02, 0xAA, 0xBB]),
+            [vec![0x01], vec![0xAA, 0xBB]]
+        );
+    }
+
+    #[cfg(feature = "ring")]
+    #[test]
+    fn verify_certificate_chain_rejects_too_many_intermediates() {
+        let quote = crate::quote::Quote::parse(include_bytes!("../sample/sgx_quote")).unwrap();
+        let chain = crate::intel::extract_cert_chain(&quote).unwrap();
+        let leaf_der = CertificateDer::from_slice(&chain[0]);
+        let leaf = webpki::EndEntityCert::try_from(&leaf_der).unwrap();
+        let root = CertificateDer::from_slice(crate::constants::TRUSTED_ROOT_CA_DER);
+        let anchor = webpki::anchor_from_trusted_cert(&root).unwrap();
+        let verify = |count| {
+            let intermediates = vec![CertificateDer::from_slice(&chain[1]); count];
+            verify_certificate_chain(
+                &leaf,
+                &intermediates,
+                UnixTime::now(),
+                &[],
+                anchor.clone(),
+                webpki::ring::ECDSA_P256_SHA256,
+            )
+        };
+        let too_many = |count| {
+            verify(count)
+                .is_err_and(|e| e.to_string().contains("Too many intermediate certificates"))
+        };
+        assert!(!too_many(MAX_INTERMEDIATE_CERTS));
+        assert!(too_many(MAX_INTERMEDIATE_CERTS + 1));
+    }
+}
