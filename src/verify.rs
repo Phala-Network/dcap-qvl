@@ -1086,8 +1086,16 @@ fn find_tcb_level<'a>(
                     tdx_components.len()
                 );
             }
-            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i]
-            if tee_tcb_svn.iter().zip(&tdx_components).any(|(a, b)| a < b) {
+            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i].
+            // Like Intel QVL, a non-zero module version leaves the module SVNs
+            // (indices 0 and 1) to the TDX module identity evaluation.
+            let skip = if tee_tcb_svn[1] > 0 { 2 } else { 0 };
+            if tee_tcb_svn
+                .iter()
+                .zip(&tdx_components)
+                .skip(skip)
+                .any(|(a, b)| a < b)
+            {
                 continue;
             }
         }
@@ -1108,7 +1116,7 @@ fn evaluate_tdx_tcb(
 ) -> Result<TcbLevel> {
     let mut tcb_level = find_tcb_level(tcb_info, cpu_svn, pce_svn, Some(tee_tcb_svn))?.clone();
     let Some(module_level) =
-        match_tdx_module_level(tcb_info, tee_tcb_svn).context("TDX module identity check")?
+        match_tdx_module_level(tcb_info, tee_tcb_svn).context("TDX module TCB level check")?
     else {
         return Ok(tcb_level);
     };
@@ -1123,8 +1131,8 @@ fn evaluate_tdx_tcb(
     }
     // Like Intel QVL, date the converged level by its oldest component so that
     // TCB freshness checks also cover the module.
-    if parse_rfc3339_unix_secs(&module_level.tcb_date)?
-        < parse_rfc3339_unix_secs(&tcb_level.tcb_date)?
+    if parse_rfc3339_unix_secs(&module_level.tcb_date).context("Invalid TDX module tcbDate")?
+        < parse_rfc3339_unix_secs(&tcb_level.tcb_date).context("Invalid TCB level tcbDate")?
     {
         tcb_level.tcb_date = module_level.tcb_date.clone();
     }
@@ -1132,13 +1140,13 @@ fn evaluate_tdx_tcb(
 }
 
 /// The module identity selected by the module version (`tee_tcb_svn[1]`), or
-/// `None` if the version is 0 or the TCB Info lists no identities.
+/// `None` if the version is 0.
 fn tdx_module_identity<'a>(
     tcb_info: &'a TcbInfo,
     tee_tcb_svn: &[u8; 16],
 ) -> Result<Option<&'a TdxModuleIdentity>> {
     let module_version = tee_tcb_svn[1];
-    if module_version == 0 || tcb_info.tdx_module_identities.is_empty() {
+    if module_version == 0 {
         return Ok(None);
     }
     let wanted_id = format!("TDX_{:02X}", module_version);
@@ -2083,21 +2091,36 @@ mod tests {
     #[test]
     fn test_tdx_tcb_converges_module_status_and_date() {
         let tcb_info = outdated_tdx_tcb_info();
-        let level = evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(5, 1)).unwrap();
-        assert_eq!(level.tcb_status, OutOfDate);
-        assert_eq!(level.tcb_date, "2024-03-13T00:00:00Z");
-        assert_eq!(level.advisory_ids, ["INTEL-SA-01036", "INTEL-SA-01099"]);
+        let eval = |isvsvn| {
+            evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(isvsvn, 1)).unwrap()
+        };
 
-        let level = evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(6, 1)).unwrap();
+        let level = eval(6);
         assert_eq!(level.tcb_status, UpToDate);
         assert_eq!(level.tcb_date, "2024-11-13T00:00:00Z");
+
+        // The module SVNs are appraised by the module identity, not the platform level.
+        for (isvsvn, date) in [(4, "2024-03-13T00:00:00Z"), (2, "2023-08-09T00:00:00Z")] {
+            let level = eval(isvsvn);
+            assert_eq!(level.tcb_status, OutOfDate);
+            assert_eq!(level.tcb_date, date);
+            assert_eq!(level.advisory_ids, ["INTEL-SA-01036", "INTEL-SA-01099"]);
+        }
     }
 
     #[test]
     fn test_tdx_tcb_rejects_unappraisable_svns() {
-        let tcb_info = outdated_tdx_tcb_info();
-        for svn in [tee_tcb_svn(6, 2), tee_tcb_svn(2, 3), tee_tcb_svn(4, 1)] {
+        let mut tcb_info = outdated_tdx_tcb_info();
+        for svn in [
+            tee_tcb_svn(6, 2),
+            tee_tcb_svn(2, 3),
+            tee_tcb_svn(1, 1),
+            tee_tcb_svn(4, 0),
+        ] {
             assert!(evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &svn).is_err());
         }
+
+        tcb_info.tdx_module_identities.clear();
+        assert!(evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(6, 1)).is_err());
     }
 }
