@@ -12,7 +12,9 @@ use {
     crate::constants::*,
     crate::policy::PckCertFlag,
     crate::qe_identity::{QeIdentity, QeTcbLevel},
-    crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleTcbLevel},
+    crate::tcb_info::{
+        TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleIdentity, TdxModuleTcbLevel,
+    },
     alloc::string::{String, ToString},
     alloc::vec::Vec,
 };
@@ -1027,7 +1029,34 @@ fn match_platform_tcb(
         }
     }
 
-    // Find matching TCB level
+    if !tee_type.is_tdx() {
+        return find_tcb_level(tcb_info, cpu_svn, pce_svn, None).cloned();
+    }
+
+    let td_report = quote
+        .report
+        .as_td10()
+        .context("Failed to get TD10 report")?;
+    let tcb_level = evaluate_tdx_tcb(tcb_info, cpu_svn, pce_svn, &td_report.tee_tcb_svn)?;
+    verify_tdx_module_identity(tcb_info, td_report).context("TDX module identity check")?;
+
+    // A TD 1.5 report also carries the current TCB, which differs from the
+    // launch TCB after a TD-preserving module update. Like Intel QVL, require
+    // it to be appraisable too.
+    if let Some(td15) = quote.report.as_td15() {
+        evaluate_tdx_tcb(tcb_info, cpu_svn, pce_svn, &td15.tee_tcb_svn2)
+            .context("Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)")?;
+    }
+    Ok(tcb_level)
+}
+
+/// Find the first TCB level whose components are all met by the platform.
+fn find_tcb_level<'a>(
+    tcb_info: &'a TcbInfo,
+    cpu_svn: &[u8],
+    pce_svn: u16,
+    tee_tcb_svn: Option<&[u8; 16]>,
+) -> Result<&'a TcbLevel> {
     for tcb_level in &tcb_info.tcb_levels {
         if pce_svn < tcb_level.tcb.pce_svn {
             continue;
@@ -1047,69 +1076,111 @@ fn match_platform_tcb(
             continue;
         }
 
-        // For TDX, also check TDX components
-        if tee_type.is_tdx() {
-            let td_report = quote
-                .report
-                .as_td10()
-                .context("Failed to get TD10 report")?;
+        if let Some(tee_tcb_svn) = tee_tcb_svn {
             let tdx_components: Vec<u8> =
                 tcb_level.tcb.tdx_components.iter().map(|c| c.svn).collect();
-            if tdx_components.len() != td_report.tee_tcb_svn.len() {
+            if tdx_components.len() != tee_tcb_svn.len() {
                 bail!(
                     "TDX component count mismatch: expected {}, got {}",
-                    td_report.tee_tcb_svn.len(),
+                    tee_tcb_svn.len(),
                     tdx_components.len()
                 );
             }
-            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i]
-            if td_report
-                .tee_tcb_svn
+            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i].
+            // Like Intel QVL, a non-zero module version leaves the module SVNs
+            // (indices 0 and 1) to the TDX module identity evaluation.
+            let skip = if tee_tcb_svn[1] > 0 { 2 } else { 0 };
+            if tee_tcb_svn
                 .iter()
                 .zip(&tdx_components)
+                .skip(skip)
                 .any(|(a, b)| a < b)
             {
                 continue;
             }
         }
 
-        let mut matched = tcb_level.clone();
-        if tee_type.is_tdx() {
-            if let Some(module_status) =
-                match_tdx_module_identity(tcb_info, quote).context("TDX module identity check")?
-            {
-                matched.tcb_status = matched
-                    .tcb_status
-                    .converge_with_component(module_status.status);
-                for advisory in module_status.advisory_ids {
-                    if !matched.advisory_ids.contains(&advisory) {
-                        matched.advisory_ids.push(advisory);
-                    }
-                }
-            }
-        }
-        return Ok(matched);
+        return Ok(tcb_level);
     }
 
     bail!("No matching TCB level found");
 }
 
-fn match_tdx_module_identity(
+/// Match the platform TCB level for `tee_tcb_svn` and converge it with the TDX
+/// module TCB level selected by the same SVNs.
+fn evaluate_tdx_tcb(
     tcb_info: &TcbInfo,
-    quote: &Quote,
-) -> Result<Option<TcbStatusWithAdvisory>> {
-    if tcb_info.id != "TDX" || tcb_info.version < 3 {
+    cpu_svn: &[u8],
+    pce_svn: u16,
+    tee_tcb_svn: &[u8; 16],
+) -> Result<TcbLevel> {
+    let mut tcb_level = find_tcb_level(tcb_info, cpu_svn, pce_svn, Some(tee_tcb_svn))?.clone();
+    let Some(module_level) =
+        match_tdx_module_level(tcb_info, tee_tcb_svn).context("TDX module TCB level check")?
+    else {
+        return Ok(tcb_level);
+    };
+
+    tcb_level.tcb_status = tcb_level
+        .tcb_status
+        .converge_with_component(module_level.tcb_status);
+    for advisory in &module_level.advisory_ids {
+        if !tcb_level.advisory_ids.contains(advisory) {
+            tcb_level.advisory_ids.push(advisory.clone());
+        }
+    }
+    // Like Intel QVL, date the converged level by its oldest component so that
+    // TCB freshness checks also cover the module.
+    if parse_rfc3339_unix_secs(&module_level.tcb_date).context("Invalid TDX module tcbDate")?
+        < parse_rfc3339_unix_secs(&tcb_level.tcb_date).context("Invalid TCB level tcbDate")?
+    {
+        tcb_level.tcb_date = module_level.tcb_date.clone();
+    }
+    Ok(tcb_level)
+}
+
+/// The module identity selected by the module version (`tee_tcb_svn[1]`), or
+/// `None` if the version is 0.
+fn tdx_module_identity<'a>(
+    tcb_info: &'a TcbInfo,
+    tee_tcb_svn: &[u8; 16],
+) -> Result<Option<&'a TdxModuleIdentity>> {
+    let module_version = tee_tcb_svn[1];
+    if module_version == 0 {
         return Ok(None);
     }
+    let wanted_id = format!("TDX_{:02X}", module_version);
+    tcb_info
+        .tdx_module_identities
+        .iter()
+        .find(|id| id.id.eq_ignore_ascii_case(&wanted_id))
+        .with_context(|| format!("No TDX module identity with id {wanted_id} found in TCB Info"))
+        .map(Some)
+}
 
-    let td_report = quote
-        .report
-        .as_td10()
-        .context("Failed to get TD10 report for TDX module identity")?;
+/// The module TCB level met by the module ISVSVN (`tee_tcb_svn[0]`).
+fn match_tdx_module_level<'a>(
+    tcb_info: &'a TcbInfo,
+    tee_tcb_svn: &[u8; 16],
+) -> Result<Option<&'a TdxModuleTcbLevel>> {
+    let Some(identity) = tdx_module_identity(tcb_info, tee_tcb_svn)? else {
+        return Ok(None);
+    };
+    let module_isvsvn = tee_tcb_svn[0];
+    identity
+        .tcb_levels
+        .iter()
+        .find(|level| module_isvsvn >= level.tcb.isvsvn)
+        .with_context(|| {
+            format!(
+                "TDX module ISVSVN {module_isvsvn} is below minimum required from TDX module TCB levels"
+            )
+        })
+        .map(Some)
+}
 
-    let module_isvsvn = td_report.tee_tcb_svn[0];
-    let module_version = td_report.tee_tcb_svn[1];
-
+/// Verify the TD report's SEAM module signer and attributes against the TCB Info.
+fn verify_tdx_module_identity(tcb_info: &TcbInfo, td_report: &TDReport10) -> Result<()> {
     let base_module = match &tcb_info.tdx_module {
         Some(m) => m,
         None => {
@@ -1139,22 +1210,7 @@ fn match_tdx_module_identity(
     let mut attributes_mask =
         decode_hex_array::<8>(&base_module.attributes_mask, "tdxModule.attributesMask")?;
 
-    // If a specific module version is indicated and identities are present,
-    // override expectations from the matching identity entry.
-    let mut identity_tcb_levels: Option<&[TdxModuleTcbLevel]> = None;
-    if module_version > 0 && !tcb_info.tdx_module_identities.is_empty() {
-        let wanted_id = format!("TDX_{:02X}", module_version);
-        let identity = tcb_info
-            .tdx_module_identities
-            .iter()
-            .find(|id| id.id.eq_ignore_ascii_case(&wanted_id))
-            .with_context(|| {
-                format!(
-                    "No TDX module identity with id {} found in TCB Info",
-                    wanted_id
-                )
-            })?;
-
+    if let Some(identity) = tdx_module_identity(tcb_info, &td_report.tee_tcb_svn)? {
         expected_mrsigner =
             decode_hex_array::<48>(&identity.mrsigner, "tdxModuleIdentity.mrsigner")?;
         expected_attributes =
@@ -1163,7 +1219,6 @@ fn match_tdx_module_identity(
             &identity.attributes_mask,
             "tdxModuleIdentity.attributesMask",
         )?;
-        identity_tcb_levels = Some(&identity.tcb_levels);
     }
 
     // Verify MRSEAM signer (MR_SIGNER_SEAM) matches expected module MRSIGNER.
@@ -1201,32 +1256,7 @@ fn match_tdx_module_identity(
         }
     }
 
-    // If we have module identity TCB levels, derive module status from them.
-    if let Some(levels) = identity_tcb_levels {
-        let mut matched: Option<&TdxModuleTcbLevel> = None;
-        for level in levels {
-            if module_isvsvn >= level.tcb.isvsvn {
-                matched = Some(level);
-                break;
-            }
-        }
-
-        let module_level = matched.with_context(|| {
-            format!(
-                "TDX module ISVSVN {} is below minimum required from TDX module TCB levels",
-                module_isvsvn
-            )
-        })?;
-
-        return Ok(Some(TcbStatusWithAdvisory::new(
-            module_level.tcb_status,
-            module_level.advisory_ids.clone(),
-        )));
-    }
-
-    // No identity-specific TCB levels: we've still corroborated module identity,
-    // but there is no additional status/advisory to merge.
-    Ok(None)
+    Ok(())
 }
 
 // =============================================================================
@@ -2041,5 +2071,56 @@ mod tests {
         // Should match level with isvsvn=6 (7 >= 6)
         assert_eq!(tcb_level.tcb_status, OutOfDate);
         assert_eq!(tcb_level.advisory_ids, vec!["INTEL-SA-00615"]);
+    }
+
+    fn outdated_tdx_tcb_info() -> TcbInfo {
+        let collateral: crate::QuoteCollateralV3 =
+            serde_json::from_str(include_str!("../sample/tdx_quote_outdated_collateral.json"))
+                .unwrap();
+        serde_json::from_str(&collateral.tcb_info).unwrap()
+    }
+
+    const OUTDATED_CPU_SVN: [u8; 16] = [3, 3, 2, 2, 4, 1, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    fn tee_tcb_svn(module_isvsvn: u8, module_version: u8) -> [u8; 16] {
+        let mut svn = [0; 16];
+        svn[..3].copy_from_slice(&[module_isvsvn, module_version, 3]);
+        svn
+    }
+
+    #[test]
+    fn test_tdx_tcb_converges_module_status_and_date() {
+        let tcb_info = outdated_tdx_tcb_info();
+        let eval = |isvsvn| {
+            evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(isvsvn, 1)).unwrap()
+        };
+
+        let level = eval(6);
+        assert_eq!(level.tcb_status, UpToDate);
+        assert_eq!(level.tcb_date, "2024-11-13T00:00:00Z");
+
+        // The module SVNs are appraised by the module identity, not the platform level.
+        for (isvsvn, date) in [(4, "2024-03-13T00:00:00Z"), (2, "2023-08-09T00:00:00Z")] {
+            let level = eval(isvsvn);
+            assert_eq!(level.tcb_status, OutOfDate);
+            assert_eq!(level.tcb_date, date);
+            assert_eq!(level.advisory_ids, ["INTEL-SA-01036", "INTEL-SA-01099"]);
+        }
+    }
+
+    #[test]
+    fn test_tdx_tcb_rejects_unappraisable_svns() {
+        let mut tcb_info = outdated_tdx_tcb_info();
+        for svn in [
+            tee_tcb_svn(6, 2),
+            tee_tcb_svn(2, 3),
+            tee_tcb_svn(1, 1),
+            tee_tcb_svn(4, 0),
+        ] {
+            assert!(evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &svn).is_err());
+        }
+
+        tcb_info.tdx_module_identities.clear();
+        assert!(evaluate_tdx_tcb(&tcb_info, &OUTDATED_CPU_SVN, 13, &tee_tcb_svn(6, 1)).is_err());
     }
 }

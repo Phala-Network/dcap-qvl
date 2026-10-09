@@ -79,7 +79,7 @@ let policy = QuotePolicy::strict(now)
 
 Expired collateral is always rejected by the cryptographic verification pipeline. There is no collateral expiration grace period.
 
-**Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level. For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. The corresponding status must also be explicitly enabled with `allow_status`; setting either option alone does not accept an out-of-date platform.
+**Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level (for TDX, converged with the TDX module TCB level and dated by the older of the two). For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. The corresponding status must also be explicitly enabled with `allow_status`; setting either option alone does not accept an out-of-date platform.
 
 **QE grace** (`qe_grace_period`): Applies only to the **QE** TCB level. For QE `OutOfDate`, checks `qe.tcb_level.tcb_date + grace >= now`. Because the merged verdict is also out of date, the corresponding merged status must be enabled with `allow_status`.
 
