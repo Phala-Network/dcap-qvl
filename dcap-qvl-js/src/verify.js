@@ -398,8 +398,8 @@ function findTcbLevel(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
 
         // Check SGX components
         const sgxComponents = tcbLevel.tcb.sgxtcbcomponents.map(c => c.svn);
-        if (sgxComponents.length === 0) {
-            throw new Error('No SGX components in the TCB info');
+        if (sgxComponents.length !== cpuSvn.length) {
+            throw new Error(`SGX component count mismatch: expected ${cpuSvn.length}, got ${sgxComponents.length}`);
         }
 
         if (!compareSvnArrays(cpuSvn, sgxComponents)) {
@@ -409,11 +409,13 @@ function findTcbLevel(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
         // Check TDX components for TDX quotes
         if (teeTcbSvn) {
             const tdxComponents = tcbLevel.tcb.tdxtcbcomponents.map(c => c.svn);
-            if (tdxComponents.length === 0) {
-                throw new Error('No TDX components in the TCB info');
+            if (tdxComponents.length !== teeTcbSvn.length) {
+                throw new Error(`TDX component count mismatch: expected ${teeTcbSvn.length}, got ${tdxComponents.length}`);
             }
 
-            if (!compareSvnArrays(teeTcbSvn, tdxComponents)) {
+            // Like Intel QVL, a non-zero module version leaves the module SVNs
+            // (indices 0 and 1) to the TDX module identity evaluation
+            if (!compareSvnArrays(teeTcbSvn, tdxComponents, teeTcbSvn[1] > 0 ? 2 : 0)) {
                 continue;
             }
         }
@@ -437,10 +439,10 @@ function evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
 }
 
 // The module identity selected by the module version (teeTcbSvn[1]), or null
-// if the version is 0 or the TCB Info lists no identities
+// if the version is 0
 function tdxModuleIdentity(tcbInfo, teeTcbSvn) {
     const moduleVersion = teeTcbSvn[1];
-    if (moduleVersion === 0 || tcbInfo.tdxModuleIdentities.length === 0) {
+    if (moduleVersion === 0) {
         return null;
     }
     const wantedId = `TDX_${moduleVersion.toString(16).toUpperCase().padStart(2, '0')}`;
@@ -563,14 +565,10 @@ function matchQeTcbLevel(isvSvn, tcbLevels) {
 }
 
 // Compare SVN arrays (must be >= for each component)
-function compareSvnArrays(actual, required) {
-    if (actual.length !== required.length) {
-        return false;
-    }
-
+function compareSvnArrays(actual, required, start = 0) {
     // Component-wise comparison: every actual[i] must be >= required[i]
     // This matches the Rust implementation: cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b)
-    for (let i = 0; i < actual.length; i++) {
+    for (let i = start; i < actual.length; i++) {
         if (actual[i] < required[i]) {
             return false;
         }
