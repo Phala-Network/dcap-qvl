@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use asn1_der::{
-    typed::{DerDecodable, Sequence},
+    typed::{DerDecodable, DerTypeView, Sequence},
     DerObject,
 };
 use rustls_pki_types::{CertificateDer, SignatureVerificationAlgorithm, TrustAnchor, UnixTime};
@@ -40,12 +40,29 @@ fn get_obj<'a>(path: &[&[u8]], mut obj: DerObject<'a>) -> Result<DerObject<'a>> 
     Ok(obj)
 }
 
+/// Iterates over the entries of a DER SEQUENCE in a single pass.
+///
+/// `Sequence::get(i)` re-walks the sequence from its start on every call, so
+/// an indexed loop is quadratic in the number of entries.
+pub(crate) fn seq_entries<'a>(seq: &Sequence<'a>) -> impl Iterator<Item = Result<DerObject<'a>>> {
+    let mut rest = seq.object().value();
+    core::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let entry = DerObject::decode(rest).map_err(anyhow::Error::msg);
+        rest = entry
+            .as_ref()
+            .ok()
+            .and_then(|obj| rest.get(obj.header().len().saturating_add(obj.value().len())..))
+            .unwrap_or_default();
+        Some(entry)
+    })
+}
+
 fn sub_obj<'a>(oid: &[u8], seq: Sequence<'a>) -> Result<DerObject<'a>> {
-    for i in 0..seq.len() {
-        let entry = seq
-            .get(i)
-            .map_err(anyhow::Error::msg)
-            .context("Failed to get entry")?;
+    for entry in seq_entries(&seq) {
+        let entry = entry.context("Failed to get entry")?;
         let entry = Sequence::load(entry)
             .map_err(anyhow::Error::msg)
             .context("Failed to load sequence")?;
@@ -215,6 +232,11 @@ pub fn parse_crls(
     ])
 }
 
+/// Intel's DCAP chains carry at most an intermediate CA and the root above the
+/// leaf. The path builder re-parses every candidate on each of its up to 200k
+/// build steps, so a long attacker-supplied list is a CPU-exhaustion vector.
+const MAX_INTERMEDIATE_CERTS: usize = 4;
+
 /// Verifies that the `leaf_cert` in combination with the `intermediate_certs` establishes
 /// a valid certificate chain that is rooted in one of the trust anchors that was compiled into the pallet
 ///
@@ -234,6 +256,11 @@ pub fn verify_certificate_chain(
     trust_anchor: TrustAnchor<'_>,
     sig_algo: &dyn SignatureVerificationAlgorithm,
 ) -> Result<Vec<CertificateDer<'static>>> {
+    ensure!(
+        intermediate_certs.len() <= MAX_INTERMEDIATE_CERTS,
+        "Too many intermediate certificates: {}",
+        intermediate_certs.len()
+    );
     let crl_slice = crls.iter().collect::<Vec<_>>();
 
     // Create a RevocationOptions object with the CRL
