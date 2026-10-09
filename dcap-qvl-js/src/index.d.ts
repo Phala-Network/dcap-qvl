@@ -397,6 +397,22 @@ export interface TcbLevel {
   advisoryIDs: string[];
 }
 
+export interface TdxModule {
+  mrsigner: string;
+  attributes: string;
+  attributesMask: string;
+}
+
+export interface TdxModuleIdentity extends TdxModule {
+  id: string;
+  tcbLevels: {
+    tcb: { isvsvn: number };
+    tcbDate: string;
+    tcbStatus: TcbStatus;
+    advisoryIDs?: string[];
+  }[];
+}
+
 export class TcbInfo {
   version: number;
   issueDate: string;
@@ -407,6 +423,8 @@ export class TcbInfo {
   tcbEvaluationDataNumber: number;
   tcbLevels: TcbLevel[];
   id?: string;
+  tdxModule: TdxModule | null;
+  tdxModuleIdentities: TdxModuleIdentity[];
 
   constructor(data: {
     version: number;

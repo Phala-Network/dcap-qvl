@@ -2,7 +2,7 @@
 
 /// Comprehensive test sample generator for DCAP quote verification
 /// Generates samples in the correct directory structure with quote.bin, collateral.json, and expected.json
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dcap_qvl::{quote::*, INTEL_QE_VENDOR_ID};
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
@@ -15,6 +15,43 @@ const CERT_DIR: &str = "test_data/certs";
 const SAMPLES_DIR: &str = "test_data/samples";
 
 type CollateralModifier = Box<dyn Fn(&mut serde_json::Value) -> Result<()>>;
+
+/// Turns the collateral into TDX TCB Info whose module identity `TDX_01`
+/// expects `mrsigner` and a module ISVSVN of at least `min_isvsvn`.
+fn tdx_collateral_with_module(mrsigner: [u8; 48], min_isvsvn: u8) -> CollateralModifier {
+    Box::new(move |collateral| {
+        let mut tcb: serde_json::Value =
+            serde_json::from_str(collateral["tcb_info"].as_str().context("tcb_info")?)?;
+        tcb["version"] = json!(3);
+        tcb["id"] = json!("TDX");
+        for level in tcb["tcbLevels"].as_array_mut().context("tcbLevels")? {
+            level["tcb"]["tdxtcbcomponents"] = make_tcb_components(&[]);
+        }
+        tcb["tdxModule"] = json!({
+            "mrsigner": hex::encode([0x02u8; 48]),
+            "attributes": hex::encode([0u8; 8]),
+            "attributesMask": hex::encode([0u8; 8]),
+        });
+        tcb["tdxModuleIdentities"] = json!([{
+            "id": "TDX_01",
+            "mrsigner": hex::encode(mrsigner),
+            "attributes": hex::encode([0u8; 8]),
+            "attributesMask": hex::encode([0u8; 8]),
+            "tcbLevels": [{
+                "tcb": { "isvsvn": min_isvsvn },
+                "tcbDate": tcb["issueDate"].clone(),
+                "tcbStatus": "UpToDate",
+                "advisoryIDs": [],
+            }],
+        }]);
+        let new_tcb_info = serde_json::to_string(&tcb)?;
+        let key_pair = load_private_key(&format!("{}/tcb_signing.pkcs8.key", CERT_DIR))?;
+        let tcb_signature = sign_data(&key_pair, new_tcb_info.as_bytes())?;
+        collateral["tcb_info"] = json!(new_tcb_info);
+        collateral["tcb_info_signature"] = json!(hex::encode(tcb_signature));
+        update_qe_identity(collateral, "TD_QE", 2)
+    })
+}
 
 struct TestSample {
     name: String,
@@ -825,6 +862,24 @@ fn main() -> Result<()> {
             update_qe_identity(collateral, "QE", 2)?;
             Ok(())
         })),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_module_mrsigner_mismatch".to_string(),
+        description: "TDX quote whose MRSIGNERSEAM differs from the module identity".to_string(),
+        should_succeed: false,
+        expected_error: Some("TDX module MRSIGNER mismatch".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(tdx_collateral_with_module([0x03; 48], 1)),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_module_isvsvn_too_low".to_string(),
+        description: "TDX quote whose module ISVSVN is below every module TCB level".to_string(),
+        should_succeed: false,
+        expected_error: Some("is below minimum required from TDX module TCB levels".to_string()),
+        quote_generator: Box::new(generate_tdx_quote_v4),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 2)),
     });
 
     samples.push(TestSample {

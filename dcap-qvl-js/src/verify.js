@@ -362,6 +362,34 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
 
 // Step 8: Match Platform TCB
 function matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn) {
+    if (quote.header.teeType !== TEE_TYPE_TDX) {
+        const tcbLevel = findTcbLevel(tcbInfo, cpuSvn, pceSvn, null);
+        return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
+    }
+
+    const tdReport = quote.report.asTd10();
+    if (!tdReport) {
+        throw new Error('Failed to get TD10 report');
+    }
+    const status = evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, tdReport.teeTcbSvn);
+    verifyTdxModuleIdentity(tcbInfo, tdReport);
+
+    // A TD 1.5 report also carries the current TCB, which differs from the
+    // launch TCB after a TD-preserving module update. Like Intel QVL, require
+    // it to be appraisable too.
+    const td15 = quote.report.asTd15();
+    if (td15) {
+        try {
+            evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, td15.teeTcbSvn2);
+        } catch (e) {
+            throw new Error('Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)', { cause: e });
+        }
+    }
+    return status;
+}
+
+// Find the first TCB level whose components are all met by the platform
+function findTcbLevel(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
     for (const tcbLevel of tcbInfo.tcbLevels) {
         // Check PCE SVN
         if (pceSvn < tcbLevel.tcb.pcesvn) {
@@ -379,27 +407,96 @@ function matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn) {
         }
 
         // Check TDX components for TDX quotes
-        if (quote.header.teeType === TEE_TYPE_TDX) {
-            const tdReport = quote.report.asTd10();
-            if (!tdReport) {
-                throw new Error('Failed to get TD10 report');
-            }
-
+        if (teeTcbSvn) {
             const tdxComponents = tcbLevel.tcb.tdxtcbcomponents.map(c => c.svn);
             if (tdxComponents.length === 0) {
                 throw new Error('No TDX components in the TCB info');
             }
 
-            if (!compareSvnArrays(tdReport.teeTcbSvn, tdxComponents)) {
+            if (!compareSvnArrays(teeTcbSvn, tdxComponents)) {
                 continue;
             }
         }
 
-        // Found matching TCB level
-        return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
+        return tcbLevel;
     }
 
     throw new Error('No matching TCB level found');
+}
+
+// Match the platform TCB level for teeTcbSvn and converge it with the TDX
+// module TCB level selected by the same SVNs
+function evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
+    const tcbLevel = findTcbLevel(tcbInfo, cpuSvn, pceSvn, teeTcbSvn);
+    const status = new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
+    const moduleLevel = matchTdxModuleLevel(tcbInfo, teeTcbSvn);
+    if (!moduleLevel) {
+        return status;
+    }
+    return status.merge(new TcbStatus(moduleLevel.tcbStatus, moduleLevel.advisoryIDs));
+}
+
+// The module identity selected by the module version (teeTcbSvn[1]), or null
+// if the version is 0 or the TCB Info lists no identities
+function tdxModuleIdentity(tcbInfo, teeTcbSvn) {
+    const moduleVersion = teeTcbSvn[1];
+    if (moduleVersion === 0 || tcbInfo.tdxModuleIdentities.length === 0) {
+        return null;
+    }
+    const wantedId = `TDX_${moduleVersion.toString(16).toUpperCase().padStart(2, '0')}`;
+    const identity = tcbInfo.tdxModuleIdentities.find(id => id.id.toUpperCase() === wantedId);
+    if (!identity) {
+        throw new Error(`No TDX module identity with id ${wantedId} found in TCB Info`);
+    }
+    return identity;
+}
+
+// The module TCB level met by the module ISVSVN (teeTcbSvn[0])
+function matchTdxModuleLevel(tcbInfo, teeTcbSvn) {
+    const identity = tdxModuleIdentity(tcbInfo, teeTcbSvn);
+    if (!identity) {
+        return null;
+    }
+    const moduleIsvsvn = teeTcbSvn[0];
+    const level = identity.tcbLevels.find(l => moduleIsvsvn >= l.tcb.isvsvn);
+    if (!level) {
+        throw new Error(`TDX module ISVSVN ${moduleIsvsvn} is below minimum required from TDX module TCB levels`);
+    }
+    return level;
+}
+
+// Verify the TD report's SEAM module signer and attributes against the TCB Info
+function verifyTdxModuleIdentity(tcbInfo, tdReport) {
+    if (!tcbInfo.tdxModule) {
+        throw new Error('TDX TCB Info is missing tdxModule field');
+    }
+    const expected = tdxModuleIdentity(tcbInfo, tdReport.teeTcbSvn) || tcbInfo.tdxModule;
+
+    const mrSignerSeam = Buffer.from(tdReport.mrSignerSeam);
+    if (!mrSignerSeam.equals(Buffer.from(expected.mrsigner, 'hex'))) {
+        throw new Error(`TDX module MRSIGNER mismatch: expected ${expected.mrsigner.toUpperCase()}, got ${mrSignerSeam.toString('hex').toUpperCase()}`);
+    }
+
+    const attributes = Buffer.from(expected.attributes, 'hex');
+    const mask = Buffer.from(expected.attributesMask, 'hex');
+    if (attributes.length !== 8 || mask.length !== 8) {
+        throw new Error('Invalid TDX module attributes or attributesMask length');
+    }
+    for (let i = 0; i < 8; i++) {
+        const actual = tdReport.seamAttributes[i];
+        const expectedMasked = attributes[i] & mask[i];
+        const actualMasked = actual & mask[i];
+        if (expectedMasked !== actualMasked) {
+            throw new Error(`TDX module SEAMATTRIBUTES mismatch at byte ${i}: expected ${hexByte(expectedMasked)} (masked), got ${hexByte(actualMasked)} (masked)`);
+        }
+        if ((actual & ~mask[i]) !== 0) {
+            throw new Error(`TDX module SEAMATTRIBUTES has bits set outside mask at byte ${i}`);
+        }
+    }
+}
+
+function hexByte(value) {
+    return value.toString(16).padStart(2, '0').toUpperCase();
 }
 
 // Step 6 & 9: Verify QE Report policy and match QE TCB
