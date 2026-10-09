@@ -230,11 +230,8 @@ fn sub_object_opt<'a>(
     oid: &const_oid::ObjectIdentifier,
     seq: Sequence<'a>,
 ) -> Result<Option<DerObject<'a>>> {
-    for idx in 0..seq.len() {
-        let entry = seq
-            .get(idx)
-            .map_err(anyhow::Error::msg)
-            .context("Failed to read entry inside Intel extension")?;
+    for entry in utils::seq_entries(&seq) {
+        let entry = entry.context("Failed to read entry inside Intel extension")?;
         let entry_seq = Sequence::load(entry)
             .map_err(anyhow::Error::msg)
             .context("Failed to load nested sequence")?;
@@ -265,11 +262,8 @@ fn find_recursive<'a>(
         Ok(s) => s,
         Err(_) => return Ok(None),
     };
-    for idx in 0..seq.len() {
-        let entry = match seq.get(idx) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+    for entry in utils::seq_entries(&seq) {
+        let Ok(entry) = entry else { continue };
         let entry_seq = match Sequence::load(entry) {
             Ok(s) => s,
             Err(_) => continue,
