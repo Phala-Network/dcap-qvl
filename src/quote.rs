@@ -205,8 +205,8 @@ pub struct SECFlags {
     /// PKS: TD is allowed to use Supervisor Protection Keys
     pub pks: bool,
 
-    /// Positive reserved bit (formerly KL)
-    pub reserved_positive_bit31: bool,
+    /// KL: TD is allowed to use Key Locker (reserved since ABI 348551-008US)
+    pub kl: bool,
 }
 
 /// OTHER attributes that do not impact the security of the TD (bits 63:32)
@@ -231,7 +231,7 @@ impl TDAttributes {
         let sept_ve_disable = is_set(28);
         let migratable = is_set(29);
         let pks = is_set(30);
-        let reserved_positive_bit31 = is_set(31);
+        let kl = is_set(31);
 
         let tpa = is_set(62);
         let perfmon = is_set(63);
@@ -246,7 +246,7 @@ impl TDAttributes {
                 sept_ve_disable,
                 migratable,
                 pks,
-                reserved_positive_bit31,
+                kl,
             },
             other: OTHERFlags { tpa, perfmon },
             reserved: attributes & TD_ATTRIBUTES_RESERVED_MBZ_MASK,
@@ -255,34 +255,22 @@ impl TDAttributes {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod td_attributes_tests {
     use super::{ones, TDAttributes};
 
     #[test]
-    fn accepts_all_non_mbz_bits_from_tdx_1_5() {
-        let allowed = [
+    fn reserved_matches_tdx_1_5_mbz_bits() {
+        let defined = [
             0_u32, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 62, 63,
         ];
-
-        for bit in allowed {
-            let attributes = TDAttributes::parse(ones(bit..=bit).to_le_bytes()).unwrap();
-            assert_eq!(attributes.reserved, 0, "bit {bit} must be accepted");
-        }
-    }
-
-    #[test]
-    fn rejects_all_mbz_bits_from_tdx_1_5() {
-        let allowed_mask = [
-            0_u32, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 27, 28, 29, 30, 31, 62, 63,
-        ]
-        .into_iter()
-        .fold(0_u64, |mask, bit| mask | ones(bit..=bit));
-
         for bit in 0..64 {
-            if allowed_mask & ones(bit..=bit) == 0 {
-                let attributes = TDAttributes::parse(ones(bit..=bit).to_le_bytes()).unwrap();
-                assert_ne!(attributes.reserved, 0, "bit {bit} must be rejected");
-            }
+            let attributes = TDAttributes::parse(ones(bit..=bit).to_le_bytes()).unwrap();
+            assert_eq!(
+                attributes.reserved == 0,
+                defined.contains(&bit),
+                "bit {bit}"
+            );
         }
     }
 
@@ -296,7 +284,7 @@ mod td_attributes_tests {
         assert_eq!(attributes.sec.reserved_positive, ones(18..=22));
         assert!(attributes.sec.lass);
         assert!(attributes.sec.migratable);
-        assert!(attributes.sec.reserved_positive_bit31);
+        assert!(attributes.sec.kl);
         assert!(attributes.other.tpa);
         assert!(attributes.other.perfmon);
         assert_eq!(attributes.reserved, 0);

@@ -581,7 +581,7 @@ function validateAttrs(report, allowDebug = false, allowServiceTd = false) {
     if (report.type === 'sgx') {
         validateSgx(report.data, allowDebug);
     } else if (report.type === 'td10') {
-        validateTd10(report.data, allowDebug);
+        validateTd10(report.data, allowDebug, allowServiceTd);
     } else if (report.type === 'td15') {
         validateTd15(report.data, allowDebug, allowServiceTd);
     } else if (report.type === 'td15ex') {
@@ -600,13 +600,13 @@ function validateSgx(report, allowDebug = false) {
     }
 }
 
-function validateTd10(report, allowDebug = false) {
+function validateTd10(report, allowDebug = false, allowServiceTd = false) {
     const tdAttrs = parseTdAttributes(report.tdAttributes);
 
     if ((tdAttrs.tud & 0x01) !== 0 && !allowDebug) {
         throw new Error('Debug mode is enabled');
     }
-    if ((tdAttrs.tud & 0x70) !== 0) {
+    if ((tdAttrs.tud & 0x70) !== 0 && !allowDebug) {
         throw new Error('TD profiling is enabled');
     }
 
@@ -615,6 +615,9 @@ function validateTd10(report, allowDebug = false) {
     }
     if (tdAttrs.sec.migratable) {
         throw new Error('TD migration is enabled');
+    }
+    if (tdAttrs.sec.servtdExt && !allowServiceTd) {
+        throw new Error('SERVTD_EXT is enabled');
     }
 
     if (!tdAttrs.sec.septVeDisable) {
@@ -630,7 +633,7 @@ function validateTd15(report, allowDebug = false, allowServiceTd = false) {
         }
     }
 
-    validateTd10(report.base, allowDebug);
+    validateTd10(report.base, allowDebug, allowServiceTd);
 }
 
 function ones(start, end) {
@@ -653,6 +656,7 @@ function parseTdAttributes(input) {
     return {
         tud,
         sec: {
+            servtdExt: isSet(17),
             septVeDisable: isSet(28),
             migratable: isSet(29),
             pks: isSet(30),
