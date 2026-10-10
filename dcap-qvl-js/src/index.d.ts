@@ -267,6 +267,8 @@ export type TcbStatus =
   | 'OutOfDate'
   | 'OutOfDateConfigurationNeeded'
   | 'Revoked'
+  | 'TDRelaunchAdvised'
+  | 'TDRelaunchAdvisedConfigurationNeeded'
   | 'Unknown';
 
 export class VerifiedReport {

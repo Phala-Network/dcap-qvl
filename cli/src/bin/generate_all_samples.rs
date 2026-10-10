@@ -17,8 +17,11 @@ const SAMPLES_DIR: &str = "test_data/samples";
 type CollateralModifier = Box<dyn Fn(&mut serde_json::Value) -> Result<()>>;
 
 /// Turns the collateral into TDX TCB Info whose module identity `TDX_01`
-/// expects `mrsigner` and a module ISVSVN of at least `min_isvsvn`.
-fn tdx_collateral_with_module(mrsigner: [u8; 48], min_isvsvn: u8) -> CollateralModifier {
+/// expects `mrsigner` and has the given `(isvsvn, tcbStatus)` module TCB levels.
+fn tdx_collateral_with_module(
+    mrsigner: [u8; 48],
+    module_levels: &'static [(u8, &'static str)],
+) -> CollateralModifier {
     Box::new(move |collateral| {
         let mut tcb: serde_json::Value =
             serde_json::from_str(collateral["tcb_info"].as_str().context("tcb_info")?)?;
@@ -39,12 +42,12 @@ fn tdx_collateral_with_module(mrsigner: [u8; 48], min_isvsvn: u8) -> CollateralM
             "mrsigner": hex::encode(mrsigner),
             "attributes": hex::encode([0u8; 8]),
             "attributesMask": hex::encode([0u8; 8]),
-            "tcbLevels": [{
-                "tcb": { "isvsvn": min_isvsvn },
+            "tcbLevels": module_levels.iter().map(|(isvsvn, status)| json!({
+                "tcb": { "isvsvn": isvsvn },
                 "tcbDate": tcb["issueDate"].clone(),
-                "tcbStatus": "UpToDate",
+                "tcbStatus": status,
                 "advisoryIDs": [],
-            }],
+            })).collect::<Vec<_>>(),
         }]);
         let new_tcb_info = serde_json::to_string(&tcb)?;
         let key_pair = load_private_key(&format!("{}/tcb_signing.pkcs8.key", CERT_DIR))?;
@@ -60,6 +63,8 @@ struct TestSample {
     description: String,
     should_succeed: bool,
     expected_error: Option<String>,
+    /// Status a successful verification must report, if checked
+    expected_status: Option<&'static str>,
     quote_generator: Box<dyn Fn() -> Result<Vec<u8>>>,
     collateral_modifier: Option<CollateralModifier>,
 }
@@ -669,7 +674,8 @@ fn write_sample(sample: &TestSample) -> Result<()> {
     let expected = json!({
         "should_succeed": sample.should_succeed,
         "description": sample.description,
-        "expected_error": sample.expected_error.as_deref().unwrap_or("")
+        "expected_error": sample.expected_error.as_deref().unwrap_or(""),
+        "expected_status": sample.expected_status.unwrap_or("")
     });
     fs::write(
         dir.join("expected.json"),
@@ -704,6 +710,7 @@ fn main() -> Result<()> {
         description: "Valid SGX quote v3".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: None,
     });
@@ -713,6 +720,7 @@ fn main() -> Result<()> {
         description: "Invalid SGX quote v4 (v4/v5 are TDX only)".to_string(),
         should_succeed: false,
         expected_error: Some("SGX TEE quote must have version 3".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(4, 2, false)),
         collateral_modifier: None,
     });
@@ -722,8 +730,9 @@ fn main() -> Result<()> {
         description: "Valid TDX quote v4".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
-        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(1, "UpToDate")])),
     });
 
     samples.push(TestSample {
@@ -732,6 +741,7 @@ fn main() -> Result<()> {
         should_succeed: false,
         // Quote v5 with v3 auth data causes auth data version mismatch
         expected_error: Some("Verification failed".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(5, 2, false)),
         collateral_modifier: None,
     });
@@ -744,6 +754,7 @@ fn main() -> Result<()> {
         description: "TDX quote with missing tdxtcbcomponents in TCB info".to_string(),
         should_succeed: false,
         expected_error: Some("TDX component count mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
         collateral_modifier: Some(Box::new(|collateral| {
             // TDX TCB info without tdxtcbcomponents
@@ -774,6 +785,7 @@ fn main() -> Result<()> {
         expected_error: Some(
             "Unsupported QE Identity id/version for the quote TEE type".to_string(),
         ),
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
         collateral_modifier: Some(Box::new(|collateral| {
             // Ensure TDX TCB info has TDX components and module identity
@@ -828,8 +840,9 @@ fn main() -> Result<()> {
         description: "TDX quote whose MRSIGNERSEAM differs from the module identity".to_string(),
         should_succeed: false,
         expected_error: Some("TDX module MRSIGNER mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
-        collateral_modifier: Some(tdx_collateral_with_module([0x03; 48], 1)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x03; 48], &[(1, "UpToDate")])),
     });
 
     samples.push(TestSample {
@@ -837,8 +850,9 @@ fn main() -> Result<()> {
         description: "TDX quote whose module ISVSVN is below every module TCB level".to_string(),
         should_succeed: false,
         expected_error: Some("is below minimum required from TDX module TCB levels".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
-        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 2)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(2, "UpToDate")])),
     });
 
     samples.push(TestSample {
@@ -846,8 +860,9 @@ fn main() -> Result<()> {
         description: "Valid TDX quote v5 with a TD 1.5 report".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| generate_tdx_quote_v5([1; 16])),
-        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(1, "UpToDate")])),
     });
 
     samples.push(TestSample {
@@ -855,12 +870,49 @@ fn main() -> Result<()> {
         description: "TD 1.5 quote whose current module ISVSVN (TEE_TCB_SVN2) is below every module TCB level".to_string(),
         should_succeed: false,
         expected_error: Some("Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             let mut tee_tcb_svn2 = [1; 16];
             tee_tcb_svn2[0] = 0;
             generate_tdx_quote_v5(tee_tcb_svn2)
         }),
-        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(1, "UpToDate")])),
+    });
+
+    // Launched with module ISVSVN 1 (OutOfDate), currently running ISVSVN 2 (UpToDate).
+    samples.push(TestSample {
+        name: "tdx_td15_relaunch_advised".to_string(),
+        description: "TD 1.5 quote launched with an out-of-date module that was updated in place"
+            .to_string(),
+        should_succeed: true,
+        expected_error: None,
+        expected_status: Some("TDRelaunchAdvised"),
+        quote_generator: Box::new(|| {
+            let mut tee_tcb_svn2 = [1; 16];
+            tee_tcb_svn2[0] = 2;
+            generate_tdx_quote_v5(tee_tcb_svn2)
+        }),
+        collateral_modifier: Some(tdx_collateral_with_module(
+            [0x02; 48],
+            &[(2, "UpToDate"), (1, "OutOfDate")],
+        )),
+    });
+
+    samples.push(TestSample {
+        name: "tdx_td15_current_revoked".to_string(),
+        description: "TD 1.5 quote whose current module ISVSVN is revoked".to_string(),
+        should_succeed: false,
+        expected_error: Some("TCB status is invalid: Revoked".to_string()),
+        expected_status: None,
+        quote_generator: Box::new(|| {
+            let mut tee_tcb_svn2 = [1; 16];
+            tee_tcb_svn2[0] = 2;
+            generate_tdx_quote_v5(tee_tcb_svn2)
+        }),
+        collateral_modifier: Some(tdx_collateral_with_module(
+            [0x02; 48],
+            &[(2, "Revoked"), (1, "UpToDate")],
+        )),
     });
 
     samples.push(TestSample {
@@ -868,6 +920,7 @@ fn main() -> Result<()> {
         description: "TDX quote with debug mode enabled".to_string(),
         should_succeed: false,
         expected_error: Some("Debug mode is enabled".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             // Generate TDX quote with debug bit set
             let header = create_sgx_header(4, 2, 0x00000081);
@@ -989,6 +1042,7 @@ fn main() -> Result<()> {
         description: "TDX quote without SEPT_VE_DISABLE bit".to_string(),
         should_succeed: false,
         expected_error: Some("SEPT_VE_DISABLE is not enabled".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
@@ -1094,6 +1148,7 @@ fn main() -> Result<()> {
         description: "TDX quote with reserved bits set in TD attributes".to_string(),
         should_succeed: false,
         expected_error: Some("Reserved bits in TD attributes are set".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
@@ -1198,6 +1253,7 @@ fn main() -> Result<()> {
         description: "TDX quote with PKS (Protection Keys) enabled".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
@@ -1304,6 +1360,7 @@ fn main() -> Result<()> {
         description: "TDX quote with KL (Key Locker) enabled".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
@@ -1413,6 +1470,7 @@ fn main() -> Result<()> {
         description: "SGX v3 in debug mode".to_string(),
         should_succeed: false,
         expected_error: Some("Debug mode is enabled".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, true)),
         collateral_modifier: None,
     });
@@ -1425,6 +1483,7 @@ fn main() -> Result<()> {
         should_succeed: false,
         // Invalid binary data causes buffer underflow
         expected_error: Some("Failed to decode quote".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_invalid_quote),
         collateral_modifier: None,
     });
@@ -1435,6 +1494,7 @@ fn main() -> Result<()> {
         should_succeed: false,
         // Truncated data causes buffer underflow
         expected_error: Some("Not enough data to fill buffer".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_truncated_quote),
         collateral_modifier: None,
     });
@@ -1449,6 +1509,7 @@ fn main() -> Result<()> {
             should_succeed: false,
             // Use the root cause error message (from Caused by chain)
             expected_error: Some("Unsupported quote version".to_string()),
+            expected_status: None,
             quote_generator: Box::new(move || generate_base_quote(version, 2, false)),
             collateral_modifier: None,
         });
@@ -1462,6 +1523,7 @@ fn main() -> Result<()> {
             description: format!("Unsupported key type {}", key_type),
             should_succeed: false,
             expected_error: Some("Unsupported DCAP attestation key type".to_string()),
+            expected_status: None,
             quote_generator: Box::new(move || generate_base_quote(3, key_type, false)),
             collateral_modifier: None,
         });
@@ -1474,6 +1536,7 @@ fn main() -> Result<()> {
         description: "Expired TCB info".to_string(),
         should_succeed: false,
         expected_error: Some("TCBInfo expired".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             let tcb_info = json!({
@@ -1497,6 +1560,7 @@ fn main() -> Result<()> {
         description: "TCB info issue date in the future".to_string(),
         should_succeed: false,
         expected_error: Some("TCBInfo issue date is in the future".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
@@ -1520,6 +1584,7 @@ fn main() -> Result<()> {
         description: "SGX quote with non-SGX TCB info".to_string(),
         should_succeed: false,
         expected_error: Some("SGX quote with non-SGX TCB info in the collateral".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
@@ -1543,6 +1608,7 @@ fn main() -> Result<()> {
         description: "Invalid TCB JSON format".to_string(),
         should_succeed: false,
         expected_error: Some("Failed to decode TcbInfo".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["tcb_info"] = json!("INVALID JSON");
@@ -1556,6 +1622,7 @@ fn main() -> Result<()> {
         description: "SGX quote with component SVN mismatch (1,3,2 vs required 1,2,3)".to_string(),
         should_succeed: false,
         expected_error: Some("No matching TCB level found".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Set TCB info to require higher SVN values than the quote provides
@@ -1591,6 +1658,7 @@ fn main() -> Result<()> {
         description: "TDX quote with component SVN mismatch (1,3,2 vs required 1,2,3)".to_string(),
         should_succeed: false,
         expected_error: Some("No matching TCB level found".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_tdx_quote_v4),
         collateral_modifier: Some(Box::new(|collateral| {
             // Set TCB info to require higher TDX component SVN values
@@ -1631,6 +1699,7 @@ fn main() -> Result<()> {
         description: "Quote with all component SVN values higher than required (all zeros pass when required is all zeros)".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Set TCB info to require all zeros - quote has all zeros so should pass
@@ -1665,6 +1734,7 @@ fn main() -> Result<()> {
         description: "TCB certificate chain too short".to_string(),
         should_succeed: false,
         expected_error: Some("Certificate chain is too short for TCB Info".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["tcb_info_issuer_chain"] = json!("\n");
@@ -1677,6 +1747,7 @@ fn main() -> Result<()> {
         description: "Invalid certificate format in TCB chain".to_string(),
         should_succeed: false,
         expected_error: Some("Certificate chain is too short for TCB Info".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use malformed certificate data (missing proper PEM headers/footers)
@@ -1693,6 +1764,7 @@ fn main() -> Result<()> {
         description: "Invalid TCB info signature".to_string(),
         should_succeed: false,
         expected_error: Some("Signature is invalid for tcb_info".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["tcb_info_signature"] = json!("00".repeat(64));
@@ -1707,6 +1779,7 @@ fn main() -> Result<()> {
         description: "FMSPC mismatch between quote and TCB".to_string(),
         should_succeed: false,
         expected_error: Some("Fmspc mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             if let Some(tcb_str) = collateral["tcb_info"].as_str() {
@@ -1734,6 +1807,7 @@ fn main() -> Result<()> {
         description: "QE report hash mismatch".to_string(),
         should_succeed: false,
         expected_error: Some("QE report hash mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             // Generate quote with wrong QE report hash
             let header = create_sgx_header(3, 2, 0);
@@ -1796,6 +1870,7 @@ fn main() -> Result<()> {
         description: "Invalid QE report signature".to_string(),
         should_succeed: false,
         expected_error: Some("Signature is invalid for qe_report in quote".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             // Generate quote with invalid QE report signature (all zeros)
             let header = create_sgx_header(3, 2, 0);
@@ -1860,6 +1935,7 @@ fn main() -> Result<()> {
         description: "Invalid ISV enclave report signature".to_string(),
         should_succeed: false,
         expected_error: Some("ISV enclave report signature is invalid".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| {
             // Generate quote with invalid quote signature (all zeros)
             let header = create_sgx_header(3, 2, 0);
@@ -1927,6 +2003,7 @@ fn main() -> Result<()> {
         description: "Expired QE Identity".to_string(),
         should_succeed: false,
         expected_error: Some("QE Identity expired".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity with expired nextUpdate
@@ -1967,6 +2044,7 @@ fn main() -> Result<()> {
         description: "QE Identity issue date in the future".to_string(),
         should_succeed: false,
         expected_error: Some("QE Identity issue date is in the future".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             let qe_identity = json!({
@@ -2005,6 +2083,7 @@ fn main() -> Result<()> {
         description: "Invalid QE Identity JSON format".to_string(),
         should_succeed: false,
         expected_error: Some("Failed to decode QeIdentity".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["qe_identity"] = json!("not valid json {{{");
@@ -2017,6 +2096,7 @@ fn main() -> Result<()> {
         description: "QE Identity certificate chain too short".to_string(),
         should_succeed: false,
         expected_error: Some("Certificate chain is too short for QE Identity".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["qe_identity_issuer_chain"] = json!("\n");
@@ -2029,6 +2109,7 @@ fn main() -> Result<()> {
         description: "Invalid QE Identity signature".to_string(),
         should_succeed: false,
         expected_error: Some("Signature is invalid for qe_identity".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             collateral["qe_identity_signature"] = json!("00".repeat(64));
@@ -2041,6 +2122,7 @@ fn main() -> Result<()> {
         description: "QE MRSIGNER mismatch".to_string(),
         should_succeed: false,
         expected_error: Some("QE MRSIGNER mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity with different MRSIGNER
@@ -2080,6 +2162,7 @@ fn main() -> Result<()> {
         description: "QE ISVPRODID mismatch".to_string(),
         should_succeed: false,
         expected_error: Some("QE ISVPRODID mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity with different ISVPRODID
@@ -2119,6 +2202,7 @@ fn main() -> Result<()> {
         description: "QE MISCSELECT mismatch".to_string(),
         should_succeed: false,
         expected_error: Some("QE MISCSELECT mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity with different MISCSELECT (with full mask, so it must match exactly)
@@ -2158,6 +2242,7 @@ fn main() -> Result<()> {
         description: "QE ATTRIBUTES mismatch".to_string(),
         should_succeed: false,
         expected_error: Some("QE ATTRIBUTES mismatch".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity with different ATTRIBUTES (with full mask, so it must match exactly)
@@ -2197,6 +2282,7 @@ fn main() -> Result<()> {
         description: "Quote with debug flag set in QE report should be rejected".to_string(),
         should_succeed: false,
         expected_error: Some("Debug mode is enabled".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_quote_with_debug_qe),
         collateral_modifier: Some(Box::new(|collateral| {
             // Create QE Identity that requires debug bit to be 0 (production mode)
@@ -2240,6 +2326,7 @@ fn main() -> Result<()> {
         description: "Quote with no matching TCB level (empty tcbLevels array)".to_string(),
         should_succeed: false,
         expected_error: Some("No matching TCB level found".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use empty tcbLevels array - no matching level will be found
@@ -2265,6 +2352,7 @@ fn main() -> Result<()> {
         description: "Quote with Revoked platform TCB status".to_string(),
         should_succeed: false,
         expected_error: Some("TCB status is invalid: Revoked".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Set platform TCB status to Revoked
@@ -2294,6 +2382,7 @@ fn main() -> Result<()> {
         description: "Quote with Revoked QE TCB status".to_string(),
         should_succeed: false,
         expected_error: Some("TCB status is invalid: Revoked".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Set QE TCB status to Revoked
@@ -2326,6 +2415,7 @@ fn main() -> Result<()> {
         description: "cert_type 5 quote with pck_certificate_chain in collateral".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Add pck_certificate_chain to collateral
@@ -2342,6 +2432,7 @@ fn main() -> Result<()> {
         description: "cert_type 3 (encrypted PPID) quote with pck_certificate_chain in collateral - offline verification support".to_string(),
         should_succeed: true,  // Should succeed: collateral provides PCK cert for offline verification
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(generate_cert_type_3_quote),
         collateral_modifier: Some(Box::new(|collateral| {
             // Add pck_certificate_chain to collateral (required for cert_type 3 offline verification)
@@ -2358,6 +2449,7 @@ fn main() -> Result<()> {
         description: "cert_type 3 quote without pck_certificate_chain (should fail)".to_string(),
         should_succeed: false,
         expected_error: Some("Unsupported DCAP PCK cert format".to_string()),
+        expected_status: None,
         quote_generator: Box::new(generate_cert_type_3_quote),
         collateral_modifier: None, // No pck_certificate_chain
     });
@@ -2369,6 +2461,7 @@ fn main() -> Result<()> {
         description: "TCB Info chain uses CA cert as signing cert (CaUsedAsEndEntity)".to_string(),
         should_succeed: false,
         expected_error: Some("CaUsedAsEndEntity".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use the CA-only chain which has CA:TRUE as the first cert
@@ -2398,6 +2491,7 @@ fn main() -> Result<()> {
             .to_string(),
         should_succeed: false,
         expected_error: Some("CaUsedAsEndEntity".to_string()),
+        expected_status: None,
         quote_generator: Box::new(|| generate_base_quote(3, 2, false)),
         collateral_modifier: Some(Box::new(|collateral| {
             // Use the CA-only chain for QE Identity which has CA:TRUE as the first cert

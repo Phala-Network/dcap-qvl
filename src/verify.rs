@@ -496,6 +496,10 @@ fn js_parse_tcb_status(s: &str) -> Result<TcbStatus, JsValue> {
         "OutOfDate" => Ok(TcbStatus::OutOfDate),
         "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
         "Revoked" => Ok(TcbStatus::Revoked),
+        "TDRelaunchAdvised" => Ok(TcbStatus::TDRelaunchAdvised),
+        "TDRelaunchAdvisedConfigurationNeeded" => {
+            Ok(TcbStatus::TDRelaunchAdvisedConfigurationNeeded)
+        }
         _ => Err(JsValue::from_str(&alloc::format!(
             "Unknown TCB status: {s}"
         ))),
@@ -998,7 +1002,8 @@ fn verify_isv_report_signature(
 // Step 8: Match Platform TCB (PCK Cert's CPU_SVN/PCE_SVN/FMSPC vs TCB Info)
 // =============================================================================
 
-/// Match platform TCB level and return the matched TcbLevel
+/// Match the platform TCB level of the quote. For a TD 1.5 report, also return
+/// the level matched by its current TCB (`TEE_TCB_SVN2`).
 fn match_platform_tcb(
     tcb_info: &TcbInfo,
     quote: &Quote,
@@ -1006,7 +1011,7 @@ fn match_platform_tcb(
     cpu_svn: &[u8],
     pce_svn: u16,
     fmspc: &[u8],
-) -> Result<TcbLevel> {
+) -> Result<(TcbLevel, Option<TcbLevel>)> {
     // Verify FMSPC matches
     let tcb_fmspc = hex::decode(&tcb_info.fmspc)
         .ok()
@@ -1030,7 +1035,8 @@ fn match_platform_tcb(
     }
 
     if !tee_type.is_tdx() {
-        return find_tcb_level(tcb_info, cpu_svn, pce_svn, None).cloned();
+        let tcb_level = find_tcb_level(tcb_info, cpu_svn, pce_svn, None)?.clone();
+        return Ok((tcb_level, None));
     }
 
     let td_report = quote
@@ -1043,11 +1049,48 @@ fn match_platform_tcb(
     // A TD 1.5 report also carries the current TCB, which differs from the
     // launch TCB after a TD-preserving module update. Like Intel QVL, require
     // it to be appraisable too.
-    if let Some(td15) = quote.report.as_td15() {
-        evaluate_tdx_tcb(tcb_info, cpu_svn, pce_svn, &td15.tee_tcb_svn2)
-            .context("Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)")?;
-    }
-    Ok(tcb_level)
+    let current_tcb_level = quote
+        .report
+        .as_td15()
+        .map(|td15| {
+            evaluate_tdx_tcb(tcb_info, cpu_svn, pce_svn, &td15.tee_tcb_svn2)
+                .context("Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)")
+        })
+        .transpose()?;
+    Ok((tcb_level, current_tcb_level))
+}
+
+// TCB statuses Intel QVL accepts in each collateral structure.
+const TCB_INFO_STATUSES: &[TcbStatus] = &[
+    TcbStatus::UpToDate,
+    TcbStatus::OutOfDate,
+    TcbStatus::ConfigurationNeeded,
+    TcbStatus::Revoked,
+    TcbStatus::OutOfDateConfigurationNeeded,
+    TcbStatus::SWHardeningNeeded,
+    TcbStatus::ConfigurationAndSWHardeningNeeded,
+];
+const TDX_MODULE_STATUSES: &[TcbStatus] = &[
+    TcbStatus::UpToDate,
+    TcbStatus::OutOfDate,
+    TcbStatus::Revoked,
+];
+const QE_IDENTITY_STATUSES: &[TcbStatus] = &[
+    TcbStatus::UpToDate,
+    TcbStatus::OutOfDate,
+    TcbStatus::ConfigurationNeeded,
+    TcbStatus::Revoked,
+    TcbStatus::OutOfDateConfigurationNeeded,
+];
+
+/// Reject a TCB status that Intel QVL does not accept for the given
+/// collateral structure.
+fn ensure_valid_status(status: TcbStatus, valid: &[TcbStatus], structure: &str) -> Result<()> {
+    ensure!(
+        valid.contains(&status),
+        "Unrecognized TCB status {status} in {structure}"
+    );
+    Ok(())
 }
 
 /// Find the first TCB level whose components are all met by the platform.
@@ -1100,6 +1143,7 @@ fn find_tcb_level<'a>(
             }
         }
 
+        ensure_valid_status(tcb_level.tcb_status, TCB_INFO_STATUSES, "TCB Info")?;
         return Ok(tcb_level);
     }
 
@@ -1167,7 +1211,7 @@ fn match_tdx_module_level<'a>(
         return Ok(None);
     };
     let module_isvsvn = tee_tcb_svn[0];
-    identity
+    let level = identity
         .tcb_levels
         .iter()
         .find(|level| module_isvsvn >= level.tcb.isvsvn)
@@ -1175,8 +1219,9 @@ fn match_tdx_module_level<'a>(
             format!(
                 "TDX module ISVSVN {module_isvsvn} is below minimum required from TDX module TCB levels"
             )
-        })
-        .map(Some)
+        })?;
+    ensure_valid_status(level.tcb_status, TDX_MODULE_STATUSES, "TDX module identity")?;
+    Ok(Some(level))
 }
 
 /// Verify the TD report's SEAM module signer and attributes against the TCB Info.
@@ -1402,7 +1447,7 @@ fn verify_impl(
     verify_isv_report_signature(raw_quote, &quote, &auth_data, backend)?;
 
     // Step 8: Match Platform TCB (returns matched TcbLevel)
-    let platform_tcb_level = match_platform_tcb(
+    let (platform_tcb_level, current_tcb_level) = match_platform_tcb(
         &tcb_info,
         &quote,
         tee_type,
@@ -1411,19 +1456,28 @@ fn verify_impl(
         &pck_result.fmspc,
     )?;
 
-    // Step 9 & 10: Merge statuses (take worst)
+    // Step 9 & 10: Converge the platform and QE statuses
     let platform_status = TcbStatusWithAdvisory::new(
         platform_tcb_level.tcb_status,
         platform_tcb_level.advisory_ids.clone(),
     );
     let qe_status =
         TcbStatusWithAdvisory::new(qe_tcb_level.tcb_status, qe_tcb_level.advisory_ids.clone());
-    let final_status = platform_status.merge(&qe_status);
+    let mut final_status = platform_status.merge(&qe_status);
+    let current_status = current_tcb_level.map(|level| {
+        level
+            .tcb_status
+            .converge_with_component(qe_tcb_level.tcb_status)
+    });
 
     // Revoked means the platform's keys are compromised — reject unconditionally,
     // regardless of policy. This is a security invariant, not a policy decision.
-    if final_status.status == TcbStatus::Revoked {
+    // Unlike Intel QVL, this also covers the current TCB of a TD 1.5.
+    if final_status.status == TcbStatus::Revoked || current_status == Some(TcbStatus::Revoked) {
         bail!("TCB status is invalid: Revoked");
+    }
+    if let Some(current_status) = current_status {
+        final_status.status = final_status.status.check_for_relaunch(current_status);
     }
 
     #[cfg(feature = "default-x509")]
@@ -1812,6 +1866,7 @@ fn match_qe_tcb_level(
 ) -> Result<QeTcbLevel> {
     for tcb_level in tcb_levels {
         if isv_svn >= tcb_level.tcb.isvsvn {
+            ensure_valid_status(tcb_level.tcb_status, QE_IDENTITY_STATUSES, "QE Identity")?;
             return Ok(tcb_level.clone());
         }
     }

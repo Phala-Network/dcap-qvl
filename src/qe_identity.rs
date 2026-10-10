@@ -10,7 +10,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use crate::tcb_info::TcbStatus;
 
 /// QE Identity structure as returned by Intel's PCCS
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -39,7 +39,7 @@ pub struct QeIdentity {
 }
 
 /// TCB level for QE Identity
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
