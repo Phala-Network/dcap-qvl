@@ -59,7 +59,7 @@ print(quote.fmspc())       # e.g. "B0C06F000000"
 hdr = quote.header
 print(hdr.version, hdr.tee_type, hdr.attestation_key_type)
 
-# Report body (TdReport10, TdReport15, or SgxEnclaveReport)
+# Report body (TdReport10, TdReport15, TdReport15Ex, or SgxEnclaveReport)
 report = quote.report
 if quote.is_tdx():
     print(report.mr_td.hex())
@@ -291,7 +291,7 @@ Represents a parsed SGX or TDX quote. Created via `parse_quote()` or `Quote.pars
 
 **Properties:**
 - `header: QuoteHeader`: Parsed quote header
-- `report: Union[TdReport10, TdReport15, SgxEnclaveReport]`: Parsed report body
+- `report: Union[TdReport10, TdReport15, TdReport15Ex, SgxEnclaveReport]`: Parsed report body
 
 **Methods:**
 - `parse(raw_quote: bytes) -> Quote`: Parse from raw bytes (static method)
@@ -309,9 +309,12 @@ Represents a parsed SGX or TDX quote. Created via `parse_quote()` or `Quote.pars
 - `qe_svn: int`, `pce_svn: int`
 - `qe_vendor_id: bytes` (16 bytes), `user_data: bytes` (20 bytes)
 
-#### `TdReport10` / `TdReport15`
+#### `TdReport10` / `TdReport15` / `TdReport15Ex`
 
 TDX TDREPORT structures. TdReport15 extends TdReport10 with `tee_tcb_svn2` and `mr_service_td`.
+TdReport15Ex (quote v5 body type 4) extends TdReport15 with `vmid: int`, `td_id`, `dev_info`,
+`init_service_td_hash`, `init_service_td_attributes`, `init_cpu_svn`, `init_tee_tcb_svn`,
+`init_tee_fmspc`, `cur_service_td_hash` and `cur_service_td_attributes`.
 
 **Properties (TdReport10):**
 - `tee_tcb_svn: bytes`, `mr_seam: bytes`, `mr_signer_seam: bytes`, `seam_attributes: bytes`

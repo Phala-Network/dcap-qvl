@@ -677,3 +677,42 @@ fn tdx_claims_cross_validation() {
     assert_eq!(s.earliest_expiration_date, rc.earliest_expiration_date);
     assert_eq!(s.tcb.eval_data_number, rc.tcb.eval_data_number);
 }
+
+#[test]
+fn td15_ex_quote_verifies() {
+    let raw_quote = include_bytes!("../sample/tdx_quote_td15ex");
+    let collateral: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/tdx_quote_td15ex_collateral.json"))
+            .unwrap();
+    let now = now_from_collateral(&collateral);
+
+    let quote = Quote::parse(raw_quote).unwrap();
+    let ex = quote.report.as_td15_ex().expect("body type 4");
+    assert_ne!(ex.td_id, [0u8; 32]);
+    // Quote v5 framing and sgx_report2_body_v1_5_ex_t offsets per Intel's sgx_quote_5.h.
+    assert_eq!(&raw_quote[48..54], &[4, 0, 0x75, 0x03, 0, 0]);
+    assert_eq!(raw_quote[54 + 648], ex.vmid);
+    assert_eq!(&raw_quote[54 + 649..54 + 681], &ex.td_id[..]);
+    assert_eq!(quote.report.as_td15(), Some(&ex.base));
+    assert_eq!(quote.report.as_td10(), Some(&ex.base.base));
+    assert_eq!(quote.signed_length(), 48 + 6 + 885);
+    assert_eq!(scale::Encode::encode(&quote), raw_quote.to_vec());
+
+    let report = verify(raw_quote, &collateral, now).unwrap();
+    assert_eq!(report.status, "UpToDate");
+    assert_eq!(report.report.as_td15_ex(), Some(ex));
+}
+
+#[test]
+fn td15_ex_extension_is_signed() {
+    let collateral: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/tdx_quote_td15ex_collateral.json"))
+            .unwrap();
+    let now = now_from_collateral(&collateral);
+    // td_id starts at body offset 649; the last 1.5ex field ends at 885.
+    for offset in [48 + 6 + 649, 48 + 6 + 884] {
+        let mut raw_quote = include_bytes!("../sample/tdx_quote_td15ex").to_vec();
+        raw_quote[offset] ^= 1;
+        assert!(verify(&raw_quote, &collateral, now).is_err());
+    }
+}

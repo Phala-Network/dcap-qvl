@@ -584,6 +584,11 @@ function validateAttrs(report, allowDebug = false, allowServiceTd = false) {
         validateTd10(report.data, allowDebug);
     } else if (report.type === 'td15') {
         validateTd15(report.data, allowDebug, allowServiceTd);
+    } else if (report.type === 'td15ex') {
+        // Same checks as TDX 1.5, as in Intel's QVL: the 1.5ex fields carry no attributes to validate.
+        validateTd15(report.data.base, allowDebug, allowServiceTd);
+    } else {
+        throw new Error(`Unsupported report type: ${report.type}`);
     }
 }
 

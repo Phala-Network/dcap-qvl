@@ -59,7 +59,7 @@ type QuoteHeader struct {
 	UserData           HexBytes `json:"user_data"`
 }
 
-// QuoteReport is a flattened report from either SGX EnclaveReport, TD10, or TD15.
+// QuoteReport is a flattened report from either SGX EnclaveReport, TD10, TD15, or TD15Ex.
 type QuoteReport struct {
 	Type       string   `json:"type"`
 	ReportData HexBytes `json:"report_data"`
@@ -81,6 +81,17 @@ type QuoteReport struct {
 	// TD15 extra fields
 	TeeTCBSVN2  HexBytes `json:"tee_tcb_svn2,omitempty"`
 	MrServiceTD HexBytes `json:"mr_service_td,omitempty"`
+	// TD15Ex extra fields
+	VMID                    *uint8   `json:"vmid,omitempty"`
+	TdID                    HexBytes `json:"td_id,omitempty"`
+	DevInfo                 HexBytes `json:"dev_info,omitempty"`
+	InitServiceTDHash       HexBytes `json:"init_service_td_hash,omitempty"`
+	InitServiceTDAttributes HexBytes `json:"init_service_td_attributes,omitempty"`
+	InitCPUSVN              HexBytes `json:"init_cpu_svn,omitempty"`
+	InitTeeTCBSVN           HexBytes `json:"init_tee_tcb_svn,omitempty"`
+	InitTeeFMSPC            HexBytes `json:"init_tee_fmspc,omitempty"`
+	CurServiceTDHash        HexBytes `json:"cur_service_td_hash,omitempty"`
+	CurServiceTDAttributes  HexBytes `json:"cur_service_td_attributes,omitempty"`
 	// SGX fields
 	CPUSVN     HexBytes `json:"cpu_svn,omitempty"`
 	MiscSelect *uint32  `json:"misc_select,omitempty"`

@@ -279,6 +279,47 @@ pub struct TDReport15 {
     pub mr_service_td: [u8; 48],
 }
 
+/// TD report for TDX 1.5ex: quote v5 body type 4 (`sgx_report2_body_v1_5_ex_t` in Intel's
+/// `sgx_quote_5.h`), the TDX 1.5 report followed by the fields below. Intel's QVL verifies it
+/// like a TDX 1.5 report (same TCB fields), with no extra checks on the added fields.
+#[derive(
+    Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
+)]
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+pub struct TDReport15Ex {
+    pub base: TDReport15,
+    /// VM index: 0 for an unpartitioned TD or the L1 VMM, 1-3 for TD VMs 1-3.
+    pub vmid: u8,
+    /// TD instance statistically unique ID: regenerated on TD relaunch, preserved on TD-preserving update and migration.
+    #[serde(with = "serde_bytes")]
+    pub td_id: [u8; 32],
+    /// Hash of the device information CBOR.
+    #[serde(with = "serde_bytes")]
+    pub dev_info: [u8; 48],
+    /// Initial SERVTD_HASH (non-NRX) or migration policy hash (NRX).
+    #[serde(with = "serde_bytes")]
+    pub init_service_td_hash: [u8; 48],
+    /// Initial SERVTD_ATTR (non-NRX) or 0 (NRX).
+    #[serde(with = "serde_bytes")]
+    pub init_service_td_attributes: [u8; 8],
+    /// TD's initial CPUSVN from creation.
+    #[serde(with = "serde_bytes")]
+    pub init_cpu_svn: [u8; 16],
+    /// TD's initial TEE_TCB_SVN from creation.
+    #[serde(with = "serde_bytes")]
+    pub init_tee_tcb_svn: [u8; 16],
+    /// Model information of the platform INIT_TEE_TCB_SVN was captured on.
+    #[serde(with = "serde_bytes")]
+    pub init_tee_fmspc: [u8; 12],
+    /// Current SERVTD_HASH (non-NRX) or migration policy hash (NRX).
+    #[serde(with = "serde_bytes")]
+    pub cur_service_td_hash: [u8; 48],
+    /// Current SERVTD_ATTR (non-NRX) or 0 (NRX).
+    #[serde(with = "serde_bytes")]
+    pub cur_service_td_attributes: [u8; 8],
+}
+
 #[derive(Decode, Encode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -461,10 +502,14 @@ fn decode_auth_data(ver: u16, input: &mut &[u8]) -> Result<AuthData, scale::Erro
 #[derive(Decode, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
+// The TD 1.5ex report (885 bytes) is the largest variant; boxing it would add an allocation per
+// parsed quote and change the variant's type for every caller, for little saving.
+#[allow(clippy::large_enum_variant)]
 pub enum Report {
     SgxEnclave(EnclaveReport),
     TD10(TDReport10),
     TD15(TDReport15),
+    TD15Ex(TDReport15Ex),
 }
 
 impl Report {
@@ -476,6 +521,7 @@ impl Report {
         match self {
             Report::TD10(report) => Some(report),
             Report::TD15(report) => Some(&report.base),
+            Report::TD15Ex(report) => Some(&report.base.base),
             _ => None,
         }
     }
@@ -483,6 +529,14 @@ impl Report {
     pub fn as_td15(&self) -> Option<&TDReport15> {
         match self {
             Report::TD15(report) => Some(report),
+            Report::TD15Ex(report) => Some(&report.base),
+            _ => None,
+        }
+    }
+
+    pub fn as_td15_ex(&self) -> Option<&TDReport15Ex> {
+        match self {
+            Report::TD15Ex(report) => Some(report),
             _ => None,
         }
     }
@@ -536,6 +590,9 @@ impl Decode for Quote {
                     BODY_TD_REPORT15_TYPE => {
                         report = Report::TD15(TDReport15::decode(input)?);
                     }
+                    BODY_TD_REPORT15_EX_TYPE => {
+                        report = Report::TD15Ex(TDReport15Ex::decode(input)?);
+                    }
                     _ => return Err(scale::Error::from("Unsupported body type")),
                 }
             }
@@ -577,6 +634,10 @@ impl Encode for Quote {
                     body_type: BODY_TD_REPORT15_TYPE,
                     size: TD_REPORT15_BYTE_LEN as u32,
                 },
+                Report::TD15Ex(_) => Body {
+                    body_type: BODY_TD_REPORT15_EX_TYPE,
+                    size: TD_REPORT15_EX_BYTE_LEN as u32,
+                },
             };
             body.encode_to(output);
         }
@@ -586,6 +647,7 @@ impl Encode for Quote {
             Report::SgxEnclave(report) => report.encode_to(output),
             Report::TD10(report) => report.encode_to(output),
             Report::TD15(report) => report.encode_to(output),
+            Report::TD15Ex(report) => report.encode_to(output),
         }
 
         // Encode auth data with length prefix
@@ -623,6 +685,7 @@ impl Quote {
             Report::SgxEnclave(_) => HEADER_BYTE_LEN + ENCLAVE_REPORT_BYTE_LEN,
             Report::TD10(_) => HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN,
             Report::TD15(_) => HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN,
+            Report::TD15Ex(_) => HEADER_BYTE_LEN + TD_REPORT15_EX_BYTE_LEN,
         };
         #[allow(clippy::arithmetic_side_effects)]
         if self.header.version == 5 {

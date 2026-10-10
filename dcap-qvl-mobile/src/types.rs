@@ -6,7 +6,10 @@
 
 use dcap_qvl::{
     intel::PckExtension as CorePckExtension,
-    quote::{EnclaveReport, Header, Quote as CoreQuote, Report as CoreReport, TDReport10, TDReport15},
+    quote::{
+        EnclaveReport, Header, Quote as CoreQuote, Report as CoreReport, TDReport10, TDReport15,
+        TDReport15Ex,
+    },
     tcb_info::{TcbStatus as CoreTcbStatus, TcbStatusWithAdvisory as CoreTcbStatusWithAdvisory},
     verify::VerifiedReport as CoreVerifiedReport,
 };
@@ -129,12 +132,49 @@ impl From<&TDReport15> for Td15Report {
     }
 }
 
-/// Tagged-union report: one of SGX, TDX 1.0, or TDX 1.5.
+/// TDX 1.5ex report fields (extends 1.5; quote v5 body type 4).
+#[derive(Clone, uniffi::Record)]
+pub struct Td15ExReport {
+    pub base: Td15Report,
+    pub vmid: u8,
+    pub td_id: Vec<u8>,
+    pub dev_info: Vec<u8>,
+    pub init_service_td_hash: Vec<u8>,
+    pub init_service_td_attributes: Vec<u8>,
+    pub init_cpu_svn: Vec<u8>,
+    pub init_tee_tcb_svn: Vec<u8>,
+    pub init_tee_fmspc: Vec<u8>,
+    pub cur_service_td_hash: Vec<u8>,
+    pub cur_service_td_attributes: Vec<u8>,
+}
+
+impl From<&TDReport15Ex> for Td15ExReport {
+    fn from(r: &TDReport15Ex) -> Self {
+        Td15ExReport {
+            base: Td15Report::from(&r.base),
+            vmid: r.vmid,
+            td_id: r.td_id.to_vec(),
+            dev_info: r.dev_info.to_vec(),
+            init_service_td_hash: r.init_service_td_hash.to_vec(),
+            init_service_td_attributes: r.init_service_td_attributes.to_vec(),
+            init_cpu_svn: r.init_cpu_svn.to_vec(),
+            init_tee_tcb_svn: r.init_tee_tcb_svn.to_vec(),
+            init_tee_fmspc: r.init_tee_fmspc.to_vec(),
+            cur_service_td_hash: r.cur_service_td_hash.to_vec(),
+            cur_service_td_attributes: r.cur_service_td_attributes.to_vec(),
+        }
+    }
+}
+
+/// Tagged-union report: one of SGX, TDX 1.0, TDX 1.5, or TDX 1.5ex.
+// The 1.5ex record is the largest variant; it is passed across the FFI by value either way.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, uniffi::Enum)]
 pub enum Report {
     Sgx { report: SgxReport },
     Td10 { report: Td10Report },
     Td15 { report: Td15Report },
+    Td15Ex { report: Td15ExReport },
 }
 
 impl From<&CoreReport> for Report {
@@ -143,6 +183,7 @@ impl From<&CoreReport> for Report {
             CoreReport::SgxEnclave(r) => Report::Sgx { report: r.into() },
             CoreReport::TD10(r) => Report::Td10 { report: r.into() },
             CoreReport::TD15(r) => Report::Td15 { report: r.into() },
+            CoreReport::TD15Ex(r) => Report::Td15Ex { report: r.into() },
         }
     }
 }
