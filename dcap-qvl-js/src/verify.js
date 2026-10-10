@@ -581,7 +581,7 @@ function validateAttrs(report, allowDebug = false, allowServiceTd = false) {
     if (report.type === 'sgx') {
         validateSgx(report.data, allowDebug);
     } else if (report.type === 'td10') {
-        validateTd10(report.data, allowDebug);
+        validateTd10(report.data, allowDebug, allowServiceTd);
     } else if (report.type === 'td15') {
         validateTd15(report.data, allowDebug, allowServiceTd);
     } else if (report.type === 'td15ex') {
@@ -600,19 +600,24 @@ function validateSgx(report, allowDebug = false) {
     }
 }
 
-function validateTd10(report, allowDebug = false) {
+function validateTd10(report, allowDebug = false, allowServiceTd = false) {
     const tdAttrs = parseTdAttributes(report.tdAttributes);
 
-    // TUD bit 0 is DEBUG; bits 7:1 are reserved and must always be zero.
-    if ((tdAttrs.tud & ~0x01) !== 0) {
-        throw new Error('Reserved bits in TD attributes are set');
-    }
     if ((tdAttrs.tud & 0x01) !== 0 && !allowDebug) {
         throw new Error('Debug mode is enabled');
     }
+    if ((tdAttrs.tud & 0x70) !== 0 && !allowDebug) {
+        throw new Error('TD profiling is enabled');
+    }
 
-    if (tdAttrs.sec.reservedLower !== 0 || tdAttrs.sec.reservedBit29 || tdAttrs.other.reserved !== 0) {
+    if (tdAttrs.reserved !== 0n) {
         throw new Error('Reserved bits in TD attributes are set');
+    }
+    if (tdAttrs.sec.migratable) {
+        throw new Error('TD migration is enabled');
+    }
+    if (tdAttrs.sec.servtdExt && !allowServiceTd) {
+        throw new Error('SERVTD_EXT is enabled');
     }
 
     if (!tdAttrs.sec.septVeDisable) {
@@ -628,36 +633,39 @@ function validateTd15(report, allowDebug = false, allowServiceTd = false) {
         }
     }
 
-    validateTd10(report.base, allowDebug);
+    validateTd10(report.base, allowDebug, allowServiceTd);
 }
 
+function ones(start, end) {
+    const first = BigInt(start);
+    const last = BigInt(end);
+    return ((1n << (last - first + 1n)) - 1n) << first;
+}
+
+// Intel TDX Module ABI Specification 348551-008US, Table 3.23:
+// https://www.intel.com/content/www/us/en/content-details/865802/intel-tdx-module-abi-specification.html
+const TD_ATTRIBUTES_RESERVED_MBZ_MASK =
+    ones(1, 3) | ones(7, 15) | ones(23, 26) | ones(32, 61);
+
 function parseTdAttributes(input) {
+    const bytes = Uint8Array.from(input);
+    const attributes = new DataView(bytes.buffer).getBigUint64(0, true);
+    const isSet = bit => (attributes & ones(bit, bit)) !== 0n;
     const tud = input[0];
-
-    // Extract SEC flags
-    const reservedLower = ((input[3] & 0x0f) << 16) | (input[2] << 8) | input[1];
-    const septVeDisable = (input[3] & 0x10) !== 0;
-    const reservedBit29 = (input[3] & 0x20) !== 0;
-    const pks = (input[3] & 0x40) !== 0;
-    const kl = (input[3] & 0x80) !== 0;
-
-    // Extract OTHER flags
-    const reservedOther = ((input[7] & 0x7f) << 24) | (input[6] << 16) | (input[5] << 8) | input[4];
-    const perfmon = (input[7] & 0x80) !== 0;
 
     return {
         tud,
         sec: {
-            reservedLower,
-            septVeDisable,
-            reservedBit29,
-            pks,
-            kl,
+            servtdExt: isSet(17),
+            septVeDisable: isSet(28),
+            migratable: isSet(29),
+            pks: isSet(30),
+            kl: isSet(31),
         },
         other: {
-            reserved: reservedOther,
-            perfmon,
+            perfmon: isSet(63),
         },
+        reserved: attributes & TD_ATTRIBUTES_RESERVED_MBZ_MASK,
     };
 }
 

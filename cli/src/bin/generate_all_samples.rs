@@ -283,6 +283,17 @@ fn generate_tdx_quote_v4() -> Result<Vec<u8>> {
     generate_tdx_quote(4, Report::TD10(create_tdx_report()))
 }
 
+/// A v4 TDX quote with the given TD attribute bits set on top of SEPT_VE_DISABLE.
+fn generate_tdx_quote_with_td_attributes(bits: &[u32]) -> Result<Vec<u8>> {
+    let mut report = create_tdx_report();
+    let mut attributes = u64::from_le_bytes(report.td_attributes);
+    for bit in bits {
+        attributes |= 1 << bit;
+    }
+    report.td_attributes = attributes.to_le_bytes();
+    generate_tdx_quote(4, Report::TD10(report))
+}
+
 /// A v5 TD 1.5 quote whose current TCB (TEE_TCB_SVN2) is `tee_tcb_svn2`.
 fn generate_tdx_quote_v5(tee_tcb_svn2: [u8; 16]) -> Result<Vec<u8>> {
     let report = TDReport15 {
@@ -1090,6 +1101,32 @@ fn main() -> Result<()> {
     });
 
     samples.push(TestSample {
+        name: "valid_tdx_v4_tdx15_attributes".to_string(),
+        description: "TDX quote with every TDX 1.5 TD attribute accepted by default".to_string(),
+        should_succeed: true,
+        expected_error: None,
+        quote_generator: Box::new(|| {
+            generate_tdx_quote_with_td_attributes(&[16, 18, 19, 20, 21, 22, 27, 30, 31, 62, 63])
+        }),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+    });
+
+    for (name, bit, error) in [
+        ("tdx_profiling_enabled", 5, "TD profiling is enabled"),
+        ("tdx_migratable", 29, "TD migration is enabled"),
+        ("tdx_servtd_ext_enabled", 17, "SERVTD_EXT is enabled"),
+    ] {
+        samples.push(TestSample {
+            name: name.to_string(),
+            description: format!("TDX quote with TD attribute bit {bit} set"),
+            should_succeed: false,
+            expected_error: Some(error.to_string()),
+            quote_generator: Box::new(move || generate_tdx_quote_with_td_attributes(&[bit])),
+            collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+        });
+    }
+
+    samples.push(TestSample {
         name: "tdx_reserved_bits_set".to_string(),
         description: "TDX quote with reserved bits set in TD attributes".to_string(),
         should_succeed: false,
@@ -1097,8 +1134,8 @@ fn main() -> Result<()> {
         quote_generator: Box::new(|| {
             let header = create_sgx_header(4, 2, 0x00000081);
             let mut report = create_tdx_report();
-            // Set reserved bit 29 (byte 3, bit 5)
-            report.td_attributes[3] |= 0x20; // Reserved bit 29
+            // Set RESERVED_N bit 23 (byte 2, bit 7).
+            report.td_attributes[2] |= 0x80;
 
             let pck_cert = fs::read_to_string(format!("{}/pck.pem", CERT_DIR))?;
             let root_cert = fs::read_to_string(format!("{}/root_ca.pem", CERT_DIR))?;

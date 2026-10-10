@@ -1581,21 +1581,24 @@ fn validate_sgx_attrs(report: &EnclaveReport, allow_debug: bool) -> Result<()> {
 }
 
 fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) -> Result<()> {
-    fn validate_td10(report: &TDReport10, allow_debug: bool) -> Result<()> {
+    fn validate_td10(report: &TDReport10, allow_service_td: bool, allow_debug: bool) -> Result<()> {
         let td_attrs = TDAttributes::parse(report.td_attributes)
             .map_err(anyhow::Error::msg)
             .context("Failed to parse TD attributes")?;
-        if td_attrs.tud & !0x01 != 0 {
-            bail!("Reserved bits in TD attributes are set");
-        }
         if td_attrs.tud & 0x01 != 0 && !allow_debug {
             bail!("Debug mode is enabled");
         }
-        if td_attrs.sec.reserved_lower != 0
-            || td_attrs.sec.reserved_bit29
-            || td_attrs.other.reserved != 0
-        {
+        if td_attrs.tud & 0x70 != 0 && !allow_debug {
+            bail!("TD profiling is enabled");
+        }
+        if td_attrs.reserved != 0 {
             bail!("Reserved bits in TD attributes are set");
+        }
+        if td_attrs.sec.migratable {
+            bail!("TD migration is enabled");
+        }
+        if td_attrs.sec.servtd_ext && !allow_service_td {
+            bail!("SERVTD_EXT is enabled");
         }
         if !td_attrs.sec.sept_ve_disable {
             bail!("SEPT_VE_DISABLE is not enabled");
@@ -1606,13 +1609,13 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
         if !allow_service_td && report.mr_service_td != [0u8; 48] {
             bail!("Invalid MR service TD");
         }
-        validate_td10(&report.base, allow_debug)
+        validate_td10(&report.base, allow_service_td, allow_debug)
     }
     match &report {
         Report::TD15(report) => validate_td15(report, allow_service_td, allow_debug),
         // Same checks as TDX 1.5, as in Intel's QVL: the 1.5ex fields carry no attributes to validate.
         Report::TD15Ex(report) => validate_td15(&report.base, allow_service_td, allow_debug),
-        Report::TD10(report) => validate_td10(report, allow_debug),
+        Report::TD10(report) => validate_td10(report, allow_service_td, allow_debug),
         Report::SgxEnclave(report) => validate_sgx_attrs(report, allow_debug),
     }
 }
