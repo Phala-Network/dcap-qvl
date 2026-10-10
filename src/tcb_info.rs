@@ -9,7 +9,7 @@ use borsh::BorshSchema;
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -50,7 +50,7 @@ impl TcbInfo {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -113,7 +113,7 @@ pub struct TdxModule {
     pub attributes_mask: String,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -125,7 +125,7 @@ pub struct TdxModuleIdentity {
     pub tcb_levels: Vec<TdxModuleTcbLevel>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
@@ -157,43 +157,59 @@ pub enum TcbStatus {
     ConfigurationNeeded,
     SWHardeningNeeded,
     Revoked,
+    /// TD 1.5 only: the TD launched with an out-of-date TCB, but its current
+    /// TCB (after a TD-preserving module update) is not out of date.
+    TDRelaunchAdvised,
+    /// [`TDRelaunchAdvised`](Self::TDRelaunchAdvised) where the launch or
+    /// current TCB also needs platform configuration.
+    TDRelaunchAdvisedConfigurationNeeded,
 }
 
 impl TcbStatus {
-    fn severity(&self) -> u8 {
-        match self {
-            Self::UpToDate => 0,
-            Self::SWHardeningNeeded => 1,
-            Self::ConfigurationNeeded => 2,
-            Self::ConfigurationAndSWHardeningNeeded => 3,
-            Self::OutOfDate => 4,
-            Self::OutOfDateConfigurationNeeded => 5,
-            Self::Revoked => 6,
-        }
-    }
-
-    /// Converge a platform status with a QE or TDX module status using Intel's
-    /// appraisal rule for an out-of-date component on a configured platform.
+    /// Converge a platform status with a QE or TDX module status like Intel
+    /// QVL's `convergeTcbStatuses`: only an `OutOfDate` or `Revoked` component
+    /// affects the platform status.
     pub(crate) fn converge_with_component(self, component: TcbStatus) -> TcbStatus {
         use TcbStatus::*;
         match (component, self) {
+            (Revoked, _) => Revoked,
+            (OutOfDate, UpToDate | SWHardeningNeeded) => OutOfDate,
             (OutOfDate, ConfigurationNeeded | ConfigurationAndSWHardeningNeeded) => {
                 OutOfDateConfigurationNeeded
             }
-            _ => component.max(self),
+            _ => self,
         }
     }
-}
 
-impl Ord for TcbStatus {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.severity().cmp(&other.severity())
-    }
-}
-
-impl PartialOrd for TcbStatus {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
+    /// Combine the launch and current statuses of a TD 1.5 like Intel QVL's
+    /// `checkForRelaunch`.
+    pub(crate) fn check_for_relaunch(self, current: TcbStatus) -> TcbStatus {
+        use TcbStatus::*;
+        let configuration_needed = |status| {
+            matches!(
+                status,
+                ConfigurationNeeded
+                    | OutOfDateConfigurationNeeded
+                    | ConfigurationAndSWHardeningNeeded
+                    | TDRelaunchAdvisedConfigurationNeeded
+            )
+        };
+        match (self, current) {
+            (
+                OutOfDate | OutOfDateConfigurationNeeded,
+                UpToDate
+                | SWHardeningNeeded
+                | ConfigurationNeeded
+                | ConfigurationAndSWHardeningNeeded,
+            ) => {
+                if configuration_needed(self) || configuration_needed(current) {
+                    TDRelaunchAdvisedConfigurationNeeded
+                } else {
+                    TDRelaunchAdvised
+                }
+            }
+            _ => self,
+        }
     }
 }
 
@@ -201,7 +217,7 @@ impl PartialOrd for TcbStatus {
 ///
 /// This is the result of matching a TCB level, used by both
 /// platform TCB matching and QE Identity verification.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[cfg_attr(feature = "borsh_schema", derive(BorshSchema))]
 pub struct TcbStatusWithAdvisory {
@@ -251,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tcb_status_merge_takes_worse() {
+    fn test_tcb_status_merge_out_of_date_component() {
         let a = TcbStatusWithAdvisory::new(UpToDate, vec![]);
         let b = TcbStatusWithAdvisory::new(OutOfDate, vec!["INTEL-SA-00001".into()]);
         let result = a.merge(&b);
@@ -267,6 +283,55 @@ mod tests {
             platform.merge(&qe).status,
             TcbStatus::OutOfDateConfigurationNeeded
         );
+    }
+
+    #[test]
+    fn test_converge_with_component_matches_intel() {
+        for (platform, component, expected) in [
+            (UpToDate, OutOfDate, OutOfDate),
+            (SWHardeningNeeded, OutOfDate, OutOfDate),
+            (
+                ConfigurationAndSWHardeningNeeded,
+                OutOfDate,
+                OutOfDateConfigurationNeeded,
+            ),
+            (
+                OutOfDateConfigurationNeeded,
+                OutOfDate,
+                OutOfDateConfigurationNeeded,
+            ),
+            (ConfigurationNeeded, Revoked, Revoked),
+            // Only OutOfDate and Revoked components affect the platform status.
+            (UpToDate, ConfigurationNeeded, UpToDate),
+            (UpToDate, OutOfDateConfigurationNeeded, UpToDate),
+            (SWHardeningNeeded, UpToDate, SWHardeningNeeded),
+        ] {
+            assert_eq!(platform.converge_with_component(component), expected);
+        }
+    }
+
+    #[test]
+    fn test_check_for_relaunch_matches_intel() {
+        for (launch, current, expected) in [
+            (OutOfDate, UpToDate, TDRelaunchAdvised),
+            (OutOfDate, SWHardeningNeeded, TDRelaunchAdvised),
+            (
+                OutOfDate,
+                ConfigurationNeeded,
+                TDRelaunchAdvisedConfigurationNeeded,
+            ),
+            (
+                OutOfDateConfigurationNeeded,
+                UpToDate,
+                TDRelaunchAdvisedConfigurationNeeded,
+            ),
+            (OutOfDate, OutOfDate, OutOfDate),
+            (OutOfDate, Revoked, OutOfDate),
+            (UpToDate, UpToDate, UpToDate),
+            (ConfigurationNeeded, UpToDate, ConfigurationNeeded),
+        ] {
+            assert_eq!(launch.check_for_relaunch(current), expected);
+        }
     }
 
     #[test]

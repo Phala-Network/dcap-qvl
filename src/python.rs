@@ -683,6 +683,10 @@ fn parse_tcb_status(value: &str) -> PyResult<TcbStatus> {
         "OutOfDate" => Ok(TcbStatus::OutOfDate),
         "OutOfDateConfigurationNeeded" => Ok(TcbStatus::OutOfDateConfigurationNeeded),
         "Revoked" => Ok(TcbStatus::Revoked),
+        "TDRelaunchAdvised" => Ok(TcbStatus::TDRelaunchAdvised),
+        "TDRelaunchAdvisedConfigurationNeeded" => {
+            Ok(TcbStatus::TDRelaunchAdvisedConfigurationNeeded)
+        }
         _ => Err(PyValueError::new_err(format!(
             "Unknown TCB status: {value}"
         ))),

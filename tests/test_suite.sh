@@ -158,6 +158,7 @@ run_single_test() {
 	# Parse expected results
 	local should_succeed=$(jq -r '.should_succeed' "$expected_file" 2>/dev/null || echo "false")
 	local expected_error=$(jq -r '.expected_error // ""' "$expected_file" 2>/dev/null)
+	local expected_status=$(jq -r '.expected_status // ""' "$expected_file" 2>/dev/null)
 	local description=$(jq -r '.description // ""' "$expected_file" 2>/dev/null)
 
 	# Run verification
@@ -170,7 +171,7 @@ run_single_test() {
 	# Determine test result
 	local status result
 	if [ "$should_succeed" = "true" ]; then
-		if [ $exit_code -eq 0 ]; then
+		if [ $exit_code -eq 0 ] && { [ -z "$expected_status" ] || echo "$output" | grep -qx "Status: $expected_status"; }; then
 			status="${GREEN}✓ PASS${NC}"
 			result="pass"
 		else

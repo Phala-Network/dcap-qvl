@@ -347,11 +347,18 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
     const platformTcbStatus = matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn);
 
     // Step 9 & 10: QE TCB matching is done in verifyQeIdentityPolicy, merge statuses
-    const finalStatus = platformTcbStatus.merge(qeTcbStatus);
+    let finalStatus = platformTcbStatus.launch.merge(qeTcbStatus);
+    const currentStatus = platformTcbStatus.current && platformTcbStatus.current.merge(qeTcbStatus);
 
-    // Reject invalid TCB status (including Revoked)
-    if (!finalStatus.isValid()) {
-        throw new Error(`TCB status is invalid: ${finalStatus.status}`);
+    // Reject invalid TCB status (including Revoked). Unlike Intel QVL, this
+    // also covers the current TCB of a TD 1.5.
+    for (const status of [finalStatus, currentStatus]) {
+        if (status && !status.isValid()) {
+            throw new Error(`TCB status is invalid: ${status.status}`);
+        }
+    }
+    if (currentStatus) {
+        finalStatus = finalStatus.checkForRelaunch(currentStatus);
     }
 
     // Validate attributes
@@ -364,28 +371,48 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
 function matchPlatformTcb(tcbInfo, quote, cpuSvn, pceSvn) {
     if (quote.header.teeType !== TEE_TYPE_TDX) {
         const tcbLevel = findTcbLevel(tcbInfo, cpuSvn, pceSvn, null);
-        return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
+        return { launch: new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]), current: null };
     }
 
     const tdReport = quote.report.asTd10();
     if (!tdReport) {
         throw new Error('Failed to get TD10 report');
     }
-    const status = evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, tdReport.teeTcbSvn);
+    const launch = evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, tdReport.teeTcbSvn);
     verifyTdxModuleIdentity(tcbInfo, tdReport);
 
     // A TD 1.5 report also carries the current TCB, which differs from the
     // launch TCB after a TD-preserving module update. Like Intel QVL, require
     // it to be appraisable too.
     const td15 = quote.report.asTd15();
-    if (td15) {
-        try {
-            evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, td15.teeTcbSvn2);
-        } catch (e) {
-            throw new Error('Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)', { cause: e });
-        }
+    if (!td15) {
+        return { launch, current: null };
     }
-    return status;
+    try {
+        return { launch, current: evaluateTdxTcb(tcbInfo, cpuSvn, pceSvn, td15.teeTcbSvn2) };
+    } catch (e) {
+        throw new Error('Failed to evaluate the current TDX TCB (TEE_TCB_SVN2)', { cause: e });
+    }
+}
+
+// TCB statuses Intel QVL accepts in each collateral structure
+const TCB_INFO_STATUSES = [
+    'UpToDate',
+    'OutOfDate',
+    'ConfigurationNeeded',
+    'Revoked',
+    'OutOfDateConfigurationNeeded',
+    'SWHardeningNeeded',
+    'ConfigurationAndSWHardeningNeeded',
+];
+const TDX_MODULE_STATUSES = ['UpToDate', 'OutOfDate', 'Revoked'];
+const QE_IDENTITY_STATUSES = ['UpToDate', 'OutOfDate', 'ConfigurationNeeded', 'Revoked', 'OutOfDateConfigurationNeeded'];
+
+// Reject a TCB status that Intel QVL does not accept for the given collateral structure
+function ensureValidStatus(status, valid, structure) {
+    if (!valid.includes(status)) {
+        throw new Error(`Unrecognized TCB status ${status} in ${structure}`);
+    }
 }
 
 // Find the first TCB level whose components are all met by the platform
@@ -420,6 +447,7 @@ function findTcbLevel(tcbInfo, cpuSvn, pceSvn, teeTcbSvn) {
             }
         }
 
+        ensureValidStatus(tcbLevel.tcbStatus, TCB_INFO_STATUSES, 'TCB Info');
         return tcbLevel;
     }
 
@@ -464,6 +492,7 @@ function matchTdxModuleLevel(tcbInfo, teeTcbSvn) {
     if (!level) {
         throw new Error(`TDX module ISVSVN ${moduleIsvsvn} is below minimum required from TDX module TCB levels`);
     }
+    ensureValidStatus(level.tcbStatus, TDX_MODULE_STATUSES, 'TDX module identity');
     return level;
 }
 
@@ -550,6 +579,7 @@ function verifyQeIdentityPolicy(qeReport, qeIdentity) {
 function matchQeTcbLevel(isvSvn, tcbLevels) {
     for (const tcbLevel of tcbLevels) {
         if (isvSvn >= tcbLevel.tcb.isvsvn) {
+            ensureValidStatus(tcbLevel.tcbStatus, QE_IDENTITY_STATUSES, 'QE Identity');
             return new TcbStatus(tcbLevel.tcbStatus, [...tcbLevel.advisoryIDs]);
         }
     }

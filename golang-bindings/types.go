@@ -41,11 +41,11 @@ type Quote struct {
 	CA           string      `json:"ca,omitempty"`
 	QuoteType    string      `json:"quote_type"`
 	// cert_type 2/3: encrypted PPID params for PCK cert fetch
-	QEID         HexBytes `json:"qe_id,omitempty"`
+	QEID          HexBytes `json:"qe_id,omitempty"`
 	EncryptedPPID HexBytes `json:"encrypted_ppid,omitempty"`
-	CertCPUSVN   HexBytes `json:"cert_cpusvn,omitempty"`
-	CertPCESVN   *uint16  `json:"cert_pcesvn,omitempty"`
-	CertPCEID    HexBytes `json:"cert_pceid,omitempty"`
+	CertCPUSVN    HexBytes `json:"cert_cpusvn,omitempty"`
+	CertPCESVN    *uint16  `json:"cert_pcesvn,omitempty"`
+	CertPCEID     HexBytes `json:"cert_pceid,omitempty"`
 }
 
 // QuoteHeader is the quote header.
@@ -136,13 +136,15 @@ type TcbStatusWithAdvisory struct {
 type TcbStatus string
 
 const (
-	TcbStatusUpToDate                          TcbStatus = "UpToDate"
-	TcbStatusOutOfDate                         TcbStatus = "OutOfDate"
-	TcbStatusOutOfDateConfigurationNeeded      TcbStatus = "OutOfDateConfigurationNeeded"
-	TcbStatusConfigurationNeeded               TcbStatus = "ConfigurationNeeded"
-	TcbStatusSWHardeningNeeded                 TcbStatus = "SWHardeningNeeded"
-	TcbStatusConfigurationAndSWHardeningNeeded TcbStatus = "ConfigurationAndSWHardeningNeeded"
-	TcbStatusRevoked                           TcbStatus = "Revoked"
+	TcbStatusUpToDate                             TcbStatus = "UpToDate"
+	TcbStatusOutOfDate                            TcbStatus = "OutOfDate"
+	TcbStatusOutOfDateConfigurationNeeded         TcbStatus = "OutOfDateConfigurationNeeded"
+	TcbStatusConfigurationNeeded                  TcbStatus = "ConfigurationNeeded"
+	TcbStatusSWHardeningNeeded                    TcbStatus = "SWHardeningNeeded"
+	TcbStatusConfigurationAndSWHardeningNeeded    TcbStatus = "ConfigurationAndSWHardeningNeeded"
+	TcbStatusRevoked                              TcbStatus = "Revoked"
+	TcbStatusTDRelaunchAdvised                    TcbStatus = "TDRelaunchAdvised"
+	TcbStatusTDRelaunchAdvisedConfigurationNeeded TcbStatus = "TDRelaunchAdvisedConfigurationNeeded"
 )
 
 // PCKExtension holds parsed Intel SGX extension values from a PCK certificate.

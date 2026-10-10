@@ -70,20 +70,6 @@ class TcbInfo {
     }
 }
 
-// TCB status severity ordering (higher number = worse status)
-function tcbStatusSeverity(status) {
-    switch (status) {
-        case 'UpToDate': return 0;
-        case 'SWHardeningNeeded': return 1;
-        case 'ConfigurationNeeded': return 2;
-        case 'ConfigurationAndSWHardeningNeeded': return 3;
-        case 'OutOfDate': return 4;
-        case 'OutOfDateConfigurationNeeded': return 5;
-        case 'Revoked': return 6;
-        default: return 100; // Unknown status treated as worst
-    }
-}
-
 class TcbStatus {
     constructor(status, advisoryIds) {
         this.status = status || 'Unknown';
@@ -103,6 +89,8 @@ class TcbStatus {
             case 'ConfigurationAndSWHardeningNeeded':
             case 'OutOfDate':
             case 'OutOfDateConfigurationNeeded':
+            case 'TDRelaunchAdvised':
+            case 'TDRelaunchAdvisedConfigurationNeeded':
                 return true;
             case 'Revoked':
                 return false;
@@ -111,17 +99,19 @@ class TcbStatus {
         }
     }
 
-    // Merge a platform status with a QE or TDX module status using Intel's
-    // convergence rule, combining advisory IDs
+    // Merge a platform status with a QE or TDX module status like Intel QVL's
+    // convergeTcbStatuses (only an OutOfDate or Revoked component affects the
+    // platform status), combining advisory IDs
     merge(other) {
-        let finalStatus;
-        if (other.status === 'OutOfDate' &&
-            (this.status === 'ConfigurationNeeded' || this.status === 'ConfigurationAndSWHardeningNeeded')) {
-            finalStatus = 'OutOfDateConfigurationNeeded';
-        } else {
-            finalStatus = tcbStatusSeverity(other.status) > tcbStatusSeverity(this.status)
-                ? other.status
-                : this.status;
+        let finalStatus = this.status;
+        if (other.status === 'Revoked') {
+            finalStatus = 'Revoked';
+        } else if (other.status === 'OutOfDate') {
+            if (finalStatus === 'UpToDate' || finalStatus === 'SWHardeningNeeded') {
+                finalStatus = 'OutOfDate';
+            } else if (finalStatus === 'ConfigurationNeeded' || finalStatus === 'ConfigurationAndSWHardeningNeeded') {
+                finalStatus = 'OutOfDateConfigurationNeeded';
+            }
         }
 
         const advisoryIds = [...this.advisoryIds];
@@ -133,6 +123,27 @@ class TcbStatus {
 
         return new TcbStatus(finalStatus, advisoryIds);
     }
+
+    // Combine the launch and current statuses of a TD 1.5 like Intel QVL's
+    // checkForRelaunch
+    checkForRelaunch(current) {
+        const launchOutOfDate = ['OutOfDate', 'OutOfDateConfigurationNeeded'].includes(this.status);
+        const currentNotOutOfDate = ['UpToDate', 'SWHardeningNeeded', 'ConfigurationNeeded', 'ConfigurationAndSWHardeningNeeded']
+            .includes(current.status);
+        if (!launchOutOfDate || !currentNotOutOfDate) {
+            return this;
+        }
+        const configurationNeeded = status => [
+            'ConfigurationNeeded',
+            'OutOfDateConfigurationNeeded',
+            'ConfigurationAndSWHardeningNeeded',
+            'TDRelaunchAdvisedConfigurationNeeded',
+        ].includes(status);
+        const status = configurationNeeded(this.status) || configurationNeeded(current.status)
+            ? 'TDRelaunchAdvisedConfigurationNeeded'
+            : 'TDRelaunchAdvised';
+        return new TcbStatus(status, this.advisoryIds);
+    }
 }
 
 module.exports = {
@@ -141,5 +152,4 @@ module.exports = {
     TcbLevel,
     TcbInfo,
     TcbStatus,
-    tcbStatusSeverity,
 };

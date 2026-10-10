@@ -67,6 +67,8 @@ impl QuotePolicy {
     const CONFIGURATION_AND_SW_HARDENING_NEEDED: u8 = 1 << 3;
     const OUT_OF_DATE: u8 = 1 << 4;
     const OUT_OF_DATE_CONFIGURATION_NEEDED: u8 = 1 << 5;
+    const TD_RELAUNCH_ADVISED: u8 = 1 << 6;
+    const TD_RELAUNCH_ADVISED_CONFIGURATION_NEEDED: u8 = 1 << 7;
 
     fn status_to_flag(status: TcbStatus) -> u8 {
         match status {
@@ -78,6 +80,10 @@ impl QuotePolicy {
             }
             TcbStatus::OutOfDate => Self::OUT_OF_DATE,
             TcbStatus::OutOfDateConfigurationNeeded => Self::OUT_OF_DATE_CONFIGURATION_NEEDED,
+            TcbStatus::TDRelaunchAdvised => Self::TD_RELAUNCH_ADVISED,
+            TcbStatus::TDRelaunchAdvisedConfigurationNeeded => {
+                Self::TD_RELAUNCH_ADVISED_CONFIGURATION_NEEDED
+            }
             TcbStatus::Revoked => 0,
         }
     }
@@ -225,9 +231,14 @@ impl Policy for QuotePolicy {
         }
 
         // 4. Platform TCB freshness: platform tcb_date_tag + grace >= now.
+        // The platform level is the launch TCB; a relaunch verdict means the
+        // current TCB is no longer out of date, so it is not subject to grace.
         let platform_is_out_of_date = matches!(
             data.platform.tcb_level.tcb_status,
             TcbStatus::OutOfDate | TcbStatus::OutOfDateConfigurationNeeded
+        ) && !matches!(
+            data.tcb.status,
+            TcbStatus::TDRelaunchAdvised | TcbStatus::TDRelaunchAdvisedConfigurationNeeded
         );
         let platform_in_grace = platform_is_out_of_date
             && within_grace(
