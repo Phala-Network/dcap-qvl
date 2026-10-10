@@ -351,6 +351,8 @@ try {
 - `"ConfigurationAndSWHardeningNeeded"`: Platform needs both configuration and software updates
 - `"SWHardeningNeeded"`: Software hardening updates needed
 - `"OutOfDateConfigurationNeeded"`: Platform is out of date and needs configuration
+- `"TDRelaunchAdvised"`: TD 1.5 only. The TD launched with an out-of-date TCB, but its current TCB (after a TD-preserving module update) is not out of date; relaunching the TD is advised
+- `"TDRelaunchAdvisedConfigurationNeeded"`: As `"TDRelaunchAdvised"`, and the platform also needs configuration
 
 ## License
 

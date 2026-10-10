@@ -81,6 +81,8 @@ Expired collateral is always rejected by the cryptographic verification pipeline
 
 **Platform grace** (`platform_grace_period`): Applies only to the **platform** TCB level (for TDX, converged with the TDX module TCB level and dated by the older of the two). For `OutOfDate` / `OutOfDateConfigurationNeeded`, checks `platform.tcb_date_tag + grace >= now`. The corresponding status must also be explicitly enabled with `allow_status`; setting either option alone does not accept an out-of-date platform.
 
+**TD relaunch** (`TDRelaunchAdvised` / `TDRelaunchAdvisedConfigurationNeeded`): For a TD 1.5 report, the launch TCB (`TEE_TCB_SVN`) and the current TCB (`TEE_TCB_SVN2`) are both evaluated. As in Intel QVL, a launch status of `OutOfDate` / `OutOfDateConfigurationNeeded` whose current status is no longer out of date becomes one of these statuses; `platform.tcb_level` stays the launch level. Platform grace does not apply to them, since the current TCB is not out of date. They are rejected unless enabled with `allow_status`. A `Revoked` current TCB is always rejected.
+
 **QE grace** (`qe_grace_period`): Applies only to the **QE** TCB level. For QE `OutOfDate`, checks `qe.tcb_level.tcb_date + grace >= now`. Because the merged verdict is also out of date, the corresponding merged status must be enabled with `allow_status`.
 
 Advisory blacklists are enforced regardless of whether a platform or QE is inside a grace window.

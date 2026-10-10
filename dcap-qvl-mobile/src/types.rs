@@ -239,7 +239,11 @@ impl Quote {
             cert_chain_pem,
             fmspc,
             ca,
-            kind: if q.header.is_sgx() { QuoteKind::Sgx } else { QuoteKind::Tdx },
+            kind: if q.header.is_sgx() {
+                QuoteKind::Sgx
+            } else {
+                QuoteKind::Tdx
+            },
         }
     }
 }
@@ -258,6 +262,8 @@ pub enum TcbStatus {
     ConfigurationNeeded,
     SwHardeningNeeded,
     Revoked,
+    TdRelaunchAdvised,
+    TdRelaunchAdvisedConfigurationNeeded,
 }
 
 impl From<CoreTcbStatus> for TcbStatus {
@@ -272,6 +278,10 @@ impl From<CoreTcbStatus> for TcbStatus {
             CoreTcbStatus::ConfigurationNeeded => TcbStatus::ConfigurationNeeded,
             CoreTcbStatus::SWHardeningNeeded => TcbStatus::SwHardeningNeeded,
             CoreTcbStatus::Revoked => TcbStatus::Revoked,
+            CoreTcbStatus::TDRelaunchAdvised => TcbStatus::TdRelaunchAdvised,
+            CoreTcbStatus::TDRelaunchAdvisedConfigurationNeeded => {
+                TcbStatus::TdRelaunchAdvisedConfigurationNeeded
+            }
         }
     }
 }
