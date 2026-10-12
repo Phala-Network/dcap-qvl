@@ -39,3 +39,9 @@ test('TD report 1.5ex extension fields are covered by the signature', () => {
         assert.throws(() => verify(tampered, COLLATERAL, NOW_SECS), /signature is invalid/);
     }
 });
+
+test('quote v5 body size must match the report', () => {
+    const tampered = Buffer.from(QUOTE);
+    tampered[50] ^= 1;
+    assert.throws(() => Quote.parse(tampered), /Invalid body size/);
+});

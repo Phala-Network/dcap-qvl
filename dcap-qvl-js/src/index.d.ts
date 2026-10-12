@@ -302,7 +302,10 @@ export class QuoteVerifier {
   allowDebug(allow: boolean): QuoteVerifier;
 
   /**
-   * Allow non-zero `mr_service_td` in TDX 1.5 quotes (opt-in). Default false.
+   * Allow a TDX 1.5 TD bound to service TDs: a non-zero `mrServiceTd` or the
+   * SERVTD_EXT attribute. Default false. For a TD 1.5ex quote with SERVTD_EXT,
+   * `mrServiceTd` is the service TD hash at TD creation; check
+   * `curServiceTdHash` for the currently bound service TDs.
    */
   allowServiceTd(allow: boolean): QuoteVerifier;
 
