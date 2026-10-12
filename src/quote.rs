@@ -156,13 +156,7 @@ pub struct TDAttributes {
 }
 
 const fn ones(range: core::ops::RangeInclusive<u32>) -> u64 {
-    let start = *range.start();
-    let end = *range.end();
-    let right_shift = match 63_u32.checked_sub(end) {
-        Some(shift) => shift,
-        None => panic!("bit range exceeds u64"),
-    };
-    (u64::MAX << start) & (u64::MAX >> right_shift)
+    (u64::MAX << *range.start()) & !(u64::MAX << *range.end() << 1)
 }
 
 // Intel TDX Module ABI Specification 348551-008US, Table 3.23:
@@ -189,9 +183,6 @@ pub struct SECFlags {
 
     /// SERVTD_EXT: Include a hash of SERVTD_EXT_STRUCT in TDREPORT_STRUCT
     pub servtd_ext: bool,
-
-    /// Positive reserved flags that attestation verifiers may accept (bits 22:18)
-    pub reserved_positive: u64,
 
     /// LASS: TD is allowed to use Linear Address Space Separation
     pub lass: bool,
@@ -226,7 +217,6 @@ impl TDAttributes {
         let tud = input[0];
         let icssd = is_set(16);
         let servtd_ext = is_set(17);
-        let reserved_positive = attributes & ones(18..=22);
         let lass = is_set(27);
         let sept_ve_disable = is_set(28);
         let migratable = is_set(29);
@@ -241,7 +231,6 @@ impl TDAttributes {
             sec: SECFlags {
                 icssd,
                 servtd_ext,
-                reserved_positive,
                 lass,
                 sept_ve_disable,
                 migratable,
@@ -281,7 +270,6 @@ mod td_attributes_tests {
 
         assert!(attributes.sec.icssd);
         assert!(attributes.sec.servtd_ext);
-        assert_eq!(attributes.sec.reserved_positive, ones(18..=22));
         assert!(attributes.sec.lass);
         assert!(attributes.sec.migratable);
         assert!(attributes.sec.kl);

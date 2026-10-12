@@ -657,13 +657,16 @@ function parseTdAttributes(input) {
     return {
         tud,
         sec: {
+            icssd: isSet(16),
             servtdExt: isSet(17),
+            lass: isSet(27),
             septVeDisable: isSet(28),
             migratable: isSet(29),
             pks: isSet(30),
             kl: isSet(31),
         },
         other: {
+            tpa: isSet(62),
             perfmon: isSet(63),
         },
         reserved: attributes & TD_ATTRIBUTES_RESERVED_MBZ_MASK,
