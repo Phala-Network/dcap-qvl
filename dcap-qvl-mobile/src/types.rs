@@ -239,11 +239,7 @@ impl Quote {
             cert_chain_pem,
             fmspc,
             ca,
-            kind: if q.header.is_sgx() {
-                QuoteKind::Sgx
-            } else {
-                QuoteKind::Tdx
-            },
+            kind: if q.header.is_sgx() { QuoteKind::Sgx } else { QuoteKind::Tdx },
         }
     }
 }

@@ -270,13 +270,21 @@ impl Policy for QuotePolicy {
             );
         }
 
-        // 2. Advisory ID blacklist.
-        for id in &data.platform.tcb_level.advisory_ids {
-            if advisory_rejected(&self.rejected_advisory_ids, id) {
-                bail!("Advisory ID {id} is rejected by policy");
-            }
-        }
-        for id in &data.qe.tcb_level.advisory_ids {
+        // 2. Advisory ID blacklist, covering both the launch and the current
+        // TCB of a TD 1.5.
+        let advisory_ids = data
+            .platform
+            .tcb_level
+            .advisory_ids
+            .iter()
+            .chain(
+                data.platform
+                    .current_tcb_level
+                    .iter()
+                    .flat_map(|l| &l.advisory_ids),
+            )
+            .chain(&data.qe.tcb_level.advisory_ids);
+        for id in advisory_ids {
             if advisory_rejected(&self.rejected_advisory_ids, id) {
                 bail!("Advisory ID {id} is rejected by policy");
             }
@@ -439,6 +447,7 @@ mod tests {
                     advisory_ids: vec![],
                 },
                 tcb_date_tag: 1_690_000_000, // ~2023-07-22
+                current_tcb_level: None,
                 pck: PckIdentity {
                     ppid: vec![0u8; 16],
                     cpu_svn: [0u8; 16],
@@ -657,6 +666,46 @@ mod tests {
         let policy = QuotePolicy::strict(1_702_000_000).allow_status(OutOfDateConfigurationNeeded);
         let err = policy.validate(&data).unwrap_err().to_string();
         assert!(err.contains("Platform TCB too old"), "{err}");
+    }
+
+    // -- TD relaunch --
+
+    /// A TD 1.5 launched with an out-of-date TCB whose current TCB is up to date.
+    fn make_relaunch_claims() -> QuoteClaims {
+        let mut data = make_test_claims(OutOfDate);
+        data.tcb.status = TDRelaunchAdvised;
+        let mut current = data.platform.tcb_level.clone();
+        current.tcb_status = UpToDate;
+        data.platform.current_tcb_level = Some(current);
+        data
+    }
+
+    #[test]
+    fn policy_relaunch_advised_rejected_unless_allowed() {
+        let data = make_relaunch_claims();
+        let policy = QuotePolicy::strict(1_702_000_000).allow_status(OutOfDate);
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("TDRelaunchAdvised"), "{err}");
+    }
+
+    #[test]
+    fn policy_relaunch_advised_not_subject_to_platform_grace() {
+        let data = make_relaunch_claims();
+        let policy = QuotePolicy::strict(1_702_000_000).allow_status(TDRelaunchAdvised);
+        assert!(policy.validate(&data).is_ok());
+    }
+
+    #[test]
+    fn policy_blacklist_checked_for_current_tcb() {
+        let mut data = make_relaunch_claims();
+        if let Some(current) = data.platform.current_tcb_level.as_mut() {
+            current.advisory_ids = vec!["INTEL-SA-00615".to_string()];
+        }
+        let policy = QuotePolicy::strict(1_702_000_000)
+            .allow_status(TDRelaunchAdvised)
+            .reject_advisory("INTEL-SA-00615");
+        let err = policy.validate(&data).unwrap_err().to_string();
+        assert!(err.contains("INTEL-SA-00615"), "{err}");
     }
 
     // -- min_tcb_eval_data_number --

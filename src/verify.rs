@@ -132,6 +132,7 @@ struct QuoteVerificationResult {
     tcb_status: TcbStatus,
     advisory_ids: Vec<String>,
     platform_tcb_level: TcbLevel,
+    current_tcb_level: Option<TcbLevel>,
     qe_tcb_level: QeTcbLevel,
     pck_ext: PckCertChainResult,
     qe_report: EnclaveReport,
@@ -186,6 +187,7 @@ impl QuoteVerificationResult {
             platform: PlatformInfo {
                 tcb_level: self.platform_tcb_level.clone(),
                 tcb_date_tag,
+                current_tcb_level: self.current_tcb_level.clone(),
                 pck: PckIdentity {
                     ppid: self.pck_ext.ppid.clone(),
                     cpu_svn: self.pck_ext.cpu_svn,
@@ -1464,7 +1466,7 @@ fn verify_impl(
     let qe_status =
         TcbStatusWithAdvisory::new(qe_tcb_level.tcb_status, qe_tcb_level.advisory_ids.clone());
     let mut final_status = platform_status.merge(&qe_status);
-    let current_status = current_tcb_level.map(|level| {
+    let current_status = current_tcb_level.as_ref().map(|level| {
         level
             .tcb_status
             .converge_with_component(qe_tcb_level.tcb_status)
@@ -1505,6 +1507,7 @@ fn verify_impl(
         tcb_status: final_status.status,
         advisory_ids: final_status.advisory_ids,
         platform_tcb_level,
+        current_tcb_level,
         qe_tcb_level,
         pck_ext: pck_result,
         qe_report,
