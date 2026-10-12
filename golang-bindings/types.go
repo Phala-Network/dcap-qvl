@@ -136,13 +136,15 @@ type TcbStatusWithAdvisory struct {
 type TcbStatus string
 
 const (
-	TcbStatusUpToDate                          TcbStatus = "UpToDate"
-	TcbStatusOutOfDate                         TcbStatus = "OutOfDate"
-	TcbStatusOutOfDateConfigurationNeeded      TcbStatus = "OutOfDateConfigurationNeeded"
-	TcbStatusConfigurationNeeded               TcbStatus = "ConfigurationNeeded"
-	TcbStatusSWHardeningNeeded                 TcbStatus = "SWHardeningNeeded"
-	TcbStatusConfigurationAndSWHardeningNeeded TcbStatus = "ConfigurationAndSWHardeningNeeded"
-	TcbStatusRevoked                           TcbStatus = "Revoked"
+	TcbStatusUpToDate                             TcbStatus = "UpToDate"
+	TcbStatusOutOfDate                            TcbStatus = "OutOfDate"
+	TcbStatusOutOfDateConfigurationNeeded         TcbStatus = "OutOfDateConfigurationNeeded"
+	TcbStatusConfigurationNeeded                  TcbStatus = "ConfigurationNeeded"
+	TcbStatusSWHardeningNeeded                    TcbStatus = "SWHardeningNeeded"
+	TcbStatusConfigurationAndSWHardeningNeeded    TcbStatus = "ConfigurationAndSWHardeningNeeded"
+	TcbStatusRevoked                              TcbStatus = "Revoked"
+	TcbStatusTDRelaunchAdvised                    TcbStatus = "TDRelaunchAdvised"
+	TcbStatusTDRelaunchAdvisedConfigurationNeeded TcbStatus = "TDRelaunchAdvisedConfigurationNeeded"
 )
 
 // PCKExtension holds parsed Intel SGX extension values from a PCK certificate.

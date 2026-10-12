@@ -91,7 +91,7 @@ pub struct QuoteClaims {
     pub header: Header,
     /// TEE type: `0x00000000` for SGX, `0x00000081` for TDX.
     pub tee_type: u32,
-    /// Merged TCB verdict (worst of platform + QE).
+    /// TCB verdict converged from the platform and QE statuses.
     pub tcb: TcbVerdict,
     /// Platform verification details.
     pub platform: PlatformInfo,
@@ -113,13 +113,12 @@ pub struct QuoteClaims {
     pub report: Report,
 }
 
-/// Merged TCB verdict from platform and QE status convergence.
-///
-/// Uses Intel's `convergeTcbStatusWithQeTcbStatus` logic to produce the
-/// worst-case status and union of advisory IDs.
+/// TCB verdict converged from the platform and QE statuses like Intel QVL's
+/// `convergeTcbStatuses`, with the union of their advisory IDs. For a TD 1.5
+/// it also reflects the current TCB like Intel's `checkForRelaunch`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TcbVerdict {
-    /// Merged TCB status (worst of platform TCB + QE TCB).
+    /// Converged TCB status.
     pub status: TcbStatus,
     /// Merged advisory IDs (union of platform + QE advisories).
     pub advisory_ids: Vec<String>,
@@ -131,11 +130,15 @@ pub struct TcbVerdict {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlatformInfo {
     /// The matched platform TCB level, not merged with the QE. For TDX it is
-    /// converged with the matched TDX module TCB level (worst status, union of
-    /// advisories, oldest date).
+    /// converged with the matched TDX module TCB level (union of advisories,
+    /// oldest date); for a TD 1.5 it is the launch TCB (`TEE_TCB_SVN`).
     pub tcb_level: TcbLevel,
     /// Platform TCB level date as unix timestamp (precomputed from `tcb_level.tcb_date`).
     pub tcb_date_tag: u64,
+    /// For a TD 1.5, the platform TCB level matched by the current TCB
+    /// (`TEE_TCB_SVN2`), converged like [`tcb_level`](Self::tcb_level).
+    #[serde(default)]
+    pub current_tcb_level: Option<TcbLevel>,
     /// PCK certificate identity fields.
     pub pck: PckIdentity,
     /// SHA-384 of root CA's raw public key bytes, matching Intel's `root_key_id`.
