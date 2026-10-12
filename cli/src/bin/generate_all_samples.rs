@@ -1159,10 +1159,11 @@ fn main() -> Result<()> {
         description: "TDX quote with every TDX 1.5 TD attribute accepted by default".to_string(),
         should_succeed: true,
         expected_error: None,
+        expected_status: None,
         quote_generator: Box::new(|| {
             generate_tdx_quote_with_td_attributes(&[16, 18, 19, 20, 21, 22, 27, 30, 31, 62])
         }),
-        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+        collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(1, "UpToDate")])),
     });
 
     for (name, bit, error) in [
@@ -1175,8 +1176,9 @@ fn main() -> Result<()> {
             description: format!("TDX quote with TD attribute bit {bit} set"),
             should_succeed: false,
             expected_error: Some(error.to_string()),
+            expected_status: None,
             quote_generator: Box::new(move || generate_tdx_quote_with_td_attributes(&[bit])),
-            collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
+            collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], &[(1, "UpToDate")])),
         });
     }
 
