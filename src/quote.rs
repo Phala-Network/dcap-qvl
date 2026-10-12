@@ -370,7 +370,8 @@ pub struct TDReport15Ex {
     /// Model information of the platform INIT_TEE_TCB_SVN was captured on.
     #[serde(with = "serde_bytes")]
     pub init_tee_fmspc: [u8; 12],
-    /// SERVTD_HASH of the currently bound service TDs.
+    /// SERVTD_HASH of the currently bound service TDs. Unlike `base.mr_service_td`,
+    /// which is the initial hash, this reflects bindings made after TD creation.
     #[serde(with = "serde_bytes")]
     pub cur_service_td_hash: [u8; 48],
     /// Attributes of the currently bound service TD.

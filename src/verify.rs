@@ -323,6 +323,10 @@ impl<C: Config> QuoteVerifier<C> {
         }
     }
 
+    /// Allow a TDX 1.5 TD bound to service TDs: a non-zero `mr_service_td` or the
+    /// SERVTD_EXT attribute. Default false. For a TD 1.5ex quote with SERVTD_EXT,
+    /// `mr_service_td` is the service TD hash at TD creation; check
+    /// `cur_service_td_hash` for the currently bound service TDs.
     pub fn allow_service_td(mut self, allow: bool) -> Self {
         self.allow_service_td = allow;
         self
