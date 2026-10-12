@@ -716,3 +716,10 @@ fn td15_ex_extension_is_signed() {
         assert!(verify(&raw_quote, &collateral, now).is_err());
     }
 }
+
+#[test]
+fn quote_v5_body_size_must_match_report() {
+    let mut raw_quote = include_bytes!("../sample/tdx_quote_td15ex").to_vec();
+    raw_quote[50] ^= 1;
+    assert!(Quote::parse(&raw_quote).is_err());
+}

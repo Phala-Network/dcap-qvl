@@ -333,6 +333,12 @@ pub struct TDReport15 {
 /// TD report for TDX 1.5ex: quote v5 body type 4 (`sgx_report2_body_v1_5_ex_t` in Intel's
 /// `sgx_quote_5.h`), the TDX 1.5 report followed by the fields below. Intel's QVL verifies it
 /// like a TDX 1.5 report (same TCB fields), with no extra checks on the added fields.
+///
+/// Intel's TDQE fills the service TD fields (`init_service_td_hash` through
+/// `cur_service_td_attributes`) from SERVTD_EXT_STRUCT only for a TD with the SERVTD_EXT
+/// attribute, setting `mr_service_td` to `init_service_td_hash`; otherwise they are zero.
+/// The initial platform TCB (`init_cpu_svn`, `init_tee_tcb_svn`, `init_tee_fmspc`) is not
+/// appraised.
 #[derive(
     Decode, Encode, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize,
 )]
@@ -341,6 +347,7 @@ pub struct TDReport15 {
 pub struct TDReport15Ex {
     pub base: TDReport15,
     /// VM index: 0 for an unpartitioned TD or the L1 VMM, 1-3 for TD VMs 1-3.
+    /// Only the L1 VMM can call TDG.MR.REPORT, so this is the VM it requested the report for.
     pub vmid: u8,
     /// TD instance statistically unique ID: regenerated on TD relaunch, preserved on TD-preserving update and migration.
     #[serde(with = "serde_bytes")]
@@ -348,10 +355,10 @@ pub struct TDReport15Ex {
     /// Hash of the device information CBOR.
     #[serde(with = "serde_bytes")]
     pub dev_info: [u8; 48],
-    /// Initial SERVTD_HASH (non-NRX) or migration policy hash (NRX).
+    /// SERVTD_HASH of the service TDs bound when the TD was created.
     #[serde(with = "serde_bytes")]
     pub init_service_td_hash: [u8; 48],
-    /// Initial SERVTD_ATTR (non-NRX) or 0 (NRX).
+    /// Attributes of the service TD bound when the TD was created.
     #[serde(with = "serde_bytes")]
     pub init_service_td_attributes: [u8; 8],
     /// TD's initial CPUSVN from creation.
@@ -363,10 +370,10 @@ pub struct TDReport15Ex {
     /// Model information of the platform INIT_TEE_TCB_SVN was captured on.
     #[serde(with = "serde_bytes")]
     pub init_tee_fmspc: [u8; 12],
-    /// Current SERVTD_HASH (non-NRX) or migration policy hash (NRX).
+    /// SERVTD_HASH of the currently bound service TDs.
     #[serde(with = "serde_bytes")]
     pub cur_service_td_hash: [u8; 48],
-    /// Current SERVTD_ATTR (non-NRX) or 0 (NRX).
+    /// Attributes of the currently bound service TD.
     #[serde(with = "serde_bytes")]
     pub cur_service_td_attributes: [u8; 8],
 }
@@ -598,6 +605,15 @@ impl Report {
             _ => None,
         }
     }
+
+    fn byte_len(&self) -> usize {
+        match self {
+            Report::SgxEnclave(_) => ENCLAVE_REPORT_BYTE_LEN,
+            Report::TD10(_) => TD_REPORT10_BYTE_LEN,
+            Report::TD15(_) => TD_REPORT15_BYTE_LEN,
+            Report::TD15Ex(_) => TD_REPORT15_EX_BYTE_LEN,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -645,6 +661,9 @@ impl Decode for Quote {
                         report = Report::TD15Ex(TDReport15Ex::decode(input)?);
                     }
                     _ => return Err(scale::Error::from("Unsupported body type")),
+                }
+                if body.size as usize != report.byte_len() {
+                    return Err(scale::Error::from("Invalid body size"));
                 }
             }
             _ => return Err(scale::Error::from("Unsupported quote version")),
@@ -731,14 +750,9 @@ impl Quote {
     }
 
     /// Get the length of signed data in the quote.
+    #[allow(clippy::arithmetic_side_effects)]
     pub fn signed_length(&self) -> usize {
-        let mut len = match self.report {
-            Report::SgxEnclave(_) => HEADER_BYTE_LEN + ENCLAVE_REPORT_BYTE_LEN,
-            Report::TD10(_) => HEADER_BYTE_LEN + TD_REPORT10_BYTE_LEN,
-            Report::TD15(_) => HEADER_BYTE_LEN + TD_REPORT15_BYTE_LEN,
-            Report::TD15Ex(_) => HEADER_BYTE_LEN + TD_REPORT15_EX_BYTE_LEN,
-        };
-        #[allow(clippy::arithmetic_side_effects)]
+        let mut len = HEADER_BYTE_LEN + self.report.byte_len();
         if self.header.version == 5 {
             len += BODY_BYTE_SIZE;
         }

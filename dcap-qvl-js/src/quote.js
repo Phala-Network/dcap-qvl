@@ -205,6 +205,8 @@ class TDReport15 {
 
 // TD report for TDX 1.5ex: quote v5 body type 4 (sgx_report2_body_v1_5_ex_t in Intel's sgx_quote_5.h),
 // the TDX 1.5 report followed by the fields below. Verified like a TDX 1.5 report, as Intel's QVL does.
+// Intel's TDQE sets the service TD fields (initServiceTdHash..curServiceTdAttributes) only for a TD
+// with the SERVTD_EXT attribute, and then sets mrServiceTd to initServiceTdHash.
 class TDReport15Ex {
     constructor(base, data) {
         this.base = base;
@@ -408,6 +410,7 @@ class Quote {
             }
         } else if (header.version === 5) {
             const body = Body.decode(reader);
+            const reportStart = reader.offset;
             if (body.bodyType === BODY_SGX_ENCLAVE_REPORT_TYPE) {
                 report = new Report('sgx', EnclaveReport.decode(reader));
             } else if (body.bodyType === BODY_TD_REPORT10_TYPE) {
@@ -418,6 +421,9 @@ class Quote {
                 report = new Report('td15ex', TDReport15Ex.decode(reader));
             } else {
                 throw new Error('Unsupported body type');
+            }
+            if (reader.offset - reportStart !== body.size) {
+                throw new Error('Invalid body size');
             }
         } else {
             throw new Error('Unsupported quote version');

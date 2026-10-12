@@ -1670,7 +1670,8 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
     }
     match &report {
         Report::TD15(report) => validate_td15(report, allow_service_td, allow_debug),
-        // Same checks as TDX 1.5, as in Intel's QVL: the 1.5ex fields carry no attributes to validate.
+        // Same checks as TDX 1.5, as in Intel's QVL. The 1.5ex service TD fields are only set for a TD
+        // with SERVTD_EXT, which the TD attribute checks gate.
         Report::TD15Ex(report) => validate_td15(&report.base, allow_service_td, allow_debug),
         // A TD with service TDs never gets a TD 1.0 body: Intel's TDQE emits a v5 quote for it.
         Report::TD10(report) => validate_td10(report, false, allow_debug),
