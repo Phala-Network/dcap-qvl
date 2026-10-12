@@ -1106,7 +1106,7 @@ fn main() -> Result<()> {
         should_succeed: true,
         expected_error: None,
         quote_generator: Box::new(|| {
-            generate_tdx_quote_with_td_attributes(&[16, 18, 19, 20, 21, 22, 27, 30, 31, 62, 63])
+            generate_tdx_quote_with_td_attributes(&[16, 18, 19, 20, 21, 22, 27, 30, 31, 62])
         }),
         collateral_modifier: Some(tdx_collateral_with_module([0x02; 48], 1)),
     });

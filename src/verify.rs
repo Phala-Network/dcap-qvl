@@ -1581,7 +1581,7 @@ fn validate_sgx_attrs(report: &EnclaveReport, allow_debug: bool) -> Result<()> {
 }
 
 fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) -> Result<()> {
-    fn validate_td10(report: &TDReport10, allow_service_td: bool, allow_debug: bool) -> Result<()> {
+    fn validate_td10(report: &TDReport10, allow_servtd_ext: bool, allow_debug: bool) -> Result<()> {
         let td_attrs = TDAttributes::parse(report.td_attributes)
             .map_err(anyhow::Error::msg)
             .context("Failed to parse TD attributes")?;
@@ -1597,7 +1597,7 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
         if td_attrs.sec.migratable {
             bail!("TD migration is enabled");
         }
-        if td_attrs.sec.servtd_ext && !allow_service_td {
+        if td_attrs.sec.servtd_ext && !allow_servtd_ext {
             bail!("SERVTD_EXT is enabled");
         }
         if !td_attrs.sec.sept_ve_disable {
@@ -1615,7 +1615,8 @@ fn validate_attrs(report: &Report, allow_service_td: bool, allow_debug: bool) ->
         Report::TD15(report) => validate_td15(report, allow_service_td, allow_debug),
         // Same checks as TDX 1.5, as in Intel's QVL: the 1.5ex fields carry no attributes to validate.
         Report::TD15Ex(report) => validate_td15(&report.base, allow_service_td, allow_debug),
-        Report::TD10(report) => validate_td10(report, allow_service_td, allow_debug),
+        // A TD with service TDs never gets a TD 1.0 body: Intel's TDQE emits a v5 quote for it.
+        Report::TD10(report) => validate_td10(report, false, allow_debug),
         Report::SgxEnclave(report) => validate_sgx_attrs(report, allow_debug),
     }
 }

@@ -581,7 +581,8 @@ function validateAttrs(report, allowDebug = false, allowServiceTd = false) {
     if (report.type === 'sgx') {
         validateSgx(report.data, allowDebug);
     } else if (report.type === 'td10') {
-        validateTd10(report.data, allowDebug, allowServiceTd);
+        // A TD with service TDs never gets a TD 1.0 body: Intel's TDQE emits a v5 quote for it.
+        validateTd10(report.data, allowDebug, false);
     } else if (report.type === 'td15') {
         validateTd15(report.data, allowDebug, allowServiceTd);
     } else if (report.type === 'td15ex') {
@@ -600,7 +601,7 @@ function validateSgx(report, allowDebug = false) {
     }
 }
 
-function validateTd10(report, allowDebug = false, allowServiceTd = false) {
+function validateTd10(report, allowDebug = false, allowServtdExt = false) {
     const tdAttrs = parseTdAttributes(report.tdAttributes);
 
     if ((tdAttrs.tud & 0x01) !== 0 && !allowDebug) {
@@ -616,7 +617,7 @@ function validateTd10(report, allowDebug = false, allowServiceTd = false) {
     if (tdAttrs.sec.migratable) {
         throw new Error('TD migration is enabled');
     }
-    if (tdAttrs.sec.servtdExt && !allowServiceTd) {
+    if (tdAttrs.sec.servtdExt && !allowServtdExt) {
         throw new Error('SERVTD_EXT is enabled');
     }
 
