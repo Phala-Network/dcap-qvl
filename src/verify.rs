@@ -728,6 +728,10 @@ fn verify_tcb_info_signature(
         trust_anchor,
         backend.sig_algo,
     )?;
+    ensure!(
+        tcb_path.len() == 1,
+        "TCB Info signer must be issued directly by the root CA"
+    );
 
     // Verify signature
     let asn1_signature = (backend.encode_ecdsa)(&collateral.tcb_info_signature)?;
@@ -787,14 +791,19 @@ fn verify_qe_identity_signature(
     let qe_id_path = if qe_id_certs == tcb_info_certs {
         None
     } else {
-        Some(verify_certificate_chain(
+        let path = verify_certificate_chain(
             &qe_id_leaf_cert,
             qe_id_chain,
             now,
             crls,
             trust_anchor,
             backend.sig_algo,
-        )?)
+        )?;
+        ensure!(
+            path.len() == 1,
+            "QE Identity signer must be issued directly by the root CA"
+        );
+        Some(path)
     };
 
     // Verify signature

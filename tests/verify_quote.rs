@@ -724,3 +724,23 @@ fn quote_v5_body_size_must_match_report() {
     let err = Quote::parse(&raw_quote).unwrap_err();
     assert!(err.to_string().contains("Invalid body size"), "{err}");
 }
+
+#[test]
+fn collateral_signer_must_be_issued_by_root() {
+    let raw_quote = include_bytes!("../sample/tdx_quote");
+    let collateral: QuoteCollateralV3 =
+        serde_json::from_slice(include_bytes!("../sample/tdx_quote_collateral.json")).unwrap();
+    let now = now_from_collateral(&collateral);
+    let quote = Quote::decode(&mut &raw_quote[..]).unwrap();
+    let pck_chain = String::from_utf8(quote.raw_cert_chain().unwrap().to_vec()).unwrap();
+
+    let mut forged = collateral.clone();
+    forged.tcb_info_issuer_chain = pck_chain.clone();
+    let err = verify(raw_quote, &forged, now).unwrap_err();
+    assert!(err.to_string().contains("TCB Info signer"), "{err:#}");
+
+    let mut forged = collateral;
+    forged.qe_identity_issuer_chain = pck_chain;
+    let err = verify(raw_quote, &forged, now).unwrap_err();
+    assert!(err.to_string().contains("QE Identity signer"), "{err:#}");
+}

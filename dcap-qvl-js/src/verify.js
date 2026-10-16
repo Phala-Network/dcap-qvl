@@ -145,6 +145,9 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
         crls,
         rootCaDer
     );
+    if (!Buffer.from(tcbLeafCerts[1]).equals(Buffer.from(rootCaDer))) {
+        throw new Error('TCB Info signer must be issued directly by the root CA');
+    }
 
     // Verify TCB info signature
     const tcbInfoSig = typeof collateral.tcb_info_signature === 'string'
@@ -192,6 +195,9 @@ function verifyImpl(rawQuote, collateral, nowSecs, rootCaDer, allowDebug = false
         crls,
         rootCaDer
     );
+    if (!Buffer.from(qeIdCerts[1]).equals(Buffer.from(rootCaDer))) {
+        throw new Error('QE Identity signer must be issued directly by the root CA');
+    }
 
     // Verify QE Identity signature
     const qeIdSig = typeof collateral.qe_identity_signature === 'string'
