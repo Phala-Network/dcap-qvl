@@ -162,7 +162,10 @@ pub use policy::{
     QuotePolicyConfig, TcbVerdict,
 };
 pub use qe_identity::{QeIdentity, QeTcb, QeTcbLevel};
-pub use tcb_info::{Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory};
+pub use tcb_info::{
+    SvnComponent, SvnShortfall, Tcb, TcbComponents, TcbInfo, TcbLevel, TcbStatus,
+    TcbStatusWithAdvisory,
+};
 
 pub mod quote;
 pub mod verify;
