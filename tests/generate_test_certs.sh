@@ -1,10 +1,10 @@
 #!/bin/bash
 # Generate test certificates for DCAP quote verification
 #
-# This script generates a 3-level certificate chain for testing:
+# This script generates the test certificates:
 # - Root CA (CA:TRUE)
 # - TCB Signing CA (CA:TRUE) - intermediate CA for signing CRLs
-# - TCB Signer (CA:FALSE) - end-entity cert for signing TCB Info and QE Identity
+# - TCB Signer (CA:FALSE) - issued by the Root CA, signs TCB Info and QE Identity
 # - PCK Certificate (CA:FALSE)
 # - CRLs
 #
@@ -64,10 +64,9 @@ openssl req -new -key "$CERTS_DIR/tcb_signing.pkcs8.key" \
     -out "$CERTS_DIR/tcb_signing.csr" \
     -subj "/CN=Test TCB Signer/O=Test/C=US"
 
-# Sign TCB signer certificate with TCB Signing CA (version 3)
-# This is an end-entity cert (CA:FALSE) for signing data
+# Sign TCB signer certificate with Root CA directly, like Intel's TCB Signing cert
 openssl x509 -req -in "$CERTS_DIR/tcb_signing.csr" \
-    -CA "$CERTS_DIR/tcb_signing_ca.pem" -CAkey "$CERTS_DIR/tcb_signing_ca.pkcs8.key" \
+    -CA "$CERTS_DIR/root_ca.pem" -CAkey "$CERTS_DIR/root_ca.key" \
     -CAcreateserial -out "$CERTS_DIR/tcb_signing.pem" -days 3650 \
     -extfile /dev/stdin <<EOF
 basicConstraints = CA:FALSE
@@ -99,8 +98,8 @@ authorityKeyIdentifier = keyid:always,issuer
 EOF
 
 echo "Creating certificate chains..."
-# Create TCB chain (TCB signer + TCB Signing CA + Root CA) - 3-level chain
-cat "$CERTS_DIR/tcb_signing.pem" "$CERTS_DIR/tcb_signing_ca.pem" "$CERTS_DIR/root_ca.pem" > "$CERTS_DIR/tcb_chain.pem"
+# Create TCB chain (TCB signer + Root CA)
+cat "$CERTS_DIR/tcb_signing.pem" "$CERTS_DIR/root_ca.pem" > "$CERTS_DIR/tcb_chain.pem"
 
 # Create CA-only TCB chain for testing CaUsedAsEndEntity error
 # This chain uses the CA cert as the signing cert (wrong!)
