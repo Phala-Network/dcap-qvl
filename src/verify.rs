@@ -12,9 +12,7 @@ use {
     crate::constants::*,
     crate::policy::PckCertFlag,
     crate::qe_identity::{QeIdentity, QeTcbLevel},
-    crate::tcb_info::{
-        TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleIdentity, TdxModuleTcbLevel,
-    },
+    crate::tcb_info::{TcbInfo, TcbLevel, TcbStatus, TcbStatusWithAdvisory, TdxModuleTcbLevel},
     alloc::string::{String, ToString},
     alloc::vec::Vec,
 };
@@ -1023,7 +1021,7 @@ fn match_platform_tcb(
     tcb_info: &TcbInfo,
     quote: &Quote,
     tee_type: TeeType,
-    cpu_svn: &[u8],
+    cpu_svn: &CpuSvn,
     pce_svn: u16,
     fmspc: &[u8],
 ) -> Result<(TcbLevel, Option<TcbLevel>)> {
@@ -1111,55 +1109,18 @@ fn ensure_valid_status(status: TcbStatus, valid: &[TcbStatus], structure: &str) 
 /// Find the first TCB level whose components are all met by the platform.
 fn find_tcb_level<'a>(
     tcb_info: &'a TcbInfo,
-    cpu_svn: &[u8],
+    cpu_svn: &CpuSvn,
     pce_svn: u16,
     tee_tcb_svn: Option<&[u8; 16]>,
 ) -> Result<&'a TcbLevel> {
     for tcb_level in &tcb_info.tcb_levels {
-        if pce_svn < tcb_level.tcb.pce_svn {
-            continue;
+        if tcb_level
+            .shortfalls(cpu_svn, pce_svn, tee_tcb_svn)?
+            .is_empty()
+        {
+            ensure_valid_status(tcb_level.tcb_status, TCB_INFO_STATUSES, "TCB Info")?;
+            return Ok(tcb_level);
         }
-
-        let sgx_components: Vec<u8> = tcb_level.tcb.sgx_components.iter().map(|c| c.svn).collect();
-        if sgx_components.len() != cpu_svn.len() {
-            bail!(
-                "SGX component count mismatch: expected {}, got {}",
-                cpu_svn.len(),
-                sgx_components.len()
-            );
-        }
-
-        // Component-wise comparison: every cpu_svn[i] must be >= sgx_components[i]
-        if cpu_svn.iter().zip(&sgx_components).any(|(a, b)| a < b) {
-            continue;
-        }
-
-        if let Some(tee_tcb_svn) = tee_tcb_svn {
-            let tdx_components: Vec<u8> =
-                tcb_level.tcb.tdx_components.iter().map(|c| c.svn).collect();
-            if tdx_components.len() != tee_tcb_svn.len() {
-                bail!(
-                    "TDX component count mismatch: expected {}, got {}",
-                    tee_tcb_svn.len(),
-                    tdx_components.len()
-                );
-            }
-            // Component-wise comparison: every tee_tcb_svn[i] must be >= tdx_components[i].
-            // Like Intel QVL, a non-zero module version leaves the module SVNs
-            // (indices 0 and 1) to the TDX module identity evaluation.
-            let skip = if tee_tcb_svn[1] > 0 { 2 } else { 0 };
-            if tee_tcb_svn
-                .iter()
-                .zip(&tdx_components)
-                .skip(skip)
-                .any(|(a, b)| a < b)
-            {
-                continue;
-            }
-        }
-
-        ensure_valid_status(tcb_level.tcb_status, TCB_INFO_STATUSES, "TCB Info")?;
-        return Ok(tcb_level);
     }
 
     bail!("No matching TCB level found");
@@ -1169,7 +1130,7 @@ fn find_tcb_level<'a>(
 /// module TCB level selected by the same SVNs.
 fn evaluate_tdx_tcb(
     tcb_info: &TcbInfo,
-    cpu_svn: &[u8],
+    cpu_svn: &CpuSvn,
     pce_svn: u16,
     tee_tcb_svn: &[u8; 16],
 ) -> Result<TcbLevel> {
@@ -1198,38 +1159,19 @@ fn evaluate_tdx_tcb(
     Ok(tcb_level)
 }
 
-/// The module identity selected by the module version (`tee_tcb_svn[1]`), or
-/// `None` if the version is 0.
-fn tdx_module_identity<'a>(
-    tcb_info: &'a TcbInfo,
-    tee_tcb_svn: &[u8; 16],
-) -> Result<Option<&'a TdxModuleIdentity>> {
-    let module_version = tee_tcb_svn[1];
-    if module_version == 0 {
-        return Ok(None);
-    }
-    let wanted_id = format!("TDX_{:02X}", module_version);
-    tcb_info
-        .tdx_module_identities
-        .iter()
-        .find(|id| id.id.eq_ignore_ascii_case(&wanted_id))
-        .with_context(|| format!("No TDX module identity with id {wanted_id} found in TCB Info"))
-        .map(Some)
-}
-
 /// The module TCB level met by the module ISVSVN (`tee_tcb_svn[0]`).
 fn match_tdx_module_level<'a>(
     tcb_info: &'a TcbInfo,
     tee_tcb_svn: &[u8; 16],
 ) -> Result<Option<&'a TdxModuleTcbLevel>> {
-    let Some(identity) = tdx_module_identity(tcb_info, tee_tcb_svn)? else {
+    let Some(identity) = tcb_info.tdx_module_identity(tee_tcb_svn)? else {
         return Ok(None);
     };
     let module_isvsvn = tee_tcb_svn[0];
     let level = identity
         .tcb_levels
         .iter()
-        .find(|level| module_isvsvn >= level.tcb.isvsvn)
+        .find(|level| level.shortfall(tee_tcb_svn).is_none())
         .with_context(|| {
             format!(
                 "TDX module ISVSVN {module_isvsvn} is below minimum required from TDX module TCB levels"
@@ -1270,7 +1212,7 @@ fn verify_tdx_module_identity(tcb_info: &TcbInfo, td_report: &TDReport10) -> Res
     let mut attributes_mask =
         decode_hex_array::<8>(&base_module.attributes_mask, "tdxModule.attributesMask")?;
 
-    if let Some(identity) = tdx_module_identity(tcb_info, &td_report.tee_tcb_svn)? {
+    if let Some(identity) = tcb_info.tdx_module_identity(&td_report.tee_tcb_svn)? {
         expected_mrsigner =
             decode_hex_array::<48>(&identity.mrsigner, "tdxModuleIdentity.mrsigner")?;
         expected_attributes =

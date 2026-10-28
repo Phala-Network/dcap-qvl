@@ -1,5 +1,8 @@
+use crate::constants::CpuSvn;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use anyhow::{ensure, Context, Result};
 use core::cmp::Ordering;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -48,6 +51,28 @@ impl TcbInfo {
         self.tcb_levels
             .sort_by(|a, b| compare_tcb_levels(a, b, is_tdx));
     }
+
+    /// The TDX module identity selected by the module version
+    /// (`tee_tcb_svn[1]`), or `None` if the version is 0.
+    ///
+    /// Errors if the TCB Info has no identity for the version.
+    pub fn tdx_module_identity(
+        &self,
+        tee_tcb_svn: &[u8; 16],
+    ) -> Result<Option<&TdxModuleIdentity>> {
+        let module_version = tee_tcb_svn[1];
+        if module_version == 0 {
+            return Ok(None);
+        }
+        let wanted_id = format!("TDX_{:02X}", module_version);
+        self.tdx_module_identities
+            .iter()
+            .find(|id| id.id.eq_ignore_ascii_case(&wanted_id))
+            .with_context(|| {
+                format!("No TDX module identity with id {wanted_id} found in TCB Info")
+            })
+            .map(Some)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -60,6 +85,88 @@ pub struct TcbLevel {
     pub tcb_status: TcbStatus,
     #[serde(rename = "advisoryIDs", default)]
     pub advisory_ids: Vec<String>,
+}
+
+/// A security version number checked by TCB level matching.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SvnComponent {
+    /// SGX TCB component `i` (`CPUSVN[i]`).
+    Sgx(u8),
+    /// TDX TCB component `i` (`TEE_TCB_SVN[i]`).
+    Tdx(u8),
+    /// PCE SVN.
+    PceSvn,
+    /// TDX module ISVSVN (`TEE_TCB_SVN[0]`), judged by a TDX module identity.
+    TdxModuleIsvSvn,
+}
+
+/// A component whose SVN is below what a TCB level requires.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SvnShortfall {
+    pub component: SvnComponent,
+    pub have: u16,
+    pub needs: u16,
+}
+
+fn short(
+    component: SvnComponent,
+    have: impl Into<u16>,
+    needs: impl Into<u16>,
+) -> Option<SvnShortfall> {
+    let (have, needs) = (have.into(), needs.into());
+    (have < needs).then_some(SvnShortfall {
+        component,
+        have,
+        needs,
+    })
+}
+
+impl TcbLevel {
+    /// The components of this level the platform falls short of. The platform
+    /// meets the level if this is empty.
+    ///
+    /// `tee_tcb_svn` is `None` for SGX. For a TD 1.5, both `TEE_TCB_SVN` and
+    /// `TEE_TCB_SVN2` must meet a level. Like Intel QVL, a non-zero module
+    /// version (`tee_tcb_svn[1]`) leaves TDX components 0 and 1 to the TDX
+    /// module identity, see [`TcbInfo::tdx_module_identity`].
+    ///
+    /// Errors if the component counts do not match.
+    pub fn shortfalls(
+        &self,
+        cpu_svn: &CpuSvn,
+        pce_svn: u16,
+        tee_tcb_svn: Option<&[u8; 16]>,
+    ) -> Result<Vec<SvnShortfall>> {
+        let tcb = &self.tcb;
+        ensure!(
+            tcb.sgx_components.len() == cpu_svn.len(),
+            "SGX component count mismatch: expected {}, got {}",
+            cpu_svn.len(),
+            tcb.sgx_components.len()
+        );
+        let mut shortfalls: Vec<_> = (0u8..)
+            .zip(cpu_svn.iter().zip(&tcb.sgx_components))
+            .filter_map(|(i, (&have, needs))| short(SvnComponent::Sgx(i), have, needs.svn))
+            .chain(short(SvnComponent::PceSvn, pce_svn, tcb.pce_svn))
+            .collect();
+
+        if let Some(tee_tcb_svn) = tee_tcb_svn {
+            ensure!(
+                tcb.tdx_components.len() == tee_tcb_svn.len(),
+                "TDX component count mismatch: expected {}, got {}",
+                tee_tcb_svn.len(),
+                tcb.tdx_components.len()
+            );
+            let skip = if tee_tcb_svn[1] > 0 { 2 } else { 0 };
+            shortfalls.extend(
+                (0u8..)
+                    .zip(tee_tcb_svn.iter().zip(&tcb.tdx_components))
+                    .skip(skip)
+                    .filter_map(|(i, (&have, needs))| short(SvnComponent::Tdx(i), have, needs.svn)),
+            );
+        }
+        Ok(shortfalls)
+    }
 }
 
 fn compare_tcb_levels(a: &TcbLevel, b: &TcbLevel, is_tdx: bool) -> Ordering {
@@ -135,6 +242,17 @@ pub struct TdxModuleTcbLevel {
     pub tcb_status: TcbStatus,
     #[serde(rename = "advisoryIDs", default)]
     pub advisory_ids: Vec<String>,
+}
+
+impl TdxModuleTcbLevel {
+    /// `Some` if the module ISVSVN (`tee_tcb_svn[0]`) is below this level.
+    pub fn shortfall(&self, tee_tcb_svn: &[u8; 16]) -> Option<SvnShortfall> {
+        short(
+            SvnComponent::TdxModuleIsvSvn,
+            tee_tcb_svn[0],
+            self.tcb.isvsvn,
+        )
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -381,6 +499,49 @@ mod tests {
             tdx_module: None,
             tdx_module_identities: vec![],
         }
+    }
+
+    #[test]
+    fn shortfalls_name_unmet_components() {
+        use SvnComponent::*;
+        let short = |component, have, needs| SvnShortfall {
+            component,
+            have,
+            needs,
+        };
+        let svns = |prefix: &[u8]| {
+            let mut svn = [0u8; 16];
+            svn.iter_mut().zip(prefix).for_each(|(s, p)| *s = *p);
+            svn
+        };
+        let level = make_tcb_level(&svns(&[2, 2]), 10, &svns(&[3, 1, 4, 4]), UpToDate);
+        let mut tee_tcb_svn = svns(&[2, 0, 4, 3]);
+
+        assert_eq!(
+            level.shortfalls(&svns(&[2, 1]), 9, Some(&tee_tcb_svn)).ok(),
+            Some(vec![
+                short(Sgx(1), 1, 2),
+                short(PceSvn, 9, 10),
+                short(Tdx(0), 2, 3),
+                short(Tdx(1), 0, 1),
+                short(Tdx(3), 3, 4),
+            ])
+        );
+        // A module version leaves TDX components 0 and 1 to the module identity.
+        tee_tcb_svn[1] = 1;
+        assert_eq!(
+            level
+                .shortfalls(&svns(&[2, 2]), 10, Some(&tee_tcb_svn))
+                .ok(),
+            Some(vec![short(Tdx(3), 3, 4)])
+        );
+        assert_eq!(
+            level.shortfalls(&svns(&[2, 2]), 10, None).ok(),
+            Some(vec![])
+        );
+        assert!(make_tcb_level(&[2], 10, &[], UpToDate)
+            .shortfalls(&svns(&[2]), 10, None)
+            .is_err());
     }
 
     #[allow(clippy::expect_used)]
