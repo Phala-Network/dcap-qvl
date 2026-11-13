@@ -364,13 +364,28 @@ export interface Collateral {
 }
 
 /**
+ * Options for collateral fetching.
+ */
+export interface CollateralFetchOptions {
+  /** AbortSignal that cancels the collateral fetches. */
+  signal?: AbortSignal;
+  /**
+   * Per-request deadline in milliseconds, covering both response headers and
+   * body buffering. Default: 30000. Pass 0 to disable the deadline.
+   */
+  timeoutMs?: number;
+}
+
+/**
  * Get collateral for a quote from a PCCS server
  * @param pccsUrl - PCCS server URL (e.g., 'https://your-pccs-server.com/sgx/certification/v4/')
  * @param quoteBytes - Raw quote bytes
+ * @param options - Optional signal/deadline applied to every fetch
  */
 export function getCollateral(
   pccsUrl: string,
-  quoteBytes: Buffer | Uint8Array
+  quoteBytes: Buffer | Uint8Array,
+  options?: CollateralFetchOptions
 ): Promise<Collateral>;
 
 /**
@@ -379,28 +394,36 @@ export function getCollateral(
  * @param fmspc - FMSPC as hex string
  * @param ca - CA type ('processor' or 'platform')
  * @param forSgx - Whether this is for SGX (true) or TDX (false)
+ * @param options - Optional signal/deadline applied to every fetch
  */
 export function getCollateralForFmspc(
   pccsUrl: string,
   fmspc: string,
   ca: string,
-  forSgx: boolean
+  forSgx: boolean,
+  options?: CollateralFetchOptions
 ): Promise<Collateral>;
 
 /**
  * Get collateral from Intel's PCS (Production Certification Service)
  * @param quoteBytes - Raw quote bytes
+ * @param options - Optional signal/deadline applied to every fetch
  */
-export function getCollateralFromPcs(quoteBytes: Buffer | Uint8Array): Promise<Collateral>;
+export function getCollateralFromPcs(
+  quoteBytes: Buffer | Uint8Array,
+  options?: CollateralFetchOptions
+): Promise<Collateral>;
 
 /**
  * Get collateral and verify a quote in one call
  * @param quoteBytes - Raw quote bytes
  * @param pccsUrl - Optional PCCS server URL (defaults to Phala PCCS)
+ * @param options - Optional signal/deadline applied to every fetch
  */
 export function getCollateralAndVerify(
   quoteBytes: Buffer | Uint8Array,
-  pccsUrl?: string
+  pccsUrl?: string,
+  options?: CollateralFetchOptions
 ): Promise<VerifiedReport>;
 
 // ============================================================================
