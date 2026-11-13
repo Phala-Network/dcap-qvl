@@ -1,4 +1,10 @@
 [toolchain]
-channel = "1.86.0"
+# >= 1.87: the emitted wasm contains bulk-memory opcodes (memory.fill/copy)
+# and cargo-near only passes --enable-bulk-memory to its wasm-opt post-step
+# when it detects rustc >= 1.87. On 1.86 wasm-opt rejects the contract.
+# near-sdk 5 declares a lower max-rustc, so the build passes
+# --skip-rust-version-check (Makefile); nearcore >= 2.12 supports bulk
+# memory at runtime.
+channel = "1.87.0"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]

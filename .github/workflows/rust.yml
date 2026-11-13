@@ -289,12 +289,6 @@ jobs:
     strategy:
       matrix:
         backend: [ring, rustcrypto]
-    env:
-      # cargo-near's wasm-opt validator rejects bulk-memory instructions
-      # (memory.fill/copy) that modern rustc emits by default
-      # (rust-lang/rust#141080). Stop emitting them so validation passes
-      # regardless of validator version.
-      RUSTFLAGS: "-C target-feature=-bulk-memory"
     steps:
       - uses: actions/checkout@v7
       - name: Install cargo-near
