@@ -148,6 +148,13 @@ opt-level = "z"
 panic = "abort"
 strip = "symbols"
 
+[lints.cargo]
+# Newer cargo versions report `unused dependency` warnings (e.g. byteorder,
+# futures, scale-info under some feature sets); several are optional/feature-
+# referenced, so warn-level noise becomes a hard failure under
+# CARGO_BUILD_WARNINGS=deny (setup-rust-toolchain). Keep the lint advisory.
+unused_dependencies = "allow"
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
