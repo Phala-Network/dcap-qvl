@@ -4,10 +4,10 @@ pub const TEST_QUOTE_HEX: &str = include_str!("quote/quote_hex.txt");
 pub const TEST_QUOTE_COLLATERAL: &str = include_str!("quote/quote_collateral.json");
 
 // Gas regression ceilings. Adjust them together with any intentional change in gas usage.
-// Measured with ring (rustc 1.85.0): verify 126.0 TGas, verify_with_policy 127.0 TGas.
+// Measured with ring (rustc 1.87.0, near-sandbox 0.4 / nearcore 2.14): verify 117.5 TGas, verify_with_policy 118.4 TGas.
 #[cfg(feature = "ring")]
 pub const MAX_VERIFY_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(128);
-// Measured with rustcrypto: verify 98.2 TGas, verify_with_policy 99.5 TGas.
+// Measured with rustcrypto (rustc 1.87.0, near-sandbox 0.4 / nearcore 2.14): verify 98.7 TGas, verify_with_policy 99.5 TGas.
 #[cfg(not(feature = "ring"))]
 pub const MAX_VERIFY_GAS: near_gas::NearGas = near_gas::NearGas::from_tgas(100);
 /// Extra gas `verify_with_policy` may spend on building claims on top of `verify`.
