@@ -228,7 +228,9 @@ jobs:
 
   mobile-bindings-ios:
     name: Build iOS XCFramework + run Swift tests
-    runs-on: macos-14
+    # macos-14 runners stopped being allocated (jobs cancelled at queue time);
+    # macos-15 is the current supported label.
+    runs-on: macos-15
     needs: mobile-bindings-rust
     steps:
       - uses: actions/checkout@v7
@@ -292,7 +294,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install cargo-near
-        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.22.0/cargo-near-installer.sh | sh
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.23.0/cargo-near-installer.sh | sh
       - name: Run NEAR gas test
         run: make test_near_gas NEAR_GAS_BACKEND=${{ matrix.backend }}
 

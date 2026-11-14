@@ -1,4 +1,10 @@
 [toolchain]
-channel = "1.86.0"
+# >= 1.87: rustc emits bulk-memory opcodes (memory.fill/copy) and cargo-near
+# only passes --enable-bulk-memory to its wasm-opt post-step when it detects
+# rustc >= 1.87. The sandbox must also support bulk memory at runtime:
+# near-sandbox 0.4 bundles nearcore 2.14 (>= 2.12, which added support).
+# near-sdk 5 declares a lower max-rustc, so the build passes
+# --skip-rust-version-check (Makefile).
+channel = "1.87.0"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]

@@ -115,7 +115,11 @@ NEAR_GAS_BACKEND ?= rustcrypto
 test_near_gas:
 	@echo "Building NEAR gas test contract..."
 	@rustup target add wasm32-unknown-unknown
-	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test,$(NEAR_GAS_BACKEND)
+	# rustc >= 1.87 (see gas-test/rust-toolchain.toml) makes cargo-near pass
+	# --enable-bulk-memory to its wasm-opt post-step; near-sdk 5 pins a lower
+	# max-rustc, so the version check is skipped. The matching near-sandbox
+	# (0.4, nearcore 2.14) executes bulk-memory wasm.
+	cd tests/near/contracts/gas-test && cargo near build non-reproducible-wasm --manifest-path Cargo.toml --features test,$(NEAR_GAS_BACKEND) --skip-rust-version-check
 	@echo "Running NEAR gas consumption tests..."
 	cd tests/near/contracts/gas-test && cargo test --features test,$(NEAR_GAS_BACKEND) -- --nocapture
 
