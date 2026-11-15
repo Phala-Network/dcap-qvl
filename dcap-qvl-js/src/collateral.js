@@ -1,10 +1,7 @@
 // Collateral fetching from PCCS
 // Converted from collateral.rs
 
-// Use native fetch in browsers, node-fetch in Node.js
-const fetch = typeof globalThis.fetch !== 'undefined'
-    ? globalThis.fetch
-    : require('node-fetch');
+// Requires Node.js >= 18.17 (global fetch, AbortSignal.timeout).
 const { Buffer } = require('buffer');
 const { Quote } = require('./quote');
 const intel = require('./intel');
@@ -71,8 +68,8 @@ function getHeader(response, name) {
     return decodeURIComponent(value);
 }
 
-// Default per-request deadline for collateral fetches. Aborting a settled
-// fetch does not stop body reads, so the deadline covers headers and body.
+// Default deadline for a whole collateral operation. All serial fetches in
+// one getCollateral* call share a single deadline created at the entry point.
 const DEFAULT_COLLATERAL_TIMEOUT_MS = 30_000;
 
 function abortError() {
@@ -81,86 +78,99 @@ function abortError() {
     return error;
 }
 
-/**
- * Fetch a URL as bytes with a caller signal and a deadline.
- * The deadline covers the whole operation (headers + body buffering);
- * aborting alone would only cover the headers phase.
- */
-async function fetchWithDeadline(url, options) {
-    const response = await fetchResponseWithDeadline(url, options);
-    return Buffer.from(await response.arrayBuffer());
+// Combine two AbortSignals into one. Done manually because AbortSignal.any
+// requires Node 20 while engines allow Node 18.
+function combineSignals(a, b) {
+    if (!a) return b || null;
+    if (!b) return a;
+    if (a.aborted) return a;
+    if (b.aborted) return b;
+    const controller = new AbortController();
+    const forward = (src) => src.addEventListener('abort', () => controller.abort(src.reason), { once: true });
+    forward(a);
+    forward(b);
+    return controller.signal;
+}
+
+// Build the per-operation signal: the caller's signal plus one deadline that
+// bounds the entire collateral fetch sequence.
+function operationSignal(options) {
+    const { signal, timeoutMs } = options || {};
+    const effective = timeoutMs === undefined ? DEFAULT_COLLATERAL_TIMEOUT_MS : timeoutMs;
+    const deadline = effective > 0 ? AbortSignal.timeout(effective) : null;
+    return combineSignals(signal || null, deadline);
+}
+
+function rethrowClassified(error, url) {
+    if (error && error.name === 'TimeoutError') {
+        throw new Error(`Collateral fetch timed out: ${url}`, { cause: error });
+    }
+    throw error;
 }
 
 /**
- * Fetch a URL with a caller signal and a deadline, returning a Response
- * whose body is fully buffered. The deadline covers the whole operation
- * (headers + body buffering); aborting a settled fetch alone would only
- * cover the headers phase.
+ * Fetch a URL and return a Response whose body is fully buffered.
+ *
+ * `signal` must carry the whole-operation deadline/cancellation (see
+ * operationSignal). Aborting a settled fetch does NOT reject a pending body
+ * read — verified on Node 18/20/22/24, where a stalled arrayBuffer() only
+ * settles when the server eventually responds — so the read is raced against
+ * the signal and the underlying body is torn down on cancellation.
  */
-async function fetchResponseWithDeadline(url, options) {
-    const { signal, timeoutMs } = options || {};
-    const effectiveTimeout = timeoutMs === undefined ? DEFAULT_COLLATERAL_TIMEOUT_MS : timeoutMs;
-    if (signal) {
-        if (signal.aborted) {
-            throw signal.reason instanceof Error ? signal.reason : abortError();
-        }
-    }
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal ? signal.reason : undefined);
-    if (signal) signal.addEventListener('abort', onAbort, { once: true });
-    let timeout;
-    let rejectRead;
-    let inFlightResponse;
-    const deadlineError = () => new Error(`Collateral fetch timed out after ${effectiveTimeout}ms: ${url}`);
-    const onDeadline = () => {
-        // Aborting a settled fetch does not stop body reads, so reject a
-        // pending body read explicitly and tear the connection down.
-        controller.abort(deadlineError());
-        if (rejectRead) rejectRead(deadlineError());
-        const body = inFlightResponse && inFlightResponse.body;
-        try {
-            if (body && typeof body.cancel === 'function') body.cancel().catch(() => {});
-            if (body && typeof body.destroy === 'function') body.destroy();
-        } catch {
-            // Best-effort teardown.
-        }
-    };
-    if (effectiveTimeout > 0) {
-        timeout = setTimeout(onDeadline, effectiveTimeout);
-        if (typeof timeout.unref === 'function') timeout.unref();
-    }
+async function fetchBuffered(url, { signal } = {}) {
+    let response;
     try {
-        const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) {
-            throw new Error(`Failed to fetch ${url}: ${response.status}`);
-        }
-        const read = response.arrayBuffer();
-        inFlightResponse = response;
-        let buffer;
-        if (timeout) {
-            // A losing body read must not surface as an unhandled rejection
-            // once the deadline has already rejected the call.
-            read.catch(() => {});
-            buffer = await new Promise((resolve, reject) => {
-                rejectRead = reject;
-                read.then(resolve, reject);
-            });
-        } else {
-            buffer = await read;
-        }
+        response = await fetch(url, signal ? { signal } : {});
+    } catch (error) {
+        rethrowClassified(error, url);
+    }
+    const body = response.body;
+    if (!body) return response;
+    const read = response.arrayBuffer();
+    if (!signal) {
+        const buffer = await read;
         return new Response(buffer, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers,
         });
-    } finally {
-        if (signal) signal.removeEventListener('abort', onAbort);
-        if (timeout) clearTimeout(timeout);
     }
+    // A losing body read must not surface as an unhandled rejection once the
+    // signal has already rejected the call.
+    read.catch(() => {});
+    let onAbortFail;
+    const onAbort = new Promise((_, reject) => {
+        onAbortFail = () => reject(signal.reason instanceof Error ? signal.reason : abortError());
+        if (signal.aborted) onAbortFail();
+        else signal.addEventListener('abort', onAbortFail, { once: true });
+    });
+    let buffer;
+    try {
+        buffer = await Promise.race([read, onAbort]);
+    } catch (error) {
+        try {
+            if (typeof body.cancel === 'function') body.cancel().catch(() => {});
+            if (typeof body.destroy === 'function') body.destroy();
+        } catch {
+            // Best-effort teardown.
+        }
+        rethrowClassified(error, url);
+    } finally {
+        if (onAbortFail) signal.removeEventListener('abort', onAbortFail);
+    }
+    return new Response(buffer, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    });
 }
 
 async function httpGet(url, options) {
-    return fetchWithDeadline(url, options);
+    const response = await fetchBuffered(url, options);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
 }
 
 /**
@@ -184,7 +194,7 @@ async function fetchPckCertificate(pccsUrl, params, options) {
 
     const url = `${baseUrl}/sgx/certification/v4/pckcert?qeid=${qeid}&encrypted_ppid=${encryptedPpid}&cpusvn=${cpusvn}&pcesvn=${pcesvn}&pceid=${pceid}`;
 
-    const response = await fetchResponseWithDeadline(url, options);
+    const response = await fetchBuffered(url, options);
     if (!response.ok) {
         throw new Error(`Failed to fetch PCK certificate from ${url}: ${response.status}`);
     }
@@ -276,16 +286,17 @@ async function getPckChain(pccsUrl, quote, options) {
 }
 
 async function getCollateral(pccsUrl, quoteBytes, options) {
+    const op = { signal: operationSignal(options) };
     const quote = Quote.parse(quoteBytes);
 
     // Get PCK certificate chain (from quote or PCCS)
-    const pckChain = await getPckChain(pccsUrl, quote, options);
+    const pckChain = await getPckChain(pccsUrl, quote, op);
 
     // Extract FMSPC and CA from the certificate
     const { fmspc, ca } = extractFmspcAndCa(pckChain);
 
     // Fetch the rest of the collateral
-    const collateral = await getCollateralForFmspcImpl(pccsUrl, fmspc, ca, quote.header.isSgx(), options);
+    const collateral = await getCollateralForFmspcImpl(pccsUrl, fmspc, ca, quote.header.isSgx(), op);
 
     // Attach the PCK certificate chain for offline verification
     collateral.pck_certificate_chain = pckChain;
@@ -295,11 +306,11 @@ async function getCollateral(pccsUrl, quoteBytes, options) {
 
 /**
  * Get collateral for a known FMSPC (public API).
- * @param options - Optional { signal, timeoutMs } applied to every fetch;
- *                  timeoutMs defaults to 30000 and covers headers + body.
+ * @param options - Optional { signal, timeoutMs }; timeoutMs (default 30000)
+ *                  is one deadline for the whole operation, 0 disables it.
  */
 async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx, options) {
-    return getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options);
+    return getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, { signal: operationSignal(options) });
 }
 
 /**
@@ -311,7 +322,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options) {
     // Fetch PCK CRL
     let pckCrlIssuerChain, pckCrl;
     {
-        const response = await fetchResponseWithDeadline(endpoints.urlPckcrl(), options);
+        const response = await fetchBuffered(endpoints.urlPckcrl(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch PCK CRL: ${response.status}`);
         }
@@ -322,7 +333,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options) {
     // Fetch TCB Info
     let tcbInfoIssuerChain, rawTcbInfo;
     {
-        const response = await fetchResponseWithDeadline(endpoints.urlTcb(), options);
+        const response = await fetchBuffered(endpoints.urlTcb(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch TCB info: ${response.status}`);
         }
@@ -340,7 +351,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options) {
     // Fetch QE Identity
     let qeIdentityIssuerChain, rawQeIdentity;
     {
-        const response = await fetchResponseWithDeadline(endpoints.urlQeIdentity(), options);
+        const response = await fetchBuffered(endpoints.urlQeIdentity(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch QE identity: ${response.status}`);
         }
@@ -358,8 +369,10 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options) {
             // PCCS returns hex-encoded CRL
             const hexStr = crl.toString('utf-8');
             rootCaCrl = Buffer.from(hexStr, 'hex');
-        } catch (e) {
-            // Ignore, will try extracting from cert chain
+        } catch (error) {
+            // Caller cancellation and the operation deadline must surface;
+            // only benign failures fall back to the cert-chain extraction.
+            if (options && options.signal && options.signal.aborted) throw error;
         }
     }
 

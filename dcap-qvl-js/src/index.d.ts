@@ -370,8 +370,9 @@ export interface CollateralFetchOptions {
   /** AbortSignal that cancels the collateral fetches. */
   signal?: AbortSignal;
   /**
-   * Per-request deadline in milliseconds, covering both response headers and
-   * body buffering. Default: 30000. Pass 0 to disable the deadline.
+   * Deadline in milliseconds for the ENTIRE collateral operation: all serial
+   * fetches in one getCollateral* call share this single deadline (a quote
+   * fetch performs up to ~6 requests). Default: 30000. Pass 0 to disable.
    */
   timeoutMs?: number;
 }

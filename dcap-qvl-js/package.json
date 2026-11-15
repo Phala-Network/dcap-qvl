@@ -36,7 +36,6 @@
   "author": "",
   "license": "Apache-2.0",
   "browser": {
-    "node-fetch": false,
     "crypto": false
   },
   "dependencies": {
@@ -46,10 +45,9 @@
     "bn.js": "^5.2.2",
     "buffer": "^6.0.3",
     "elliptic": "^6.6.1",
-    "hash.js": "^1.1.7",
-    "node-fetch": "^2.7.0"
+    "hash.js": "^1.1.7"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.17.0"
   }
 }

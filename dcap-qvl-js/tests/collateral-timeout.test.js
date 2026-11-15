@@ -28,7 +28,7 @@ test('collateral fetch rejects at the deadline when the server never responds', 
         const start = Date.now();
         await assert.rejects(
             getCollateralForFmspc(url, ...ARGS, { timeoutMs: 150 }),
-            /timed out after 150ms/,
+            /timed out/,
         );
         assert.ok(Date.now() - start < 2000, 'must reject at the deadline, not hang indefinitely');
     });
@@ -43,7 +43,7 @@ test('collateral fetch deadline covers the response body, not just the headers',
         const start = Date.now();
         await assert.rejects(
             getCollateralForFmspc(url, ...ARGS, { timeoutMs: 150 }),
-            /timed out after 150ms/,
+            /timed out/,
         );
         assert.ok(Date.now() - start < 2000, 'must reject at the deadline, not hang indefinitely');
     });
@@ -89,17 +89,21 @@ test('HTTP error statuses still surface unchanged', async () => {
 });
 
 test('timeoutMs 0 disables the deadline', async () => {
-    let requests = 0;
     await withServer((req, res) => {
-        requests += 1;
-        // Slow-but-finite response, slower than the other tests' deadlines.
+        // Answers slower than the short deadline below, but well within the default.
         setTimeout(() => {
             res.writeHead(404);
             res.end('late');
         }, 300);
     }, async (url) => {
-        // No timeout configured: the 404 surfaces once the server answers.
+        // With a deadline shorter than the server's response time, the call rejects.
+        const start = Date.now();
+        await assert.rejects(
+            getCollateralForFmspc(url, ...ARGS, { timeoutMs: 100 }),
+            /timed out/,
+        );
+        assert.ok(Date.now() - start < 2000, 'must reject at the deadline');
+        // timeoutMs 0 opts out: the same slow server now gets to answer.
         await assert.rejects(getCollateralForFmspc(url, ...ARGS, { timeoutMs: 0 }), /404/);
-        assert.ok(requests > 0);
     });
 });
