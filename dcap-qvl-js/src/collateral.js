@@ -72,33 +72,16 @@ function getHeader(response, name) {
 // one getCollateral* call share a single deadline created at the entry point.
 const DEFAULT_COLLATERAL_TIMEOUT_MS = 30_000;
 
-function abortError() {
-    const error = new Error('The operation was aborted');
-    error.name = 'AbortError';
-    return error;
-}
-
-// Combine two AbortSignals into one. Done manually because AbortSignal.any
-// requires Node 20 while engines allow Node 18.
-function combineSignals(a, b) {
-    if (!a) return b || null;
-    if (!b) return a;
-    if (a.aborted) return a;
-    if (b.aborted) return b;
-    const controller = new AbortController();
-    const forward = (src) => src.addEventListener('abort', () => controller.abort(src.reason), { once: true });
-    forward(a);
-    forward(b);
-    return controller.signal;
-}
-
 // Build the per-operation signal: the caller's signal plus one deadline that
 // bounds the entire collateral fetch sequence.
 function operationSignal(options) {
     const { signal, timeoutMs } = options || {};
     const effective = timeoutMs === undefined ? DEFAULT_COLLATERAL_TIMEOUT_MS : timeoutMs;
-    const deadline = effective > 0 ? AbortSignal.timeout(effective) : null;
-    return combineSignals(signal || null, deadline);
+    const signals = [
+        signal,
+        effective > 0 ? AbortSignal.timeout(effective) : null,
+    ].filter(Boolean);
+    return signals.length ? AbortSignal.any(signals) : null;
 }
 
 function rethrowClassified(error, url) {
@@ -112,57 +95,23 @@ function rethrowClassified(error, url) {
  * Fetch a URL and return a Response whose body is fully buffered.
  *
  * `signal` must carry the whole-operation deadline/cancellation (see
- * operationSignal). Aborting a settled fetch does NOT reject a pending body
- * read — verified on Node 18/20/22/24, where a stalled arrayBuffer() only
- * settles when the server eventually responds — so the read is raced against
- * the signal and the underlying body is torn down on cancellation.
+ * operationSignal). The signal stays attached for the body read, so the
+ * deadline covers the whole response: a stalled body read rejects as soon as
+ * the signal fires (verified on Node 18/20/22/24 — the pending arrayBuffer()
+ * rejects within ~150ms of abort).
  */
 async function fetchBuffered(url, { signal } = {}) {
-    let response;
     try {
-        response = await fetch(url, signal ? { signal } : {});
-    } catch (error) {
-        rethrowClassified(error, url);
-    }
-    const body = response.body;
-    if (!body) return response;
-    const read = response.arrayBuffer();
-    if (!signal) {
-        const buffer = await read;
+        const response = await fetch(url, signal ? { signal } : {});
+        const buffer = await response.arrayBuffer();
         return new Response(buffer, {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers,
         });
-    }
-    // A losing body read must not surface as an unhandled rejection once the
-    // signal has already rejected the call.
-    read.catch(() => {});
-    let onAbortFail;
-    const onAbort = new Promise((_, reject) => {
-        onAbortFail = () => reject(signal.reason instanceof Error ? signal.reason : abortError());
-        if (signal.aborted) onAbortFail();
-        else signal.addEventListener('abort', onAbortFail, { once: true });
-    });
-    let buffer;
-    try {
-        buffer = await Promise.race([read, onAbort]);
     } catch (error) {
-        try {
-            if (typeof body.cancel === 'function') body.cancel().catch(() => {});
-            if (typeof body.destroy === 'function') body.destroy();
-        } catch {
-            // Best-effort teardown.
-        }
         rethrowClassified(error, url);
-    } finally {
-        if (onAbortFail) signal.removeEventListener('abort', onAbortFail);
     }
-    return new Response(buffer, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-    });
 }
 
 async function httpGet(url, options) {
