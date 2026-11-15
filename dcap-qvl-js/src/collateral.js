@@ -1,10 +1,7 @@
 // Collateral fetching from PCCS
 // Converted from collateral.rs
 
-// Use native fetch in browsers, node-fetch in Node.js
-const fetch = typeof globalThis.fetch !== 'undefined'
-    ? globalThis.fetch
-    : require('node-fetch');
+// Requires Node.js >= 18.17 (global fetch, AbortSignal.timeout).
 const { Buffer } = require('buffer');
 const { Quote } = require('./quote');
 const intel = require('./intel');
@@ -71,8 +68,54 @@ function getHeader(response, name) {
     return decodeURIComponent(value);
 }
 
-async function httpGet(url) {
-    const response = await fetch(url);
+// Default deadline for a whole collateral operation. All serial fetches in
+// one getCollateral* call share a single deadline created at the entry point.
+const DEFAULT_COLLATERAL_TIMEOUT_MS = 30_000;
+
+// Build the per-operation signal: the caller's signal plus one deadline that
+// bounds the entire collateral fetch sequence.
+function operationSignal(options) {
+    const { signal, timeoutMs } = options || {};
+    const effective = timeoutMs === undefined ? DEFAULT_COLLATERAL_TIMEOUT_MS : timeoutMs;
+    const signals = [
+        signal,
+        effective > 0 ? AbortSignal.timeout(effective) : null,
+    ].filter(Boolean);
+    return signals.length ? AbortSignal.any(signals) : null;
+}
+
+function rethrowClassified(error, url) {
+    if (error && error.name === 'TimeoutError') {
+        throw new Error(`Collateral fetch timed out: ${url}`, { cause: error });
+    }
+    throw error;
+}
+
+/**
+ * Fetch a URL and return a Response whose body is fully buffered.
+ *
+ * `signal` must carry the whole-operation deadline/cancellation (see
+ * operationSignal). The signal stays attached for the body read, so the
+ * deadline covers the whole response: a stalled body read rejects as soon as
+ * the signal fires (verified on Node 18/20/22/24 — the pending arrayBuffer()
+ * rejects within ~150ms of abort).
+ */
+async function fetchBuffered(url, { signal } = {}) {
+    try {
+        const response = await fetch(url, signal ? { signal } : {});
+        const buffer = await response.arrayBuffer();
+        return new Response(buffer, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+        });
+    } catch (error) {
+        rethrowClassified(error, url);
+    }
+}
+
+async function httpGet(url, options) {
+    const response = await fetchBuffered(url, options);
     if (!response.ok) {
         throw new Error(`Failed to fetch ${url}: ${response.status}`);
     }
@@ -82,7 +125,7 @@ async function httpGet(url) {
 /**
  * Fetch PCK certificate from PCCS using encrypted PPID parameters.
  */
-async function fetchPckCertificate(pccsUrl, params) {
+async function fetchPckCertificate(pccsUrl, params, options) {
     // PCCS normalizes parameters to uppercase, Intel PCS accepts both
     // Use uppercase for compatibility with both
     const qeid = Buffer.from(params.qeid).toString('hex').toUpperCase();
@@ -100,7 +143,7 @@ async function fetchPckCertificate(pccsUrl, params) {
 
     const url = `${baseUrl}/sgx/certification/v4/pckcert?qeid=${qeid}&encrypted_ppid=${encryptedPpid}&cpusvn=${cpusvn}&pcesvn=${pcesvn}&pceid=${pceid}`;
 
-    const response = await fetch(url);
+    const response = await fetchBuffered(url, options);
     if (!response.ok) {
         throw new Error(`Failed to fetch PCK certificate from ${url}: ${response.status}`);
     }
@@ -173,7 +216,7 @@ function extractFmspcAndCa(pemChain) {
  * - cert_type 5: extracts from quote
  * - cert_type 2/3: fetches from PCCS using encrypted PPID
  */
-async function getPckChain(pccsUrl, quote) {
+async function getPckChain(pccsUrl, quote, options) {
     const innerCertType = quote.innerCertType();
 
     switch (innerCertType) {
@@ -184,24 +227,25 @@ async function getPckChain(pccsUrl, quote) {
         case PCK_ID_ENCRYPTED_PPID_2048:
         case PCK_ID_ENCRYPTED_PPID_3072: {
             const params = quote.encryptedPpidParams();
-            return fetchPckCertificate(pccsUrl, params);
+            return fetchPckCertificate(pccsUrl, params, options);
         }
         default:
             throw new Error(`Unsupported certification data type: ${innerCertType}`);
     }
 }
 
-async function getCollateral(pccsUrl, quoteBytes) {
+async function getCollateral(pccsUrl, quoteBytes, options) {
+    const op = { signal: operationSignal(options) };
     const quote = Quote.parse(quoteBytes);
 
     // Get PCK certificate chain (from quote or PCCS)
-    const pckChain = await getPckChain(pccsUrl, quote);
+    const pckChain = await getPckChain(pccsUrl, quote, op);
 
     // Extract FMSPC and CA from the certificate
     const { fmspc, ca } = extractFmspcAndCa(pckChain);
 
     // Fetch the rest of the collateral
-    const collateral = await getCollateralForFmspcImpl(pccsUrl, fmspc, ca, quote.header.isSgx());
+    const collateral = await getCollateralForFmspcImpl(pccsUrl, fmspc, ca, quote.header.isSgx(), op);
 
     // Attach the PCK certificate chain for offline verification
     collateral.pck_certificate_chain = pckChain;
@@ -211,21 +255,23 @@ async function getCollateral(pccsUrl, quoteBytes) {
 
 /**
  * Get collateral for a known FMSPC (public API).
+ * @param options - Optional { signal, timeoutMs }; timeoutMs (default 30000)
+ *                  is one deadline for the whole operation, 0 disables it.
  */
-async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx) {
-    return getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx);
+async function getCollateralForFmspc(pccsUrl, fmspc, ca, forSgx, options) {
+    return getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, { signal: operationSignal(options) });
 }
 
 /**
  * Internal implementation for fetching collateral by FMSPC.
  */
-async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
+async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx, options) {
     const endpoints = new PcsEndpoints(pccsUrl, forSgx, fmspc, ca);
 
     // Fetch PCK CRL
     let pckCrlIssuerChain, pckCrl;
     {
-        const response = await fetch(endpoints.urlPckcrl());
+        const response = await fetchBuffered(endpoints.urlPckcrl(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch PCK CRL: ${response.status}`);
         }
@@ -236,7 +282,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
     // Fetch TCB Info
     let tcbInfoIssuerChain, rawTcbInfo;
     {
-        const response = await fetch(endpoints.urlTcb());
+        const response = await fetchBuffered(endpoints.urlTcb(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch TCB info: ${response.status}`);
         }
@@ -254,7 +300,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
     // Fetch QE Identity
     let qeIdentityIssuerChain, rawQeIdentity;
     {
-        const response = await fetch(endpoints.urlQeIdentity());
+        const response = await fetchBuffered(endpoints.urlQeIdentity(), options);
         if (!response.ok) {
             throw new Error(`Failed to fetch QE identity: ${response.status}`);
         }
@@ -268,12 +314,14 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
     // Try to get from PCCS endpoint first (for non-PCS URLs)
     if (!endpoints.isPcs()) {
         try {
-            const crl = await httpGet(endpoints.urlRootcacrl());
+            const crl = await httpGet(endpoints.urlRootcacrl(), options);
             // PCCS returns hex-encoded CRL
             const hexStr = crl.toString('utf-8');
             rootCaCrl = Buffer.from(hexStr, 'hex');
-        } catch (e) {
-            // Ignore, will try extracting from cert chain
+        } catch (error) {
+            // Caller cancellation and the operation deadline must surface;
+            // only benign failures fall back to the cert-chain extraction.
+            if (options && options.signal && options.signal.aborted) throw error;
         }
     }
 
@@ -291,7 +339,7 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
             throw new Error('Could not find CRL distribution point in root certificate');
         }
 
-        rootCaCrl = await httpGet(crlUrl);
+        rootCaCrl = await httpGet(crlUrl, options);
     }
 
     // Parse TCB info
@@ -318,13 +366,13 @@ async function getCollateralForFmspcImpl(pccsUrl, fmspc, ca, forSgx) {
     };
 }
 
-async function getCollateralFromPcs(quoteBytes) {
-    return getCollateral(INTEL_PCS_URL, quoteBytes);
+async function getCollateralFromPcs(quoteBytes, options) {
+    return getCollateral(INTEL_PCS_URL, quoteBytes, options);
 }
 
-async function getCollateralAndVerify(quoteBytes, pccsUrl) {
+async function getCollateralAndVerify(quoteBytes, pccsUrl, options) {
     const url = (pccsUrl || '').trim() || PHALA_PCCS_URL;
-    const collateral = await getCollateral(url, quoteBytes);
+    const collateral = await getCollateral(url, quoteBytes, options);
     const now = Math.floor(Date.now() / 1000);
 
     const { verify } = require('./verify');
