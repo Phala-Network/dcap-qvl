@@ -293,8 +293,14 @@ jobs:
         backend: [ring, rustcrypto]
     steps:
       - uses: actions/checkout@v7
+      # The installer carries the SHA-256 of each release archive and checks
+      # the one it downloads, so checking the installer covers the binary too.
+      # Bumping cargo-near means updating the URL and this checksum together.
       - name: Install cargo-near
-        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/download/cargo-near-v0.23.0/cargo-near-installer.sh | sh
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf -o cargo-near-installer.sh https://github.com/near/cargo-near/releases/download/cargo-near-v0.23.0/cargo-near-installer.sh
+          echo "76ae71bc6a99864a09cc67c1c0bf82a2b7812d8ab4c93034b680235df6d22028  cargo-near-installer.sh" | sha256sum -c -
+          sh cargo-near-installer.sh
       - name: Run NEAR gas test
         run: make test_near_gas NEAR_GAS_BACKEND=${{ matrix.backend }}
 
