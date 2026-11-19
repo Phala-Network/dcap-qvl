@@ -24,8 +24,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      release-id: ${{ steps.create-release.outputs.id }}
-      upload-url: ${{ steps.create-release.outputs.upload_url }}
+      tag: ${{ steps.get-version.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,17 +79,20 @@ jobs:
           \`\`\`
           EOF
 
+      # gh calls the same Create a release endpoint as the archived
+      # actions/create-release did. --target only applies when the tag does
+      # not exist yet (a manual run), as the action's commitish default did.
       - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.get-version.outputs.tag }}
-          release_name: Release ${{ steps.get-version.outputs.tag }}
-          body_path: changelog.md
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease || false }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.get-version.outputs.tag }}
+          PRERELEASE: ${{ github.event.inputs.prerelease || false }}
+        run: |
+          flags=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" --title "Release $TAG" --notes-file changelog.md --target "$GITHUB_SHA" "${flags[@]}"
 
   build-rust:
     name: Build Rust Binaries
@@ -132,15 +134,18 @@ jobs:
           cd cli
           cargo build --release --target ${{ matrix.target }}
 
+      # gh names the asset after the file, so the binary is copied to the
+      # asset name first.
       - name: Upload CLI Binary
-        uses: actions/upload-release-asset@v1
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload-url }}
-          asset_path: cli/target/${{ matrix.target }}/release/dcap-qvl${{ contains(matrix.target, 'windows') && '.exe' || '' }}
-          asset_name: ${{ matrix.artifact-name }}
-          asset_content_type: application/octet-stream
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+          BINARY: cli/target/${{ matrix.target }}/release/dcap-qvl${{ contains(matrix.target, 'windows') && '.exe' || '' }}
+          ASSET: ${{ matrix.artifact-name }}
+        run: |
+          cp "$BINARY" "$ASSET"
+          gh release upload "$TAG" "$ASSET"
 
   publish-crates:
     name: Publish to crates.io
