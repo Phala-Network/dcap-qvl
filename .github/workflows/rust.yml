@@ -19,6 +19,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -29,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
     - name: Build
       run: cargo build --verbose --features json-core,default-x509,ring,rustcrypto,report
     - name: Run tests
@@ -39,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -68,6 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -95,6 +103,8 @@ jobs:
     needs: golang-bindings
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -121,6 +131,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -137,6 +149,8 @@ jobs:
     needs: mobile-bindings-rust
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@v6
@@ -180,6 +194,8 @@ jobs:
     needs: mobile-bindings-android
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Java
         uses: actions/setup-java@v6
@@ -237,6 +253,8 @@ jobs:
     needs: mobile-bindings-rust
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -256,6 +274,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
       - name: Check wasm32 build
@@ -266,6 +286,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Add no_std target
         run: rustup target add thumbv7em-none-eabihf
       - name: Clippy std builds without default features
@@ -296,6 +318,8 @@ jobs:
         backend: [ring, rustcrypto]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # The installer carries the SHA-256 of each release archive and checks
       # the one it downloads, so checking the installer covers the binary too.
       # Bumping cargo-near means updating the URL and this checksum together.
@@ -312,6 +336,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Format code
         run: cargo fmt --all -- --check
 
@@ -320,6 +346,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Check code with clippy
         run: cargo clippy -- -D warnings
 
@@ -328,5 +356,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Check cli code with clippy
         run: cd cli && cargo clippy -- -D warnings

@@ -33,6 +33,8 @@ jobs:
     environment: maven-central     # gates secrets behind environment approval
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Derive the version: explicit input > tag > Cargo.toml fallback
       - name: Resolve version
