@@ -63,12 +63,11 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Setup Python 3.8
         run: uv python install 3.8
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt --component clippy
+          rustup override set stable
       - name: Install Zig
         run: |
           curl -L https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
@@ -123,12 +122,12 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Setup Python 3.8
         run: uv python install 3.8
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt --component clippy
+          rustup override set stable
       - name: Build Windows wheel
         working-directory: python-bindings
         run: |
@@ -170,12 +169,11 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Setup Python 3.8
         run: uv python install 3.8
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt --component clippy
+          rustup override set stable
       - name: Build wheel natively
         working-directory: python-bindings
         run: |
@@ -223,12 +221,11 @@ jobs:
         uses: astral-sh/setup-uv@v7
       - name: Setup Python 3.8
         run: uv python install 3.8
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt --component clippy
+          rustup override set stable
       - name: Build wheel natively
         working-directory: python-bindings
         run: |
@@ -268,12 +265,11 @@ jobs:
           export VERSION_SEMVER
           python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn("^(version\\s*=\\s*)\"[^\"]*\"", lambda m: m.group(1)+f"\"{ver}\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: |
+          rustup set profile minimal
+          rustup toolchain install stable --component rustfmt --component clippy
+          rustup override set stable
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
