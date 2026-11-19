@@ -33,7 +33,7 @@ jobs:
     permissions:
       contents: write # gh release view, create and upload
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Resolve tag / version
         id: ver
@@ -51,7 +51,7 @@ jobs:
           echo "Tag=$TAG Version=$VERSION"
 
       - name: Setup Rust + Apple targets
-        uses: actions-rust-lang/setup-rust-toolchain@v2
+        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
         with:
           toolchain: stable
           target: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
