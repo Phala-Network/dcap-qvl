@@ -16,6 +16,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -23,6 +26,8 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create
     outputs:
       tag: ${{ steps.get-version.outputs.tag }}
     steps:
@@ -98,6 +103,8 @@ jobs:
     name: Build Rust Binaries
     needs: create-release
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # gh release upload
     strategy:
       matrix:
         include:
