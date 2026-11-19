@@ -20,6 +20,9 @@ on:
           - sonatype       # Maven Central via central.sonatype.com
         default: 'none'
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

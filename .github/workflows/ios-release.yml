@@ -20,6 +20,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 env:
   SATELLITE_REPO: Phala-Network/dcap-qvl-swift
 
@@ -27,6 +30,8 @@ jobs:
   release-swift:
     name: Build XCFramework + publish Swift package
     runs-on: macos-14
+    permissions:
+      contents: write # gh release view, create and upload
     steps:
       - uses: actions/checkout@v7
 
