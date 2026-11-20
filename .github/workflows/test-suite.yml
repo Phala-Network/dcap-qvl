@@ -30,6 +30,7 @@ jobs:
       - name: Install wasm-opt
         run: |
           wget https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz
+          echo "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe  binaryen-version_123-x86_64-linux.tar.gz" | sha256sum -c -
           tar xzf binaryen-version_123-x86_64-linux.tar.gz
           sudo cp binaryen-version_123/bin/wasm-opt /usr/local/bin/
           wasm-opt --version
