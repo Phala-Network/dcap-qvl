@@ -119,12 +119,125 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
     }
 }
 
+/// Parses an RFC 3339 date-time and returns its Unix timestamp in seconds.
+///
+/// Accepted form: `YYYY-MM-DD` (`T`|`t`|space) `HH:MM:SS[.f+]`
+/// (`Z`|`z`|`+HH:MM`|`-HH:MM`). Fractional seconds are accepted and ignored,
+/// and a seconds value of `60` counts as `59`. Anything else, including
+/// trailing input, is rejected.
 pub(crate) fn parse_rfc3339_unix_secs(value: &str) -> Result<u64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map_err(|e| anyhow!("Failed to parse RFC3339 datetime: {e}"))?
-        .timestamp()
-        .try_into()
+    let secs = rfc3339_to_unix(value.as_bytes())
+        .map_err(|e| anyhow!("Failed to parse RFC3339 datetime: {e}"))?;
+    secs.try_into()
         .context("RFC3339 datetime is before Unix epoch")
+}
+
+/// Splits `n` ASCII digits off the front of `input` and returns their value.
+fn take_digits(input: &mut &[u8], n: usize) -> core::result::Result<i64, &'static str> {
+    let (head, tail) = input.split_at_checked(n).ok_or("input too short")?;
+    *input = tail;
+    head.iter().try_fold(0i64, |acc, &c| {
+        if c.is_ascii_digit() {
+            acc.checked_mul(10)
+                .and_then(|v| v.checked_add(i64::from(c.wrapping_sub(b'0'))))
+                .ok_or("number out of range")
+        } else {
+            Err("expected digit")
+        }
+    })
+}
+
+/// Consumes one byte of `input` if it is one of `allowed`.
+fn take_byte(input: &mut &[u8], allowed: &[u8]) -> core::result::Result<(), &'static str> {
+    match input.split_first() {
+        Some((c, tail)) if allowed.contains(c) => {
+            *input = tail;
+            Ok(())
+        }
+        Some(_) => Err("unexpected character"),
+        None => Err("input too short"),
+    }
+}
+
+// All operands below are bounded by the range checks before them (the year has
+// four digits, every other field is a validated two-digit value), so none of
+// the arithmetic can overflow an i64.
+#[allow(clippy::arithmetic_side_effects)]
+fn rfc3339_to_unix(mut b: &[u8]) -> core::result::Result<i64, &'static str> {
+    let year = take_digits(&mut b, 4)?;
+    take_byte(&mut b, b"-")?;
+    let month = take_digits(&mut b, 2)?;
+    take_byte(&mut b, b"-")?;
+    let day = take_digits(&mut b, 2)?;
+    take_byte(&mut b, b"Tt ")?;
+    let hour = take_digits(&mut b, 2)?;
+    take_byte(&mut b, b":")?;
+    let min = take_digits(&mut b, 2)?;
+    take_byte(&mut b, b":")?;
+    let sec = take_digits(&mut b, 2)?;
+
+    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap => 29,
+        2 => 28,
+        _ => return Err("month out of range"),
+    };
+    if !(1..=days_in_month).contains(&day) {
+        return Err("day out of range");
+    }
+    if hour > 23 || min > 59 || sec > 60 {
+        return Err("time out of range");
+    }
+    // Like the parser this replaced, a leap second maps to the preceding second.
+    let sec = sec.min(59);
+
+    if let Some((b'.', tail)) = b.split_first() {
+        let digits = tail.iter().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            return Err("empty fractional seconds");
+        }
+        b = tail.get(digits..).unwrap_or_default();
+    }
+
+    let offset = if b == b"Z" || b == b"z" {
+        b = &[];
+        0
+    } else {
+        let negative = match b.first() {
+            Some(b'+') => false,
+            Some(b'-') => true,
+            Some(_) => return Err("invalid timezone offset"),
+            None => return Err("input too short"),
+        };
+        b = b.get(1..).unwrap_or_default();
+        let off_hour = take_digits(&mut b, 2)?;
+        take_byte(&mut b, b":")?;
+        let off_min = take_digits(&mut b, 2)?;
+        if off_hour > 23 || off_min > 59 {
+            return Err("offset out of range");
+        }
+        let off = off_hour * 3600 + off_min * 60;
+        if negative {
+            -off
+        } else {
+            off
+        }
+    };
+    if !b.is_empty() {
+        return Err("trailing characters");
+    }
+
+    // Days since 1970-01-01 in the proleptic Gregorian calendar.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    Ok(days * 86_400 + hour * 3600 + min * 60 + sec - offset)
 }
 
 pub(crate) mod serde_vec_bytes {
@@ -298,6 +411,141 @@ pub fn verify_certificate_chain(
 #[allow(clippy::unwrap_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rfc3339_accepts_intel_collateral_timestamps() {
+        // Shapes Intel PCS emits for issueDate, nextUpdate and tcbDate.
+        for (input, expected) in [
+            ("1970-01-01T00:00:00Z", 0),
+            ("2018-01-04T01:02:03Z", 1_515_027_723),
+            ("2023-02-15T00:00:00Z", 1_676_419_200),
+            ("2024-03-13T00:00:00Z", 1_710_288_000),
+            ("2024-02-29T23:59:59Z", 1_709_251_199),
+            ("2038-01-19T03:14:08Z", 2_147_483_648),
+            ("2106-02-07T06:28:16Z", 4_294_967_296),
+            ("9999-12-31T23:59:59Z", 253_402_300_799),
+        ] {
+            assert_eq!(parse_rfc3339_unix_secs(input).unwrap(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn rfc3339_handles_offsets_fractions_and_separators() {
+        let base = parse_rfc3339_unix_secs("2024-03-13T12:00:00Z").unwrap();
+        for input in [
+            "2024-03-13t12:00:00z",
+            "2024-03-13 12:00:00Z",
+            "2024-03-13T12:00:00.000Z",
+            "2024-03-13T12:00:00.999999999999Z",
+            "2024-03-13T14:30:00+02:30",
+            "2024-03-13T09:00:00-03:00",
+            "2024-03-13T12:00:00+00:00",
+            "2024-03-13T12:00:00-00:00",
+        ] {
+            assert_eq!(parse_rfc3339_unix_secs(input).unwrap(), base, "{input}");
+        }
+        // Leap second maps to the preceding second.
+        assert_eq!(
+            parse_rfc3339_unix_secs("2016-12-31T23:59:60Z").unwrap(),
+            parse_rfc3339_unix_secs("2016-12-31T23:59:59Z").unwrap()
+        );
+    }
+
+    #[test]
+    fn rfc3339_rejects_malformed_input() {
+        for input in [
+            "",
+            "2024",
+            "2024-03-13",
+            "2024-03-13T12:00:00",
+            "2024-03-13T12:00Z",
+            "2024-3-13T12:00:00Z",
+            "24-03-13T12:00:00Z",
+            "+024-03-13T12:00:00Z",
+            "2024/03/13T12:00:00Z",
+            "2024-03-13X12:00:00Z",
+            "2024-03-13T12-00-00Z",
+            "2024-13-01T00:00:00Z",
+            "2024-00-01T00:00:00Z",
+            "2024-04-31T00:00:00Z",
+            "2023-02-29T00:00:00Z",
+            "1900-02-29T00:00:00Z",
+            "2024-03-00T00:00:00Z",
+            "2024-03-13T24:00:00Z",
+            "2024-03-13T12:60:00Z",
+            "2024-03-13T12:00:61Z",
+            "2024-03-13T12:00:00.Z",
+            "2024-03-13T12:00:00ZZ",
+            "2024-03-13T12:00:00Z ",
+            " 2024-03-13T12:00:00Z",
+            "2024-03-13T12:00:00UTC",
+            "2024-03-13T12:00:00+02",
+            "2024-03-13T12:00:00+0200",
+            "2024-03-13T12:00:00+24:00",
+            "2024-03-13T12:00:00+02:60",
+            "2024-03-1\u{e9}T12:00:00Z",
+            "\u{ff12}024-03-13T12:00:00Z",
+        ] {
+            let err = parse_rfc3339_unix_secs(input).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("Failed to parse RFC3339 datetime"),
+                "{input:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn rfc3339_rejects_unicode_minus_offset() {
+        // chrono tolerates U+2212 as an offset sign; RFC 3339 does not.
+        assert!(parse_rfc3339_unix_secs("2024-03-13T12:00:00\u{2212}02:00").is_err());
+    }
+
+    #[test]
+    fn rfc3339_rejects_pre_epoch() {
+        for input in [
+            "1969-12-31T23:59:59Z",
+            "1970-01-01T00:00:00+01:00",
+            "0000-01-01T00:00:00Z",
+        ] {
+            let err = parse_rfc3339_unix_secs(input).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "RFC3339 datetime is before Unix epoch",
+                "{input}"
+            );
+        }
+        assert_eq!(
+            parse_rfc3339_unix_secs("1969-12-31T23:00:00-01:00").unwrap(),
+            0
+        );
+    }
+
+    /// Cross-check against chrono over a deterministic spread of inputs,
+    /// including every valid/invalid shape the cases above exercise.
+    #[test]
+    fn rfc3339_agrees_with_chrono() {
+        let reference = |s: &str| -> Option<u64> {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .and_then(|d| u64::try_from(d.timestamp()).ok())
+        };
+        let mut checked = 0u32;
+        for year in [1970, 1999, 2000, 2024, 2100, 2400, 9999] {
+            for month in 1..=12u32 {
+                for day in [1, 28, 29, 30, 31] {
+                    for time in ["00:00:00", "12:34:56", "23:59:59", "23:59:60"] {
+                        for tz in ["Z", "+05:30", "-08:00", "+23:59"] {
+                            let s = format!("{year:04}-{month:02}-{day:02}T{time}{tz}");
+                            assert_eq!(parse_rfc3339_unix_secs(&s).ok(), reference(&s), "{s}");
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 6720);
+    }
 
     #[test]
     fn seq_entries_yields_each_entry_in_order() {
