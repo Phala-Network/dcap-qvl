@@ -30,10 +30,10 @@ async fn measure(
         .with_signer(signer_id.clone(), signer.clone())
         .send_to(network_config)
         .await?;
-    let gas = result.total_gas_burnt;
-    result
+    let gas = result
         .into_result()
-        .map_err(|e| format!("{method} should succeed: {e:?}"))?;
+        .map_err(|e| format!("{method} should succeed: {e:?}"))?
+        .total_gas_burnt;
     println!(
         "{method}: {:.1} TGas ({} gas)",
         gas.as_gas() as f64 / 1e12,
