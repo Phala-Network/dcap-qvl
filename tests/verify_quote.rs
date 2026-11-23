@@ -457,12 +457,7 @@ fn print_claims_comparison() {
 
     fn ts_to_utc(ts: u64) -> String {
         time::OffsetDateTime::from_unix_timestamp(ts as i64)
-            .ok()
-            .and_then(|dt| {
-                dt.format(&time::format_description::well_known::Rfc3339)
-                    .ok()
-            })
-            .unwrap_or_else(|| format!("{ts}"))
+            .map_or_else(|_| ts.to_string(), |dt| dt.to_string())
     }
 
     let verifier = QuoteVerifier::new_prod();
