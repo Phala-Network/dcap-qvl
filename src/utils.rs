@@ -120,9 +120,9 @@ pub fn get_pce_svn(extension_section: &[u8]) -> Result<Svn> {
 }
 
 pub(crate) fn parse_rfc3339_unix_secs(value: &str) -> Result<u64> {
-    chrono::DateTime::parse_from_rfc3339(value)
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
         .map_err(|e| anyhow!("Failed to parse RFC3339 datetime: {e}"))?
-        .timestamp()
+        .unix_timestamp()
         .try_into()
         .context("RFC3339 datetime is before Unix epoch")
 }

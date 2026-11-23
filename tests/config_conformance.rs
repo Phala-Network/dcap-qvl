@@ -149,11 +149,12 @@ fn verify_with_custom_config_matches_default() {
         .get("nextUpdate")
         .and_then(serde_json::Value::as_str)
         .expect("nextUpdate");
-    let now = (chrono::DateTime::parse_from_rfc3339(next_update)
-        .expect("nextUpdate parse")
-        .timestamp() as u64)
-        .checked_sub(1)
-        .expect("nonzero nextUpdate timestamp");
+    let now =
+        (time::OffsetDateTime::parse(next_update, &time::format_description::well_known::Rfc3339)
+            .expect("nextUpdate parse")
+            .unix_timestamp() as u64)
+            .checked_sub(1)
+            .expect("nonzero nextUpdate timestamp");
 
     let default_result = verify(raw_quote, &collateral, now);
     let custom_result = QuoteVerifier::new_prod()

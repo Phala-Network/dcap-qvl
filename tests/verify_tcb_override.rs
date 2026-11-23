@@ -116,12 +116,14 @@ mod tests {
                 .get("nextUpdate")
                 .and_then(Value::as_str)
                 .expect("nextUpdate string");
-            let issue_ts = chrono::DateTime::parse_from_rfc3339(issue)
-                .expect("issueDate parse")
-                .timestamp() as u64;
-            let next_ts = chrono::DateTime::parse_from_rfc3339(next)
-                .expect("nextUpdate parse")
-                .timestamp() as u64;
+            let issue_ts =
+                time::OffsetDateTime::parse(issue, &time::format_description::well_known::Rfc3339)
+                    .expect("issueDate parse")
+                    .unix_timestamp() as u64;
+            let next_ts =
+                time::OffsetDateTime::parse(next, &time::format_description::well_known::Rfc3339)
+                    .expect("nextUpdate parse")
+                    .unix_timestamp() as u64;
             (issue_ts, next_ts)
         }
 

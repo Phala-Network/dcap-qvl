@@ -20,10 +20,7 @@ scale = { package = "parity-scale-codec", version = "3.7.5", default-features = 
 scale-info = { version = "2.11.6", default-features = false, features = [
     "derive",
 ] }
-chrono = { version = "0.4.44", default-features = false, features = [
-    "alloc",
-    "serde",
-] }
+time = { version = "0.3.45", default-features = false, features = ["parsing"] }
 const-oid = { version = "0.10.2", default-features = false }
 x509-cert = { version = "0.3.0", default-features = false, optional = true }
 byteorder = { version = "1.5.0", default-features = false }
