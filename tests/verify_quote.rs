@@ -43,12 +43,14 @@ fn now_from_collateral(collateral: &QuoteCollateralV3) -> u64 {
         let value: Value = serde_json::from_str(json_str).expect("valid JSON");
         let issue = value["issueDate"].as_str().expect("issueDate string");
         let next = value["nextUpdate"].as_str().expect("nextUpdate string");
-        let issue_ts = chrono::DateTime::parse_from_rfc3339(issue)
-            .expect("issueDate parse")
-            .timestamp() as u64;
-        let next_ts = chrono::DateTime::parse_from_rfc3339(next)
-            .expect("nextUpdate parse")
-            .timestamp() as u64;
+        let issue_ts =
+            time::OffsetDateTime::parse(issue, &time::format_description::well_known::Rfc3339)
+                .expect("issueDate parse")
+                .unix_timestamp() as u64;
+        let next_ts =
+            time::OffsetDateTime::parse(next, &time::format_description::well_known::Rfc3339)
+                .expect("nextUpdate parse")
+                .unix_timestamp() as u64;
         (issue_ts, next_ts)
     }
 
@@ -201,9 +203,12 @@ fn sgx_claims_cross_validation() {
     assert!(s.earliest_expiration_date > 0);
 
     // ── tcb_date_tag ────────────────────────────────────────────────────
-    let expected_tcb_date = chrono::DateTime::parse_from_rfc3339(&s.platform.tcb_level.tcb_date)
-        .unwrap()
-        .timestamp() as u64;
+    let expected_tcb_date = time::OffsetDateTime::parse(
+        &s.platform.tcb_level.tcb_date,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap()
+    .unix_timestamp() as u64;
     assert_eq!(s.platform.tcb_date_tag, expected_tcb_date);
 
     // ── CRL numbers ─────────────────────────────────────────────────────
@@ -451,8 +456,12 @@ fn print_claims_comparison() {
     use dcap_qvl::verify::QuoteVerifier;
 
     fn ts_to_utc(ts: u64) -> String {
-        chrono::DateTime::from_timestamp(ts as i64, 0)
-            .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+        time::OffsetDateTime::from_unix_timestamp(ts as i64)
+            .ok()
+            .and_then(|dt| {
+                dt.format(&time::format_description::well_known::Rfc3339)
+                    .ok()
+            })
             .unwrap_or_else(|| format!("{ts}"))
     }
 
