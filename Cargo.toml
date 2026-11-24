@@ -74,6 +74,13 @@ signature = { version = "3.0", default-features = false, optional = true }
 dcap-qvl-webpki = { version = "=0.103.15", default-features = false, features = ["alloc"] }
 
 
+# Backoff sleep for the default reqwest transport (`src/http.rs`). `reqwest`
+# already pulls tokio's `time` driver on native targets, so this adds no new
+# crate to the build. It is unconditional on native targets (not tied to the
+# optional `tokio` feature above, which also enables FFI runtime entry points).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.52.1", default-features = false, features = ["time"] }
+
 [dev-dependencies]
 hex-literal = "1.1.0"
 insta = "1.47.2"

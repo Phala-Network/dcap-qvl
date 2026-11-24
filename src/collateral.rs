@@ -287,7 +287,9 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
 }
 
 /// Build a `reqwest::Client` with this crate's default settings (180s
-/// timeout on non-`js` targets). Crate-private on purpose: the
+/// request timeout and 30s idle pool timeout on non-`js` targets; the
+/// short idle timeout makes a long-lived client drop pooled connections
+/// before an intermediary silently closes them). Crate-private on purpose: the
 /// `reqwest::Client` type is intentionally kept off the public API so
 /// that a future `reqwest` major bump is an internal change. Callers
 /// who need a custom HTTP stack implement [`HttpClient`] on their own
@@ -295,7 +297,9 @@ fn extract_fmspc_and_ca_with<C: Config>(pem_chain: &str) -> Result<(String, &'st
 pub(crate) fn default_http_client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder();
     #[cfg(not(feature = "js"))]
-    let builder = builder.timeout(Duration::from_secs(180));
+    let builder = builder
+        .timeout(Duration::from_secs(180))
+        .pool_idle_timeout(Duration::from_secs(30));
     Ok(builder.build()?)
 }
 
