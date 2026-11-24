@@ -60,7 +60,6 @@ pyo3 = { version = "0.29.0", optional = true, features = [
 pyo3-async-runtimes = { version = "0.29.0", optional = true, features = [
     "tokio-runtime",
 ] }
-tokio = { version = "1.52.1", optional = true, features = ["full"] }
 derive_more = { version = "2.1.1", default-features = false, features = ["display"] }
 
 rustls-pki-types = { version = "1.14", default-features = false }
@@ -74,12 +73,13 @@ signature = { version = "3.0", default-features = false, optional = true }
 dcap-qvl-webpki = { version = "=0.103.15", default-features = false, features = ["alloc"] }
 
 
-# Backoff sleep for the default reqwest transport (`src/http.rs`). `reqwest`
-# already pulls tokio's `time` driver on native targets, so this adds no new
-# crate to the build. It is unconditional on native targets (not tied to the
-# optional `tokio` feature above, which also enables FFI runtime entry points).
+# Async runtime on native targets. Always optional, so no_std builds never see
+# it. Two features switch it on, each with its own scope:
+#   * `reqwest` enables `time` only, for the retry backoff sleep in
+#     `src/http.rs`;
+#   * `tokio` adds the full runtime for the FFI entry points (`src/ffi.rs`).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.52.1", default-features = false, features = ["time"] }
+tokio = { version = "1.52.1", default-features = false, features = ["time"], optional = true }
 
 [dev-dependencies]
 hex-literal = "1.1.0"
@@ -124,6 +124,10 @@ default-x509 = ["dep:der", "dep:x509-cert"]
 # `report` (PCCS client + collateral fetch) parses CRL distribution
 # points with `x509-cert`, so it pulls in the audited backend bundle too.
 report = ["std", "tracing", "futures", "reqwest", "default-x509"]
+# The PCCS HTTP client; its retry backoff sleeps via tokio's timer (native only).
+reqwest = ["dep:reqwest", "dep:tokio"]
+# Full runtime for the FFI collateral entry points (`dcap_get_collateral_cb`).
+tokio = ["dep:tokio", "tokio/full"]
 js = ["getrandom/js", "serde-wasm-bindgen", "wasm-bindgen", "wasm-bindgen-futures", "rustcrypto", "default-x509"]
 python = ["pyo3", "pyo3-async-runtimes", "tokio", "std", "report", "ring"]
 # The `go` FFI surface concretizes on `DefaultConfig`, so it pulls in the
