@@ -65,7 +65,7 @@ jobs:
 
           grep '^version' Cargo.toml
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.6.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Setup Python 3.8
         run: uv python install 3.8
       - name: Install Rust
@@ -128,7 +128,7 @@ jobs:
           python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn("^(version\\s*=\\s*)\"[^\"]*\"", lambda m: m.group(1)+f"\"{ver}\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.6.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Setup Python 3.8
         run: uv python install 3.8
       - name: Install Rust
@@ -177,7 +177,7 @@ jobs:
           python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn("^(version\\s*=\\s*)\"[^\"]*\"", lambda m: m.group(1)+f"\"{ver}\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.6.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Setup Python 3.8
         run: uv python install 3.8
       - name: Install Rust
@@ -231,7 +231,7 @@ jobs:
           python -c 'import os,re,sys; from pathlib import Path; ver=os.environ["VERSION_SEMVER"]; p=Path("Cargo.toml"); t=p.read_text(encoding="utf-8"); t2,n=re.subn("^(version\\s*=\\s*)\"[^\"]*\"", lambda m: m.group(1)+f"\"{ver}\"", t, flags=re.M); (n==1) or sys.exit(f"Failed to patch Cargo.toml version (matches={n})"); p.write_text(t2, encoding="utf-8"); print(f"Updated Cargo.toml version to {ver}")'
           grep '^version' Cargo.toml
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.6.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Setup Python 3.8
         run: uv python install 3.8
       - name: Install Rust
@@ -374,7 +374,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v7.6.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Setup Python ${{ matrix.python-version }}
         run: uv venv --python ${{ matrix.python-version }}
       - name: Download wheels
