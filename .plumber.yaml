@@ -18,7 +18,3 @@ github:
     # these jobs use come with it.
     actionsMustNotExecuteMutableRemoteCode:
       enabled: false
-    # master has no branch protection rule today, a repository setting no pull
-    # request can change. Remove this block once it has one.
-    branchMustBeProtected:
-      enabled: false
