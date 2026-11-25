@@ -96,6 +96,27 @@ impl ReqwestHttp {
     pub(crate) fn new(client: reqwest::Client) -> Self {
         Self(client)
     }
+
+    async fn get_once(&self, url: &str) -> Result<HttpResponse> {
+        let resp = self.0.get(url).send().await?;
+        let status = resp.status().as_u16();
+        let headers = resp
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                let v = value
+                    .to_str()
+                    .map_err(|e| anyhow::anyhow!("Header {name} has non-ASCII value: {e}"))?;
+                Ok::<_, anyhow::Error>((name.as_str().to_string(), v.to_string()))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let body = resp.bytes().await?.to_vec();
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
+    }
 }
 
 /// Delays before each retry of a transient failure. The number of entries is
@@ -160,35 +181,8 @@ impl HttpClient for ReqwestHttp {
     }
 }
 
-#[cfg(feature = "reqwest")]
-impl ReqwestHttp {
-    async fn get_once(&self, url: &str) -> Result<HttpResponse> {
-        let resp = self.0.get(url).send().await?;
-        let status = resp.status().as_u16();
-        let headers = resp
-            .headers()
-            .iter()
-            .map(|(name, value)| {
-                let v = value
-                    .to_str()
-                    .map_err(|e| anyhow::anyhow!("Header {name} has non-ASCII value: {e}"))?;
-                Ok::<_, anyhow::Error>((name.as_str().to_string(), v.to_string()))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?;
-        let body = resp.bytes().await?.to_vec();
-        Ok(HttpResponse {
-            status,
-            headers,
-            body,
-        })
-    }
-}
-
-// `set_linger(0)` is how the tests make the server send a TCP RST; the
-// deprecation only warns about blocking on drop, which is irrelevant here.
 #[cfg(all(test, feature = "reqwest"))]
 #[allow(
-    deprecated,
     clippy::unwrap_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects
@@ -226,7 +220,7 @@ mod tests {
                 let _ = stream.read(&mut buf).await;
                 match reply {
                     Reply::Reset => {
-                        stream.set_linger(Some(Duration::ZERO)).unwrap();
+                        stream.set_zero_linger().unwrap();
                         drop(stream);
                     }
                     Reply::Status(code) => {
@@ -240,8 +234,6 @@ mod tests {
         });
         (url, hits)
     }
-
-    use core::time::Duration;
 
     fn http() -> ReqwestHttp {
         ReqwestHttp::new(reqwest::Client::new())
