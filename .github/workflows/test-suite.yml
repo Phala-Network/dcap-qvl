@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_WARNINGS: deny
 
 jobs:
   test-suite:
@@ -45,10 +46,9 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          target: wasm32-unknown-unknown
+      - name: Add Rust targets
+        run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Cache cargo binaries
         uses: actions/cache@v6.1.0

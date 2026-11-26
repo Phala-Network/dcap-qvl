@@ -4,14 +4,12 @@
 version: 'v0.0.3'
 workflows:
     '.github/workflows/android-aar.yml':
-        - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-java@v6.3.0'
         - 'actions/upload-artifact@v7.0.2'
         - 'gradle/actions@v6.4.1'
         - 'nttld/setup-ndk@v1.6.0'
     '.github/workflows/ios-release.yml':
-        - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/checkout@v7.0.1'
     '.github/workflows/plumber.yml':
         - 'actions/checkout@v7.0.1'
@@ -28,9 +26,7 @@ workflows:
         - 'pypa/gh-action-pypi-publish@v1.14.3'
     '.github/workflows/release.yml':
         - 'actions/checkout@v7.0.1'
-        - 'dtolnay/rust-toolchain@v1'
     '.github/workflows/rust.yml':
-        - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.1.0'
         - 'actions/setup-java@v6.3.0'
@@ -38,20 +34,14 @@ workflows:
         - 'gradle/actions@v6.4.1'
         - 'nttld/setup-ndk@v1.6.0'
         - 'reactivecircus/android-emulator-runner@v2.38.0'
+        - 'swatinem/rust-cache@v2.9.3'
     '.github/workflows/test-suite.yml':
-        - 'actions-rust-lang/setup-rust-toolchain@v2.0.1'
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
         - 'actions/setup-python@v7.1.0'
+        - 'swatinem/rust-cache@v2.9.3'
 dependencies:
-    'actions-rust-lang/setup-rust-toolchain@v2.0.1':
-        ref: 'v2.0.1'
-        commit: 'sha1-a188e68d0fd2bd36ad51dccb2b07ba6e75105f30'
-        owner_id: 103899579
-        repo_id: 482610590
-        uses:
-            - 'swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0'
     'actions/cache@v6.1.0':
         ref: 'v6.1.0'
         commit: 'sha1-55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
@@ -107,11 +97,6 @@ dependencies:
         commit: 'sha1-1db35dd8eee11c5894872e0b383ae6c406cf738d'
         owner_id: 115962839
         repo_id: 846733598
-    'dtolnay/rust-toolchain@v1':
-        ref: 'v1'
-        commit: 'sha1-683b588c487a69d01f6c6ddf40f036ff682cc2c8'
-        owner_id: 1940490
-        repo_id: 260749683
     'getplumber/plumber@v0.7.23':
         ref: 'v0.7.23'
         commit: 'sha1-ec8cb3a7edd6a324b33e85109b627b2df6023d94'
@@ -147,7 +132,7 @@ dependencies:
         commit: 'sha1-a421e43855164a8197daf9d8d40fe71c6996bb0d'
         owner_id: 51352484
         repo_id: 219782401
-    'swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0':
+    'swatinem/rust-cache@v2.9.3':
         ref: 'v2.9.3'
         commit: 'sha1-d1527c8f67ef9af357290475d4af4b0fab8f12e0'
         owner_id: 580492

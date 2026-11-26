@@ -69,11 +69,8 @@ jobs:
         with:
           ndk-version: r26b
 
-      - name: Setup Rust + Android targets
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
-          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Add Rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk

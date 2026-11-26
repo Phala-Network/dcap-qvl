@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_WARNINGS: deny
 
 jobs:
   build:
@@ -51,10 +52,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Install Python test dependencies
         run: |
@@ -77,10 +75,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Setup Go
         uses: actions/setup-go@v7.1.0
@@ -106,10 +101,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Setup Go
         uses: actions/setup-go@v7.1.0
@@ -134,10 +126,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: cargo test
         working-directory: dcap-qvl-mobile
@@ -167,11 +156,9 @@ jobs:
         with:
           ndk-version: r26b
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
-          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Add Rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -212,11 +199,9 @@ jobs:
         with:
           ndk-version: r26b
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
-          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Add Rust targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -256,11 +241,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v2.0.1
-        with:
-          toolchain: stable
-          target: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: Add Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2.9.3
 
       - name: Build XCFramework + Swift sources
         run: ./dcap-qvl-mobile/scripts/build_ios.sh
