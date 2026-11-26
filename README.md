@@ -1,6 +1,7 @@
 # dcap-qvl
 
 [![CI](https://github.com/Phala-Network/dcap-qvl/actions/workflows/rust.yml/badge.svg)](https://github.com/Phala-Network/dcap-qvl/actions/workflows/rust.yml)
+[![Plumber Score](https://score.getplumber.io/github.com/Phala-Network/dcap-qvl.svg)](https://score.getplumber.io/github.com/Phala-Network/dcap-qvl)
 [![crates.io](https://img.shields.io/crates/v/dcap-qvl.svg)](https://crates.io/crates/dcap-qvl)
 [![docs.rs](https://img.shields.io/docsrs/dcap-qvl)](https://docs.rs/dcap-qvl)
 [![PyPI](https://img.shields.io/pypi/v/dcap-qvl)](https://pypi.org/project/dcap-qvl/)

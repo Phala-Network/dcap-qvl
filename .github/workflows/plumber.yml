@@ -1,0 +1,40 @@
+name: Plumber
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+jobs:
+  plumber:
+    name: Check the workflows with Plumber
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # workflow states and one run log, to prove each job's token scope
+      security-events: write # list the findings under code scanning
+      id-token: write # needed by score-push, no secret or token to store
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Plumber
+        uses: getplumber/plumber@v0.7.23
+        with:
+          # Pull requests from forks get a read-only token, so the code
+          # scanning upload is skipped there. The report stays a workflow
+          # artifact.
+          upload-sarif: ${{ github.event.pull_request.head.repo.fork != true }}
+          # Fail under 85 points. The default gate is 100, where any finding
+          # fails.
+          min-points: 85
+          # Publish the score and the repository name on score.getplumber.io,
+          # where the README badge reads them. Only pushes to master publish,
+          # a pull request never does.
+          score-push: ${{ github.event_name == 'push' }}
