@@ -8,13 +8,6 @@ github:
       includePlumberDefaults: true
       # Third-party actions the workflows use, on top of the default trust list.
       trustedGithubActions:
-        - actions-rust-lang/setup-rust-toolchain
-        - Swatinem/rust-cache # called by setup-rust-toolchain
-        - dtolnay/rust-toolchain
+        - Swatinem/rust-cache
         - nttld/setup-ndk
         - reactivecircus/android-emulator-runner
-    # setup-rust-toolchain and dtolnay/rust-toolchain download the rustup
-    # installer only when rustup is missing, and the GitHub-hosted runners
-    # these jobs use come with it.
-    actionsMustNotExecuteMutableRemoteCode:
-      enabled: false
