@@ -33,6 +33,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Determine npm tag and version
         id: npm-meta
@@ -178,8 +180,11 @@ jobs:
 
       - name: Commit version changes
         if: success() && steps.npm-meta.outputs.commit_version == 'true' && steps.npm-meta.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.npm-meta.outputs.version }}"
+          gh auth setup-git
 
           # Configure git
           git config user.name "github-actions[bot]"
